@@ -15,6 +15,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("GameController"),
                 .linkedFramework("CoreHaptics"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("IOKit"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",

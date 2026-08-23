@@ -16,4 +16,10 @@ struct PadCommand: Decodable {
     var state: String?
     var action: String?
     var note: String?
+    var threadID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case state, action, note
+        case threadID = "thread_id"
+    }
 }

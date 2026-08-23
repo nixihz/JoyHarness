@@ -12,10 +12,17 @@ struct JoyHarnessApp: App {
                 store: appDelegate.runtime.dashboard,
                 mappingStore: appDelegate.runtime.mappings
             )
-                .frame(minWidth: 980, minHeight: 680)
+                .frame(
+                    minWidth: 980,
+                    idealWidth: 1240,
+                    maxWidth: 1440,
+                    minHeight: 680,
+                    idealHeight: 820,
+                    maxHeight: 920
+                )
         }
         .defaultSize(width: 1240, height: 820)
-        .windowResizability(.contentMinSize)
+        .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("刷新状态") {
@@ -60,12 +67,20 @@ final class JoyHarnessRuntime {
     private let statusURL: URL
     private let socketPath: String
     private let haptics = HapticEngine()
+    private let adaptiveTrigger = AdaptiveTriggerFeedback()
+    private let threads = CodexThreadProvider()
     private let buttons: ButtonBridge
     private let mouse = MouseBridge()
     private let rp2040 = RP2040Bridge()
     private var current: PadState = .idle
+    private var controllerFamily: ControllerFamily = .generic
     private var slotStates = Array(repeating: PadState.idle, count: 6)
+    private var slotThreads = Array<CodexThreadSummary?>(repeating: nil, count: 6)
+    private var threadStates: [String: PadState] = [:]
+    private var lastBatterySnapshot: ControllerBatterySnapshot?
+    private var batteryTimer: Timer?
     private var server: SocketServer?
+    private var instanceLock: SingleInstanceLock?
     private var hasStarted = false
 
     init() {
@@ -87,18 +102,30 @@ final class JoyHarnessRuntime {
 
     func start() {
         guard !hasStarted else { return }
+        guard let instanceLock = SingleInstanceLock(
+            path: "\(home)/.agent-deck/joy-harness.lock"
+        ) else {
+            print("[agent-deck] another Joy Harness instance is already running; exiting")
+            NSApp.terminate(nil)
+            return
+        }
+        self.instanceLock = instanceLock
         hasStarted = true
         configureBridge()
+        threads.onUpdate = { [weak self] summaries in
+            self?.updateThreads(summaries)
+        }
 
-        haptics.startWatching()
         mouse.start()
         buttons.start()
+        startBatteryMonitoring()
         rp2040.start()
+        threads.start()
         writeStatus(.idle, note: "boot")
         startSocketServer()
         dashboard.startMonitoring()
 
-        print("[agent-deck] physical Codex Micro mode; app-server disabled")
+        print("[agent-deck] physical Codex Micro mode; task metadata enabled")
         print("[agent-deck] ready - left stick=pointer, LT+left stick=scroll, LT+face=Codex actions")
     }
 
@@ -106,6 +133,7 @@ final class JoyHarnessRuntime {
     func perform(_ action: DashboardAction) -> Bool {
         switch action {
         case .refresh:
+            threads.refresh()
             writeStatus(current, note: "status-refreshed")
             return true
         case .selectSlot(let index):
@@ -144,14 +172,31 @@ final class JoyHarnessRuntime {
         buttons.systemKeyHandler = { [weak self] key, pressed in
             self?.mouse.setSystemKey(key, pressed: pressed)
         }
+        buttons.textInputHandler = { [weak self] text in
+            self?.mouse.typeText(text) ?? false
+        }
         buttons.mouseSpeedBoostHandler = { [weak self] active in
             self?.mouse.setSpeedBoostActive(active)
+        }
+        buttons.rightTriggerFeedbackHandler = { [weak self] value in
+            self?.adaptiveTrigger.update(value: value)
+        }
+        adaptiveTrigger.onFeedback = { [weak self] event in
+            self?.haptics.playAdaptiveTriggerFeedback(event)
         }
         buttons.onSlotSelected = { [weak self] index in
             guard let self else { return }
             self.current = self.slotStates[index]
             self.haptics.announceSlot(index, state: self.current)
             self.writeStatus(self.current, note: "slot-selected")
+        }
+        buttons.onControllerChange = { [weak self] controller, family in
+            guard let self else { return }
+            self.lastBatterySnapshot = nil
+            self.controllerFamily = family
+            self.mappings.setControllerFamily(family)
+            self.haptics.attach(controller)
+            self.adaptiveTrigger.attach(controller)
         }
         haptics.onConnectionChange = { [weak self] in
             guard let self else { return }
@@ -181,28 +226,44 @@ final class JoyHarnessRuntime {
 
     private func writeStatus(_ state: PadState, note: String?) {
         let selectedSlot = buttons.selectedSlot
+        let audio = ControllerAudioSupport.snapshot(for: controllerFamily)
+        let voiceInput = audio.controllerInput
+        let battery = buttons.batterySnapshot
         let slotPayload: [[String: Any]] = (0..<6).map { index in
-            [
+            let thread = slotThreads[index]
+            return [
                 "slot": index + 1,
                 "selected": index == selectedSlot,
-                "thread_id": "",
-                "title": "",
+                "thread_id": thread?.id ?? "",
+                "title": thread?.title ?? "",
                 "state": slotStates[index].rawValue,
             ]
         }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "state": state.rawValue,
             "selected_slot": selectedSlot + 1,
             "slots": slotPayload,
             "controller": haptics.connectedName,
+            "controller_connected": haptics.connectedName != "none",
+            "controller_family": controllerFamily.rawValue,
+            "controller_touchpad": controllerFamily == .dualSense || controllerFamily == .dualShock,
             "haptics": haptics.hasController,
             "accessibility": mouse.isAccessibilityGranted,
-            "microphone": false,
+            "input_monitoring": mouse.isInputMonitoringGranted,
+            "microphone": voiceInput != nil,
+            "voice_input": voiceInput?.name ?? "",
+            "voice_input_default": voiceInput?.isDefault ?? false,
+            "voice_input_transport": voiceInput?.transport ?? "",
+            "default_voice_input": audio.defaultInputName ?? "",
             "rp2040": rp2040.isConnected,
             "mode": "physical-codex-micro",
             "note": note ?? "",
             "ts": ISO8601DateFormatter().string(from: Date()),
         ]
+        if let battery {
+            payload["controller_battery_level"] = battery.level
+            payload["controller_battery_state"] = battery.state.rawValue
+        }
         guard let data = try? JSONSerialization.data(
             withJSONObject: payload,
             options: [.prettyPrinted, .sortedKeys]
@@ -216,18 +277,66 @@ final class JoyHarnessRuntime {
         dashboard.reload()
     }
 
-    private func apply(_ state: PadState, note: String?) {
-        current = state
-        slotStates[buttons.selectedSlot] = state
-        print("[agent-deck] state=\(state.rawValue)\(note.map { " note=\($0)" } ?? "")")
-        haptics.apply(state)
-        writeStatus(state, note: note)
-        if state == .done || state == .error {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                guard let self, self.current == state else { return }
-                self.apply(.idle, note: "auto-idle")
+    private func startBatteryMonitoring() {
+        lastBatterySnapshot = buttons.batterySnapshot
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let snapshot = self.buttons.batterySnapshot
+                guard snapshot != self.lastBatterySnapshot else { return }
+                self.lastBatterySnapshot = snapshot
+                self.writeStatus(self.current, note: "controller-battery-change")
             }
         }
+        timer.tolerance = 3
+        RunLoop.main.add(timer, forMode: .common)
+        batteryTimer = timer
+    }
+
+    private func apply(_ state: PadState, note: String?, threadID: String? = nil) {
+        let taskID = threadID.flatMap { $0.isEmpty ? nil : $0 }
+        let targetSlot = taskID.flatMap { id in
+            slotThreads.firstIndex(where: { $0?.id == id })
+        } ?? (taskID == nil ? buttons.selectedSlot : nil)
+        if let taskID {
+            threadStates[taskID] = state
+            if targetSlot == nil { threads.refresh() }
+        }
+        if let targetSlot {
+            slotStates[targetSlot] = state
+        }
+        print("[agent-deck] state=\(state.rawValue)\(note.map { " note=\($0)" } ?? "")")
+        if let targetSlot, targetSlot == buttons.selectedSlot {
+            current = state
+            haptics.apply(state)
+        }
+        writeStatus(current, note: note)
+        if state == .done || state == .error {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self else { return }
+                let stateIsCurrent = taskID.map { self.threadStates[$0] == state }
+                    ?? targetSlot.map { self.slotStates[$0] == state }
+                    ?? false
+                guard stateIsCurrent else { return }
+                self.apply(.idle, note: "auto-idle", threadID: taskID)
+            }
+        }
+    }
+
+    private func updateThreads(_ summaries: [CodexThreadSummary]) {
+        let padded = summaries.prefix(6).map(Optional.some)
+            + Array(repeating: nil, count: max(0, 6 - summaries.count))
+        slotThreads = Array(padded.prefix(6))
+        for index in 0..<6 {
+            guard let threadID = slotThreads[index]?.id else {
+                slotStates[index] = .idle
+                continue
+            }
+            slotStates[index] = threadStates[threadID] ?? .idle
+        }
+        current = slotStates[buttons.selectedSlot]
+        haptics.apply(current)
+        writeStatus(current, note: "tasks-refreshed")
     }
 
     private func startSocketServer() {
@@ -263,7 +372,7 @@ final class JoyHarnessRuntime {
             }
         }
         if let raw = command.state, let state = PadState.parse(raw) {
-            apply(state, note: command.note)
+            apply(state, note: command.note, threadID: command.threadID)
         }
     }
 }

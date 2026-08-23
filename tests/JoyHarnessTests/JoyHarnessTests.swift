@@ -1,8 +1,20 @@
+import CoreAudio
 import Foundation
 import Testing
 @testable import JoyHarness
 
 struct JoyHarnessTests {
+    @Test
+    func singleInstanceLockRejectsASecondOwner() throws {
+        let lockPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("JoyHarnessTests.\(UUID().uuidString).lock")
+        defer { try? FileManager.default.removeItem(at: lockPath) }
+
+        let first = try #require(SingleInstanceLock(path: lockPath.path))
+        #expect(SingleInstanceLock(path: lockPath.path) == nil)
+        _ = first
+    }
+
     @Test
     func rp2040HandshakeAcceptsCurrentAndLegacyFirmware() {
         #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040 0.1.0"))
@@ -32,8 +44,11 @@ struct JoyHarnessTests {
           "selected_slot":3,
           "slots":[\(slots)],
           "controller":"Xbox Wireless Controller",
+          "controller_battery_level":0.73,
+          "controller_battery_state":"discharging",
           "haptics":true,
           "accessibility":false,
+          "input_monitoring":false,
           "microphone":false,
           "rp2040":true,
           "mode":"physical-codex-micro",
@@ -48,6 +63,43 @@ struct JoyHarnessTests {
         #expect(status.selected?.displayTitle == "Micro 槽位")
         #expect(status.padState == .waiting)
         #expect(status.rp2040)
+        #expect(status.controllerBatteryLevel == 0.73)
+        #expect(status.controllerBatteryState == "discharging")
+        #expect(status.inputMonitoring == false)
+    }
+
+    @Test
+    func controllerBatterySnapshotClampsAndRoundsLevel() {
+        #expect(ControllerBatterySnapshot(level: 0.734, state: .discharging).percentage == 73)
+        #expect(ControllerBatterySnapshot(level: 1.2, state: .full).percentage == 100)
+        #expect(ControllerBatterySnapshot(level: -0.1, state: .unknown).percentage == 0)
+    }
+
+    @Test
+    func codexThreadListProvidesTaskNamesAndFallbackPreviews() throws {
+        let response = """
+        {"id":2,"result":{"data":[
+          {"id":"thread-1","name":"修复任务槽位状态和名称","preview":"ignored","status":{"type":"active","activeFlags":[]}},
+          {"id":"thread-2","name":null,"preview":"Fallback title\\nsecond line","status":{"type":"idle"}}
+        ]}}
+        """
+
+        let threads = try #require(CodexThreadProvider.decodeThreads(from: Data(response.utf8)))
+        #expect(threads.count == 2)
+        #expect(threads[0] == CodexThreadSummary(
+            id: "thread-1",
+            title: "修复任务槽位状态和名称",
+            status: "active"
+        ))
+        #expect(threads[1].title == "Fallback title")
+    }
+
+    @Test
+    func padCommandDecodesTheOriginatingThread() throws {
+        let data = Data(#"{"state":"waiting","thread_id":"thread-123"}"#.utf8)
+        let command = try JSONDecoder().decode(PadCommand.self, from: data)
+        #expect(command.state == "waiting")
+        #expect(command.threadID == "thread-123")
     }
 
     @Test
@@ -67,6 +119,21 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func slotSynchronizationDoesNotSendAnotherMicroKey() {
+        let bridge = ButtonBridge()
+        var sent = false
+        bridge.keyHandler = { _, _ in
+            sent = true
+            return true
+        }
+
+        bridge.syncSelectedSlot(3)
+
+        #expect(bridge.selectedSlot == 3)
+        #expect(!sent)
+    }
+
+    @Test
     func faceButtonsControlMouseAndKeyboardByDefault() {
         #expect(ButtonBridge.faceAction(for: .a, functionPressed: false) == .mouseButton(.left))
         #expect(ButtonBridge.faceAction(for: .b, functionPressed: false) == .mouseButton(.right))
@@ -78,8 +145,8 @@ struct JoyHarnessTests {
     func functionModifierRestoresCodexFaceButtonActions() {
         #expect(ButtonBridge.faceAction(for: .a, functionPressed: true) == .microKey("ACT07"))
         #expect(ButtonBridge.faceAction(for: .b, functionPressed: true) == .microKey("ACT08"))
-        #expect(ButtonBridge.faceAction(for: .x, functionPressed: true) == .microKey("ACT06"))
-        #expect(ButtonBridge.faceAction(for: .y, functionPressed: true) == .microKey("ACT09"))
+        #expect(ButtonBridge.faceAction(for: .x, functionPressed: true) == .textInput("no"))
+        #expect(ButtonBridge.faceAction(for: .y, functionPressed: true) == .textInput("yes"))
     }
 
     @Test
@@ -91,16 +158,79 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func defaultMappingsPreserveExistingControllerBehavior() {
+    func defaultMappingsUseUnifiedFaceButtonLayout() {
         let store = ControllerMappingStore()
         #expect(store.action(for: .buttonA).controllerAction == .mouseButton(.left))
         #expect(store.action(for: .buttonB).controllerAction == .mouseButton(.right))
         #expect(store.action(for: .leftTrigger) == .functionModifier)
-        #expect(store.action(for: .functionButtonA).controllerAction == .microKey("ACT07"))
+        #expect(store.action(for: .functionButtonX).controllerAction == .textInput("no"))
+        #expect(store.action(for: .functionButtonY).controllerAction == .textInput("yes"))
         #expect(store.action(for: .functionDpadUp).controllerAction == .selectSlot(0))
         #expect(store.action(for: .functionDpadLeft).controllerAction == .selectSlot(1))
         #expect(store.action(for: .functionDpadDown).controllerAction == .selectSlot(2))
         #expect(store.action(for: .functionDpadRight).controllerAction == .selectSlot(3))
+    }
+
+    @Test
+    func playStationDefaultsMatchXboxFaceButtonPositions() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        store.setControllerFamily(.dualSense)
+
+        #expect(store.action(for: .functionButtonY).controllerAction == .textInput("yes"))
+        #expect(store.action(for: .functionButtonB).controllerAction == .microKey("ACT08"))
+        #expect(store.action(for: .functionButtonX).controllerAction == .textInput("no"))
+    }
+
+    @Test
+    func yesNoMigrationPreservesUnrelatedCustomMappings() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [
+                ControllerInput.buttonA.rawValue: ControllerMappedAction.mouseMiddle.rawValue,
+                ControllerInput.functionButtonA.rawValue: ControllerMappedAction.approve.rawValue,
+                ControllerInput.functionButtonB.rawValue: ControllerMappedAction.deny.rawValue,
+                ControllerInput.functionButtonX.rawValue: ControllerMappedAction.quickAction.rawValue,
+                ControllerInput.functionButtonY.rawValue: ControllerMappedAction.splitThread.rawValue,
+            ],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .buttonA) == .mouseMiddle)
+        #expect(store.action(for: .functionButtonX) == .answerNo)
+        #expect(store.action(for: .functionButtonY) == .answerYes)
+    }
+
+    @Test
+    func unifiedLayoutMigrationUpdatesOldPlayStationDefaults() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(ControllerFamily.dualSense.rawValue, forKey: "controllerMappings.v1.controllerFamily")
+        defaults.set(true, forKey: "controllerMappings.v1.yesNoFaceButtonsMigrated")
+        defaults.set(
+            [
+                ControllerInput.functionButtonA.rawValue: ControllerMappedAction.approve.rawValue,
+                ControllerInput.functionButtonB.rawValue: ControllerMappedAction.answerNo.rawValue,
+                ControllerInput.functionButtonX.rawValue: ControllerMappedAction.deny.rawValue,
+                ControllerInput.functionButtonY.rawValue: ControllerMappedAction.answerYes.rawValue,
+            ],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .functionButtonA) == .approve)
+        #expect(store.action(for: .functionButtonB) == .deny)
+        #expect(store.action(for: .functionButtonX) == .answerNo)
+        #expect(store.action(for: .functionButtonY) == .answerYes)
     }
 
     @Test
@@ -116,6 +246,115 @@ struct JoyHarnessTests {
         #expect(reloaded.action(for: .buttonA) == .quickAction)
         reloaded.resetDefaults()
         #expect(reloaded.action(for: .buttonA) == .mouseLeft)
+    }
+
+    @Test
+    func playStationLabelsAndTouchpadMappingAreAvailable() {
+        #expect(ControllerInput.buttonA.displayName(for: .dualSense) == "×")
+        #expect(ControllerInput.buttonB.displayName(for: .dualSense) == "○")
+        #expect(ControllerInput.functionButtonX.displayName(for: .dualSense) == "L2 + □")
+        #expect(ControllerMappingStore.defaultMappings[.touchpadButton] == .pushToTalk)
+    }
+
+    @Test
+    func controllerFamiliesSelectMatchingDashboardArtwork() {
+        #expect(
+            ControllerFamily.dualSense.dashboardArtworkResource ==
+                "controller-dashboard-dualsense-transparent"
+        )
+        #expect(ControllerFamily.xbox.dashboardArtworkResource == "controller-dashboard")
+        #expect(ControllerFamily.dualShock.dashboardArtworkResource == nil)
+    }
+
+    @Test
+    func dualSenseAudioDeviceNamesAreRecognizedWithoutMatchingUnrelatedInputs() {
+        #expect(ControllerAudioSupport.matchesDualSenseAudioDevice("DualSense Wireless Controller"))
+        #expect(ControllerAudioSupport.matchesDualSenseAudioDevice("Wireless Controller"))
+        #expect(!ControllerAudioSupport.matchesDualSenseAudioDevice("Mac Studio Microphone"))
+        #expect(!ControllerAudioSupport.matchesDualSenseAudioDevice("Yamaha AG06MK2"))
+        #expect(ControllerAudioSupport.transportDescription(kAudioDeviceTransportTypeUSB) == "USB")
+        #expect(ControllerAudioSupport.transportDescription(kAudioDeviceTransportTypeBluetooth) == "蓝牙")
+    }
+
+    @Test
+    func adaptiveTriggerConfirmsOncePerFullPressAndResetsAfterRelease() {
+        var state = AdaptiveTriggerPressState()
+
+        let initialPosition = state.update(value: 0.02)
+        let lightPress = state.update(value: 0.08)
+        let resistanceWall = state.update(value: 0.60)
+        let firstRelease = state.update(value: 0.72)
+        let heldDown = state.update(value: 0.95)
+        let partialRelease = state.update(value: 0.40)
+        let fullRelease = state.update(value: 0.18)
+        let secondRelease = state.update(value: 0.80)
+
+        #expect(initialPosition == nil)
+        #expect(lightPress == .lightTouch)
+        #expect(resistanceWall == nil)
+        #expect(firstRelease == .confirmation)
+        #expect(heldDown == nil)
+        #expect(partialRelease == nil)
+        #expect(fullRelease == nil)
+        #expect(secondRelease == .confirmation)
+    }
+
+    @Test
+    func adaptiveTriggerUsesAStrongButReachableResistanceWall() {
+        #expect(AdaptiveTriggerPressState.resistanceStart == 0.35)
+        #expect(AdaptiveTriggerPressState.releasePoint == 0.72)
+        #expect(AdaptiveTriggerPressState.resistanceStrength == 0.90)
+        #expect(AdaptiveTriggerPressState.resetPoint < AdaptiveTriggerPressState.resistanceStart)
+    }
+
+    @Test
+    func rightTriggerActionRequiresCrossingTheResistanceWall() {
+        var state = AnalogButtonPressState(
+            pressPoint: AdaptiveTriggerPressState.releasePoint,
+            resetPoint: AdaptiveTriggerPressState.resetPoint
+        )
+
+        #expect(state.update(value: 0.20) == nil)
+        #expect(state.update(value: 0.60) == nil)
+        #expect(state.update(value: 0.72) == true)
+        #expect(state.update(value: 0.95) == nil)
+        #expect(state.update(value: 0.40) == nil)
+        #expect(state.update(value: 0.18) == false)
+        #expect(state.update(value: 0.90) == true)
+    }
+
+    @Test
+    func dualSenseUSBWeaponReportOnlyUpdatesTheRightTrigger() {
+        let report = DualSenseUSBOutputReport.weapon(
+            startPosition: 0.35,
+            endPosition: 0.72,
+            strength: 0.90
+        )
+
+        #expect(report.count == 48)
+        #expect(report[0] == 0x02)
+        #expect(report[1] == 0x04)
+        #expect(report[2] == 0)
+        #expect(Array(report[11...14]) == [0x25, 0x48, 0x00, 0x06])
+        #expect(report[22] == 0)
+    }
+
+    @Test
+    func dualSenseUSBOffReportOnlyClearsTheRightTrigger() {
+        let report = DualSenseUSBOutputReport.off()
+
+        #expect(report.count == 48)
+        #expect(report[0] == 0x02)
+        #expect(report[1] == 0x04)
+        #expect(report[11] == 0x05)
+        #expect(report.filter { $0 != 0 }.count == 3)
+    }
+
+    @Test
+    func fastAdaptiveTriggerPressSkipsTheLightPulse() {
+        var state = AdaptiveTriggerPressState()
+        let feedback = state.update(value: 0.90)
+        #expect(feedback == .confirmation)
     }
 
     @Test

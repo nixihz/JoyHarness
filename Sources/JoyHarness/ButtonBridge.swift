@@ -29,10 +29,30 @@ enum DPadDirection {
 enum ControllerAction: Hashable {
     case mouseButton(MouseButton)
     case systemKey(SystemKey)
+    case textInput(String)
     case microKey(String)
     case slotOffset(Int)
     case selectSlot(Int)
     case mouseSpeedBoost
+}
+
+struct AnalogButtonPressState {
+    let pressPoint: Float
+    let resetPoint: Float
+
+    private(set) var isPressed = false
+
+    mutating func update(value: Float) -> Bool? {
+        if !isPressed, value >= pressPoint {
+            isPressed = true
+            return true
+        }
+        if isPressed, value <= resetPoint {
+            isPressed = false
+            return false
+        }
+        return nil
+    }
 }
 
 final class ButtonBridge {
@@ -43,6 +63,11 @@ final class ButtonBridge {
     private var functionPressed = false
     private var lastJoystick: (angle: Float, distance: Float)?
     private var mouseSpeedBoostPressed = false
+    private var controllerFamily: ControllerFamily = .generic
+    private var rightTriggerPressState = AnalogButtonPressState(
+        pressPoint: AdaptiveTriggerPressState.releasePoint,
+        resetPoint: AdaptiveTriggerPressState.resetPoint
+    )
 
     private(set) var selectedSlot = 0
     var keyHandler: ((String, Int) -> Bool)?
@@ -50,9 +75,16 @@ final class ButtonBridge {
     var leftStickHandler: ((Float, Float, Bool) -> Void)?
     var mouseButtonHandler: ((MouseButton, Bool) -> Void)?
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
+    var textInputHandler: ((String) -> Bool)?
     var mouseSpeedBoostHandler: ((Bool) -> Void)?
+    var rightTriggerFeedbackHandler: ((Float) -> Void)?
     var onSlotSelected: ((Int) -> Void)?
+    var onControllerChange: ((GCController?, ControllerFamily) -> Void)?
     var mappingProvider: (ControllerInput) -> ControllerMappedAction
+
+    var batterySnapshot: ControllerBatterySnapshot? {
+        ControllerBatterySnapshot(controller?.battery)
+    }
 
     init(mappingProvider: @escaping (ControllerInput) -> ControllerMappedAction = {
         ControllerMappingStore.defaultMappings[$0] ?? .disabled
@@ -62,8 +94,16 @@ final class ButtonBridge {
 
     func start() {
         GCController.shouldMonitorBackgroundEvents = true
+        GCController.startWirelessControllerDiscovery(completionHandler: nil)
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.attachPreferredController()
+        }
+        NotificationCenter.default.addObserver(
+            forName: .GCControllerDidBecomeCurrent,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -92,10 +132,18 @@ final class ButtonBridge {
     }
 
     private func attachPreferredController() {
-        guard let selected = GCController.controllers().first(where: { $0.extendedGamepad != nil }),
+        let controllers = GCController.controllers().filter { $0.extendedGamepad != nil }
+        let selectedController = GCController.current.flatMap { current in
+            controllers.first(where: { $0 === current })
+        } ?? controller.flatMap { attached in
+            controllers.first(where: { $0 === attached })
+        } ?? controllers.first
+        guard let selected = selectedController,
               let gamepad = selected.extendedGamepad else {
             resetInputState()
             controller = nil
+            controllerFamily = .generic
+            onControllerChange?(nil, .generic)
             print("[agent-deck] controller unavailable")
             return
         }
@@ -103,11 +151,14 @@ final class ButtonBridge {
         controller?.extendedGamepad?.valueChangedHandler = nil
         resetInputState()
         controller = selected
+        let family = ControllerFamily.detect(controller: selected)
+        controllerFamily = family
         gamepad.valueChangedHandler = { [weak self] gamepad, element in
             DispatchQueue.main.async {
                 self?.handle(gamepad: gamepad, changedElement: element)
             }
         }
+        onControllerChange?(selected, family)
         print("[agent-deck] controller ready on \(selected.vendorName ?? selected.productCategory)")
     }
 
@@ -157,20 +208,49 @@ final class ButtonBridge {
         } else if let button = gamepad.buttonHome, changedElement === button {
             handleMappedButton(button, input: .home)
         } else if changedElement === gamepad.rightTrigger {
-            handleMappedButton(gamepad.rightTrigger, input: .rightTrigger)
+            rightTriggerFeedbackHandler?(gamepad.rightTrigger.value)
+            if controllerFamily == .dualSense,
+               let isPressed = rightTriggerPressState.update(value: gamepad.rightTrigger.value) {
+                handleMappedButton(
+                    gamepad.rightTrigger,
+                    input: .rightTrigger,
+                    isPressed: isPressed
+                )
+            } else if controllerFamily != .dualSense {
+                handleMappedButton(gamepad.rightTrigger, input: .rightTrigger)
+            }
         } else if let button = gamepad.leftThumbstickButton, changedElement === button {
             handleMappedButton(button, input: .leftThumbstickButton)
         } else if let button = gamepad.rightThumbstickButton, changedElement === button {
             handleMappedButton(button, input: .rightThumbstickButton)
+        } else if let button = Self.touchpadButton(for: gamepad), changedElement === button {
+            handleMappedButton(button, input: .touchpadButton)
         }
     }
 
+    private static func touchpadButton(for gamepad: GCExtendedGamepad) -> GCControllerButtonInput? {
+        if let dualSense = gamepad as? GCDualSenseGamepad { return dualSense.touchpadButton }
+        if let dualShock = gamepad as? GCDualShockGamepad { return dualShock.touchpadButton }
+        return nil
+    }
+
     private func handleMappedButton(_ button: GCControllerButtonInput, input: ControllerInput) {
-        guard let action = mappingProvider(input).controllerAction else {
-            if !button.isPressed { release(button) }
+        handleMappedButton(button, input: input, isPressed: button.isPressed)
+    }
+
+    private func handleMappedButton(
+        _ button: GCControllerButtonInput,
+        input: ControllerInput,
+        isPressed: Bool
+    ) {
+        guard isPressed else {
+            release(button)
             return
         }
-        handleControllerAction(button, action: action)
+        guard let action = mappingProvider(input).controllerAction else {
+            return
+        }
+        handleControllerAction(button, action: action, isPressed: true)
     }
 
     static func faceAction(for button: FaceButton, functionPressed: Bool) -> ControllerAction {
@@ -178,8 +258,8 @@ final class ButtonBridge {
             switch button {
             case .a: return .microKey("ACT07")
             case .b: return .microKey("ACT08")
-            case .x: return .microKey("ACT06")
-            case .y: return .microKey("ACT09")
+            case .x: return .textInput("no")
+            case .y: return .textInput("yes")
             }
         }
         switch button {
@@ -201,10 +281,11 @@ final class ButtonBridge {
 
     private func handleControllerAction(
         _ button: GCControllerButtonInput,
-        action: ControllerAction
+        action: ControllerAction,
+        isPressed: Bool
     ) {
         let id = ObjectIdentifier(button)
-        if button.isPressed {
+        if isPressed {
             guard pressedButtons.insert(id).inserted else { return }
             guard begin(action) else {
                 pressedButtons.remove(id)
@@ -230,6 +311,8 @@ final class ButtonBridge {
         case .systemKey(let key):
             systemKeyHandler?(key, true)
             succeeded = true
+        case .textInput(let text):
+            succeeded = textInputHandler?(text) == true
         case .microKey(let key):
             succeeded = keyHandler?(key, 1) == true
         case .slotOffset(let offset):
@@ -266,6 +349,8 @@ final class ButtonBridge {
             mouseButtonHandler?(button, false)
         case .systemKey(let key):
             systemKeyHandler?(key, false)
+        case .textInput:
+            break
         case .microKey(let key):
             _ = keyHandler?(key, 0)
         case .slotOffset, .selectSlot:
@@ -289,6 +374,11 @@ final class ButtonBridge {
         selectedSlot = slot
         onSlotSelected?(slot)
         tap(agentKey(for: slot))
+    }
+
+    func syncSelectedSlot(_ slot: Int) {
+        guard (0..<6).contains(slot) else { return }
+        selectedSlot = slot
     }
 
     private func agentKey(for slot: Int) -> String {
@@ -359,6 +449,10 @@ final class ButtonBridge {
         functionPressed = false
         lastJoystick = nil
         mouseSpeedBoostPressed = false
+        rightTriggerPressState = AnalogButtonPressState(
+            pressPoint: AdaptiveTriggerPressState.releasePoint,
+            resetPoint: AdaptiveTriggerPressState.resetPoint
+        )
         leftStickHandler?(0, 0, false)
     }
 }

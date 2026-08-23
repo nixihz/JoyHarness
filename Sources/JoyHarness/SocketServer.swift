@@ -85,7 +85,8 @@ final class SocketServer {
                     self.onCommand(PadCommand(
                         state: state.rawValue,
                         action: nil,
-                        note: nil
+                        note: nil,
+                        threadID: nil
                     ))
                 }
             }

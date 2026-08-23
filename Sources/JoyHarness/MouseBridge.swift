@@ -24,6 +24,10 @@ final class MouseBridge: NSObject {
         AXIsProcessTrusted()
     }
 
+    var isInputMonitoringGranted: Bool {
+        CGPreflightListenEventAccess()
+    }
+
     func start() {
         guard movementTimer == nil else { return }
         lastPermissionState = isAccessibilityGranted
@@ -104,6 +108,34 @@ final class MouseBridge: NSObject {
             pressedSystemKeys.remove(key)
             stopKeyRepeat(for: key)
         }
+    }
+
+    @discardableResult
+    func typeText(_ text: String) -> Bool {
+        guard isAccessibilityGranted else {
+            requestAccessibilityPermission()
+            return false
+        }
+        let characters = Array(text.utf16)
+        guard !characters.isEmpty,
+              let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+            return false
+        }
+        characters.withUnsafeBufferPointer { buffer in
+            textDown.keyboardSetUnicodeString(
+                stringLength: buffer.count,
+                unicodeString: buffer.baseAddress
+            )
+            textUp.keyboardSetUnicodeString(
+                stringLength: buffer.count,
+                unicodeString: buffer.baseAddress
+            )
+        }
+        for event in [textDown, textUp] {
+            event.post(tap: .cghidEventTap)
+        }
+        return true
     }
 
     nonisolated static func pointerVelocity(

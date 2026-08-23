@@ -14,10 +14,13 @@ SOCK = Path(os.environ.get("AGENT_DECK_SOCK", Path.home() / ".agent-deck" / "pad
 CHAIN_PATH = Path.home() / ".agent-deck" / "notify-chain.json"
 
 
-def pad_done(note: str) -> None:
+def pad_done(note: str, thread_id: str) -> None:
     if not SOCK.exists():
         return
-    payload = json.dumps({"state": "done", "note": note}, ensure_ascii=False) + "\n"
+    payload = json.dumps(
+        {"state": "done", "note": note, "thread_id": thread_id},
+        ensure_ascii=False,
+    ) + "\n"
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(0.4)
@@ -68,7 +71,10 @@ def main() -> int:
 
     event = payload.get("type") or "notify"
     if event == "agent-turn-complete" or not payload:
-        pad_done(note=str(event))
+        pad_done(
+            note=str(event),
+            thread_id=str(payload.get("thread-id") or payload.get("thread_id") or ""),
+        )
 
     # Forward original argv after our script name (same shape Codex used).
     chain_original(sys.argv[1:])

@@ -14,37 +14,12 @@ final class HapticEngine {
     var hasController: Bool { engine != nil }
     var connectedName: String { controllerName }
 
-    func startWatching() {
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidConnect,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.attachPreferredController()
-        }
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidDisconnect,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.detach()
-            self?.attachPreferredController()
-        }
-        GCController.startWirelessControllerDiscovery(completionHandler: nil)
-        attachPreferredController()
-    }
-
-    func attachPreferredController() {
-        let controllers = GCController.controllers()
-        guard let controller = controllers.first(where: { $0.haptics != nil }) ?? controllers.first else {
+    func attach(_ controller: GCController?) {
+        guard let controller else {
             detach()
             print("[agent-deck] no game controller connected")
             return
         }
-        attach(controller)
-    }
-
-    private func attach(_ controller: GCController) {
         detach()
         controllerName = controller.vendorName ?? "Game Controller"
         guard let haptics = controller.haptics else {
@@ -127,6 +102,18 @@ final class HapticEngine {
         let delay = TimeInterval(count) * 0.11 + 0.12
         feedbackTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.apply(state)
+        }
+    }
+
+    func playAdaptiveTriggerFeedback(_ event: AdaptiveTriggerFeedbackEvent) {
+        switch event {
+        case .lightTouch:
+            playOneShot(intensity: 0.22, sharpness: 0.75, duration: 0.025)
+        case .confirmation:
+            playBurst(events: [
+                (0.0, 0.95, 0.95, 0.055),
+                (0.065, 0.58, 0.55, 0.045),
+            ])
         }
     }
 

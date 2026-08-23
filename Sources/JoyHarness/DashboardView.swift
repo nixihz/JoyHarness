@@ -42,9 +42,9 @@ struct DashboardView: View {
                     Label("打开任务", systemImage: "arrow.up.forward.app")
                 }
                 .help("在 Codex 中打开当前任务")
+            }
 
-                Divider()
-
+            ToolbarItem {
                 HealthIndicator(status: store.status)
             }
         }
@@ -74,16 +74,6 @@ private struct SlotSidebar: View {
             }
 
             Spacer(minLength: 12)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Label("LT + 方向键 / LB / RB", systemImage: "gamecontroller")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("手柄与界面共享同一组槽位")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(16)
         }
         .background(.regularMaterial)
     }
@@ -129,7 +119,18 @@ private struct TaskDetail: View {
     private var status: DashboardStatus { store.status }
     private var slot: DashboardSlot? { status.selected }
 
+    @ViewBuilder
     var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 16) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             StateBanner(state: status.padState)
                 .padding(16)
@@ -154,11 +155,10 @@ private struct TaskDetail: View {
 
             Divider()
 
-            ControllerMap(mappingStore: mappingStore)
+            ControllerMap(status: status, mappingStore: mappingStore)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(22)
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.42))
     }
 }
 
@@ -179,12 +179,7 @@ private struct StateBanner: View {
         .foregroundStyle(state.color)
         .padding(.horizontal, 18)
         .frame(height: 62)
-        .background(state.color.opacity(0.11))
-        .overlay {
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(state.color.opacity(0.24), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .dashboardGlassSurface(cornerRadius: 7, tint: state.color)
     }
 }
 
@@ -199,7 +194,7 @@ private struct CommandButtons: View {
             } label: {
                 Label("批准", systemImage: "checkmark")
             }
-            .buttonStyle(.borderedProminent)
+            .dashboardPrimaryButtonStyle()
             .tint(waiting ? .orange : .accentColor)
             .help("批准当前待处理请求")
 
@@ -208,7 +203,7 @@ private struct CommandButtons: View {
             } label: {
                 Label("拒绝", systemImage: "xmark")
             }
-            .buttonStyle(.bordered)
+            .dashboardSecondaryButtonStyle()
             .help("拒绝当前待处理请求")
 
             Button {
@@ -216,7 +211,7 @@ private struct CommandButtons: View {
             } label: {
                 Label("快捷操作", systemImage: "bolt.fill")
             }
-            .buttonStyle(.bordered)
+            .dashboardSecondaryButtonStyle()
             .help("触发 Codex Micro 快捷操作")
 
             Button {
@@ -224,7 +219,7 @@ private struct CommandButtons: View {
             } label: {
                 Label("打开任务", systemImage: "arrow.up.forward.app")
             }
-            .buttonStyle(.bordered)
+            .dashboardSecondaryButtonStyle()
             .help("在 Codex 中打开当前任务")
         }
         .controlSize(.large)
@@ -232,6 +227,7 @@ private struct CommandButtons: View {
 }
 
 private struct ControllerMap: View {
+    let status: DashboardStatus
     @ObservedObject var mappingStore: ControllerMappingStore
 
     var body: some View {
@@ -240,6 +236,12 @@ private struct ControllerMap: View {
                 Label("控制映射", systemImage: "gamecontroller.fill")
                     .font(.headline)
                 Spacer()
+                if status.controllerConnected == true {
+                    ControllerBatteryIndicator(
+                        level: status.controllerBatteryLevel,
+                        state: status.controllerBatteryState
+                    )
+                }
                 if #available(macOS 14.0, *) {
                     SettingsLink {
                         Label("自定义按键", systemImage: "gearshape")
@@ -256,20 +258,23 @@ private struct ControllerMap: View {
                     .help("打开按键映射设置")
                 }
 
-                Text("Xbox / Codex Micro")
+                Text("\(mappingStore.controllerFamily.displayName) / Codex Micro")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
 
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 12) {
-                    MappingLabel(key: "LT + ↑", title: title(for: .functionDpadUp))
-                    MappingLabel(key: "LT + ←", title: title(for: .functionDpadLeft))
-                    MappingLabel(key: "LB", title: title(for: .leftShoulder))
-                    MappingLabel(key: "RB", title: title(for: .rightShoulder))
-                    MappingLabel(key: "Menu", title: title(for: .menu))
+                    MappingLabel(key: key(for: .functionDpadUp), title: title(for: .functionDpadUp))
+                    MappingLabel(key: key(for: .functionDpadLeft), title: title(for: .functionDpadLeft))
+                    MappingLabel(key: key(for: .leftShoulder), title: title(for: .leftShoulder))
+                    MappingLabel(key: key(for: .rightShoulder), title: title(for: .rightShoulder))
+                    MappingLabel(key: key(for: .menu), title: title(for: .menu))
+                    if mappingStore.controllerFamily == .dualSense || mappingStore.controllerFamily == .dualShock {
+                        MappingLabel(key: key(for: .touchpadButton), title: title(for: .touchpadButton))
+                    }
                     MappingLabel(key: "D-Pad", title: dpadSummary)
-                    MappingLabel(key: "LT", title: title(for: .leftTrigger))
+                    MappingLabel(key: key(for: .leftTrigger), title: title(for: .leftTrigger))
                     MappingLabel(key: "L3", title: title(for: .leftThumbstickButton))
                 }
                 .frame(width: 176, alignment: .leading)
@@ -281,6 +286,13 @@ private struct ControllerMap: View {
                         .frame(minWidth: 220, maxWidth: 390, maxHeight: 270)
                         .accessibilityHidden(true)
                         .frame(minWidth: 220, maxWidth: .infinity)
+                } else if usesPlayStationLayout {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.system(size: 112, weight: .regular))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 220, maxWidth: .infinity, maxHeight: 270)
+                        .accessibilityLabel(mappingStore.controllerFamily.displayName)
                 } else {
                     Label("手柄资源加载失败", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.secondary)
@@ -288,46 +300,51 @@ private struct ControllerMap: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    MappingLabel(key: "A", title: title(for: .buttonA))
-                    MappingLabel(key: "B", title: title(for: .buttonB))
-                    MappingLabel(key: "X", title: title(for: .buttonX))
-                    MappingLabel(key: "Y", title: title(for: .buttonY))
-                    MappingLabel(key: "LT + A", title: title(for: .functionButtonA))
-                    MappingLabel(key: "LT + B", title: title(for: .functionButtonB))
-                    MappingLabel(key: "RT", title: title(for: .rightTrigger))
+                    MappingLabel(key: key(for: .buttonA), title: title(for: .buttonA))
+                    MappingLabel(key: key(for: .buttonB), title: title(for: .buttonB))
+                    MappingLabel(key: key(for: .buttonX), title: title(for: .buttonX))
+                    MappingLabel(key: key(for: .buttonY), title: title(for: .buttonY))
+                    MappingLabel(key: key(for: .functionButtonA), title: title(for: .functionButtonA))
+                    MappingLabel(key: key(for: .functionButtonB), title: title(for: .functionButtonB))
+                    MappingLabel(key: key(for: .functionButtonX), title: title(for: .functionButtonX))
+                    MappingLabel(key: key(for: .functionButtonY), title: title(for: .functionButtonY))
+                    MappingLabel(key: key(for: .rightTrigger), title: title(for: .rightTrigger))
                     MappingLabel(key: "R3", title: title(for: .rightThumbstickButton))
                 }
                 .frame(width: 132, alignment: .leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Text("左摇杆移动鼠标，按住 LT 切换纵向 / 横向滚动；A/B 点击，X 退格，Y 返回")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(18)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.34))
-        .overlay {
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .dashboardGlassSurface(cornerRadius: 7)
     }
 
     private var controllerArtwork: NSImage? {
+        guard let resource = mappingStore.controllerFamily.dashboardArtworkResource else {
+            return nil
+        }
         let url = Bundle.main.url(
-            forResource: "controller-dashboard",
+            forResource: resource,
             withExtension: "png"
         ) ?? Bundle.module.url(
-            forResource: "controller-dashboard",
+            forResource: resource,
             withExtension: "png"
         )
         guard let url else { return nil }
         return NSImage(contentsOf: url)
     }
 
+    private var usesPlayStationLayout: Bool {
+        mappingStore.controllerFamily == .dualSense || mappingStore.controllerFamily == .dualShock
+    }
+
     private func title(for input: ControllerInput) -> String {
         mappingStore.action(for: input).displayName
+    }
+
+    private func key(for input: ControllerInput) -> String {
+        mappingStore.displayName(for: input)
     }
 
     private var dpadSummary: String {
@@ -338,6 +355,71 @@ private struct ControllerMap: View {
             mappingStore.action(for: .dpadRight),
         ]
         return Set(actions).count == 1 ? actions[0].displayName : "自定义"
+    }
+}
+
+private struct ControllerBatteryIndicator: View {
+    let level: Float?
+    let state: String?
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: batterySymbol)
+                .symbolRenderingMode(.hierarchical)
+            Text(percentageText)
+                .monospacedDigit()
+            if isCharging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 9, weight: .bold))
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(indicatorColor)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .help(accessibilityText)
+    }
+
+    private var percentage: Int? {
+        level.map { Int((min(max($0, 0), 1) * 100).rounded()) }
+    }
+
+    private var percentageText: String {
+        percentage.map { "\($0)%" } ?? "--%"
+    }
+
+    private var isCharging: Bool {
+        state == ControllerBatteryState.charging.rawValue ||
+            state == ControllerBatteryState.full.rawValue
+    }
+
+    private var batterySymbol: String {
+        guard let percentage else { return "battery.0" }
+        switch percentage {
+        case 88...: return "battery.100"
+        case 63...: return "battery.75"
+        case 38...: return "battery.50"
+        case 13...: return "battery.25"
+        default: return "battery.0"
+        }
+    }
+
+    private var indicatorColor: Color {
+        guard let percentage else { return .secondary }
+        if isCharging { return .green }
+        if percentage <= 20 { return .red }
+        if percentage <= 40 { return .orange }
+        return .secondary
+    }
+
+    private var accessibilityText: String {
+        guard let percentage else { return "手柄电量未知" }
+        let stateDescription = switch state {
+        case ControllerBatteryState.charging.rawValue: "，正在充电"
+        case ControllerBatteryState.full.rawValue: "，已充满"
+        default: ""
+        }
+        return "手柄电量 \(percentage)%\(stateDescription)"
     }
 }
 
@@ -376,10 +458,15 @@ private struct ConnectionInspector: View {
             InspectorSection(
                 title: "控制器",
                 systemImage: "gamecontroller",
-                connected: status.haptics,
+                connected: status.controllerConnected ??
+                    (status.controller != "none" && status.controller != "No controller"),
                 rows: [
                     ("设备", status.controller),
+                    ("类型", controllerFamilyName),
                     ("震动", status.haptics ? "可用" : "不可用"),
+                    ("触控板", status.controllerTouchpad == true ? "可映射" : "不可用"),
+                    ("R2 扳机", status.controllerFamily == ControllerFamily.dualSense.rawValue
+                        ? "自适应强反馈" : "标准输入"),
                 ]
             )
             Divider().padding(.leading, 16)
@@ -399,9 +486,21 @@ private struct ConnectionInspector: View {
                 connected: status.mode == "physical-codex-micro",
                 rows: [
                     ("辅助功能", status.accessibility ? "已授权" : "鼠标控制未授权"),
-                    ("麦克风", "由 Codex Micro 管理"),
+                    ("输入监控", status.inputMonitoring == true ? "已授权" : "后台手柄未授权"),
+                    ("语音输入", voiceInputDescription),
+                    ("录音", "由 Codex Desktop 管理"),
                 ]
             )
+            if status.controllerFamily == ControllerFamily.dualSense.rawValue {
+                Button {
+                    openSoundInputSettings()
+                } label: {
+                    Label("打开声音输入设置", systemImage: "mic")
+                }
+                .buttonStyle(.link)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+            }
 
             Spacer()
             Divider()
@@ -427,6 +526,34 @@ private struct ConnectionInspector: View {
             .padding(16)
         }
         .background(.regularMaterial)
+    }
+
+    private var controllerFamilyName: String {
+        guard let raw = status.controllerFamily,
+              let family = ControllerFamily(rawValue: raw) else { return "通用手柄" }
+        return family.displayName
+    }
+
+    private var voiceInputDescription: String {
+        guard status.microphone, let name = status.voiceInput, !name.isEmpty else {
+            guard let defaultInput = status.defaultVoiceInput, !defaultInput.isEmpty else {
+                return status.controllerFamily == ControllerFamily.dualSense.rawValue
+                    ? "手柄未提供；系统也无可用输入" : "系统无可用输入"
+            }
+            return status.controllerFamily == ControllerFamily.dualSense.rawValue
+                ? "手柄未提供；当前用 \(defaultInput)" : "当前用 \(defaultInput)"
+        }
+        let transport = status.voiceInputTransport.flatMap { $0.isEmpty ? nil : $0 } ?? "未知连接"
+        return status.voiceInputDefault == true
+            ? "\(name)（\(transport)，默认）"
+            : "\(name)（\(transport)，未选中）"
+    }
+
+    private func openSoundInputSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.Sound-Settings.extension?input"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -512,6 +639,75 @@ private struct ActivityBar: View {
     private var formattedTimestamp: String {
         guard let date = ISO8601DateFormatter().date(from: status.timestamp) else { return "--:--:--" }
         return date.formatted(date: .omitted, time: .standard)
+    }
+}
+
+private extension View {
+    func dashboardGlassSurface(cornerRadius: CGFloat, tint: Color? = nil) -> some View {
+        modifier(DashboardGlassSurface(cornerRadius: cornerRadius, tint: tint))
+    }
+
+    func dashboardPrimaryButtonStyle() -> some View {
+        modifier(DashboardPrimaryButtonStyle())
+    }
+
+    func dashboardSecondaryButtonStyle() -> some View {
+        modifier(DashboardSecondaryButtonStyle())
+    }
+}
+
+private struct DashboardGlassSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    let tint: Color?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            if let tint {
+                content.glassEffect(
+                    .regular.tint(tint.opacity(0.18)),
+                    in: .rect(cornerRadius: cornerRadius)
+                )
+            } else {
+                content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            }
+        } else {
+            content
+                .background(.regularMaterial, in: fallbackShape)
+                .background((tint ?? .clear).opacity(0.1), in: fallbackShape)
+                .overlay {
+                    fallbackShape.stroke(
+                        tint?.opacity(0.24) ?? Color.primary.opacity(0.1),
+                        lineWidth: 1
+                    )
+                }
+        }
+    }
+
+    private var fallbackShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+}
+
+private struct DashboardPrimaryButtonStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+private struct DashboardSecondaryButtonStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.buttonStyle(.glass)
+        } else {
+            content.buttonStyle(.bordered)
+        }
     }
 }
 

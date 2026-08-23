@@ -41,7 +41,7 @@ class HookBridgeTests(unittest.TestCase):
             environment["AGENT_DECK_SOCK"] = str(socket_path)
             result = subprocess.run(
                 ["python3", str(BRIDGE)],
-                input=json.dumps({"hook_event_name": event}),
+                input=json.dumps({"hook_event_name": event, "session_id": "thread-123"}),
                 text=True,
                 capture_output=True,
                 env=environment,
@@ -56,13 +56,19 @@ class HookBridgeTests(unittest.TestCase):
     def test_prompt_submit_sets_busy(self) -> None:
         result, message = self.capture("UserPromptSubmit")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(message, {"state": "busy", "note": "UserPromptSubmit"})
+        self.assertEqual(
+            message,
+            {"state": "busy", "note": "UserPromptSubmit", "thread_id": "thread-123"},
+        )
 
     def test_permission_request_only_signals_waiting(self) -> None:
         result, message = self.capture("PermissionRequest")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
-        self.assertEqual(message, {"state": "waiting", "note": "PermissionRequest"})
+        self.assertEqual(
+            message,
+            {"state": "waiting", "note": "PermissionRequest", "thread_id": "thread-123"},
+        )
 
     def test_offline_daemon_returns_immediately(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

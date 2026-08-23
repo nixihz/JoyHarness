@@ -23,6 +23,7 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
     case rightTrigger
     case leftThumbstickButton
     case rightThumbstickButton
+    case touchpadButton
     case dpadUp
     case dpadLeft
     case dpadDown
@@ -40,35 +41,37 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
 
     var id: Self { self }
 
-    var displayName: String {
-        switch self {
-        case .buttonA: "A"
-        case .buttonB: "B"
-        case .buttonX: "X"
-        case .buttonY: "Y"
-        case .leftShoulder: "LB"
-        case .rightShoulder: "RB"
-        case .leftTrigger: "LT"
-        case .menu: "Menu"
-        case .options: "Options / View"
-        case .home: "Home"
-        case .rightTrigger: "RT"
+    func displayName(for family: ControllerFamily = .xbox) -> String {
+        let playStation = family == .dualSense || family == .dualShock
+        return switch self {
+        case .buttonA: playStation ? "×" : "A"
+        case .buttonB: playStation ? "○" : "B"
+        case .buttonX: playStation ? "□" : "X"
+        case .buttonY: playStation ? "△" : "Y"
+        case .leftShoulder: playStation ? "L1" : "LB"
+        case .rightShoulder: playStation ? "R1" : "RB"
+        case .leftTrigger: playStation ? "L2" : "LT"
+        case .menu: playStation ? "Options" : "Menu"
+        case .options: playStation ? "Create" : "Options / View"
+        case .home: playStation ? "PS" : "Home"
+        case .rightTrigger: playStation ? "R2" : "RT"
         case .leftThumbstickButton: "L3"
         case .rightThumbstickButton: "R3"
+        case .touchpadButton: "触控板按键"
         case .dpadUp: "十字键 上"
         case .dpadLeft: "十字键 左"
         case .dpadDown: "十字键 下"
         case .dpadRight: "十字键 右"
-        case .functionButtonA: "LT + A"
-        case .functionButtonB: "LT + B"
-        case .functionButtonX: "LT + X"
-        case .functionButtonY: "LT + Y"
-        case .functionLeftShoulder: "LT + LB"
-        case .functionRightShoulder: "LT + RB"
-        case .functionDpadUp: "LT + 十字键 上"
-        case .functionDpadLeft: "LT + 十字键 左"
-        case .functionDpadDown: "LT + 十字键 下"
-        case .functionDpadRight: "LT + 十字键 右"
+        case .functionButtonA: playStation ? "L2 + ×" : "LT + A"
+        case .functionButtonB: playStation ? "L2 + ○" : "LT + B"
+        case .functionButtonX: playStation ? "L2 + □" : "LT + X"
+        case .functionButtonY: playStation ? "L2 + △" : "LT + Y"
+        case .functionLeftShoulder: playStation ? "L2 + L1" : "LT + LB"
+        case .functionRightShoulder: playStation ? "L2 + R1" : "LT + RB"
+        case .functionDpadUp: playStation ? "L2 + 十字键 上" : "LT + 十字键 上"
+        case .functionDpadLeft: playStation ? "L2 + 十字键 左" : "LT + 十字键 左"
+        case .functionDpadDown: playStation ? "L2 + 十字键 下" : "LT + 十字键 下"
+        case .functionDpadRight: playStation ? "L2 + 十字键 右" : "LT + 十字键 右"
         }
     }
 
@@ -103,6 +106,8 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case mouseMiddle
     case backspace
     case escape
+    case answerYes
+    case answerNo
     case approve
     case deny
     case quickAction
@@ -131,6 +136,8 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseMiddle: "鼠标中键"
         case .backspace: "退格"
         case .escape: "Esc"
+        case .answerYes: "输入 yes"
+        case .answerNo: "输入 no"
         case .approve: "批准"
         case .deny: "拒绝"
         case .quickAction: "快捷操作"
@@ -157,6 +164,8 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseMiddle: .mouseButton(.middle)
         case .backspace: .systemKey(.backspace)
         case .escape: .systemKey(.escape)
+        case .answerYes: .textInput("yes")
+        case .answerNo: .textInput("no")
         case .approve: .microKey("ACT07")
         case .deny: .microKey("ACT08")
         case .quickAction: .microKey("ACT06")
@@ -177,7 +186,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
 }
 
 final class ControllerMappingStore: ObservableObject {
-    static let defaultMappings: [ControllerInput: ControllerMappedAction] = [
+    private static let baseDefaultMappings: [ControllerInput: ControllerMappedAction] = [
         .buttonA: .mouseLeft,
         .buttonB: .mouseRight,
         .buttonX: .backspace,
@@ -191,14 +200,15 @@ final class ControllerMappingStore: ObservableObject {
         .rightTrigger: .focusCodex,
         .leftThumbstickButton: .mouseSpeedBoost,
         .rightThumbstickButton: .mouseMiddle,
+        .touchpadButton: .pushToTalk,
         .dpadUp: .radialInput,
         .dpadLeft: .radialInput,
         .dpadDown: .radialInput,
         .dpadRight: .radialInput,
         .functionButtonA: .approve,
         .functionButtonB: .deny,
-        .functionButtonX: .quickAction,
-        .functionButtonY: .splitThread,
+        .functionButtonX: .answerNo,
+        .functionButtonY: .answerYes,
         .functionLeftShoulder: .slot5,
         .functionRightShoulder: .slot6,
         .functionDpadUp: .slot1,
@@ -207,7 +217,14 @@ final class ControllerMappingStore: ObservableObject {
         .functionDpadRight: .slot4,
     ]
 
+    static let defaultMappings = defaultMappings(for: .xbox)
+
+    static func defaultMappings(for _: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        baseDefaultMappings
+    }
+
     @Published private(set) var mappings: [ControllerInput: ControllerMappedAction]
+    @Published private(set) var controllerFamily: ControllerFamily
 
     private let userDefaults: UserDefaults
     private let storageKey: String
@@ -218,11 +235,36 @@ final class ControllerMappingStore: ObservableObject {
     ) {
         self.userDefaults = userDefaults
         self.storageKey = storageKey
-        self.mappings = Self.loadMappings(from: userDefaults, key: storageKey)
+        let storedFamily = userDefaults.string(forKey: "\(storageKey).controllerFamily")
+            .flatMap(ControllerFamily.init(rawValue:)) ?? .xbox
+        self.controllerFamily = storedFamily
+        self.mappings = Self.loadMappings(
+            from: userDefaults,
+            key: storageKey,
+            defaults: Self.defaultMappings(for: storedFamily)
+        )
+        migrateYesNoFaceButtonsIfNeeded()
+        migrateUnifiedFaceButtonLayoutIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
         mappings[input] ?? Self.defaultMappings[input] ?? .disabled
+    }
+
+    func displayName(for input: ControllerInput) -> String {
+        input.displayName(for: controllerFamily)
+    }
+
+    func setControllerFamily(_ family: ControllerFamily) {
+        guard family != controllerFamily else { return }
+        let previousDefaults = Self.defaultMappings(for: controllerFamily)
+        let newDefaults = Self.defaultMappings(for: family)
+        for input in ControllerInput.allCases where mappings[input] == previousDefaults[input] {
+            mappings[input] = newDefaults[input]
+        }
+        controllerFamily = family
+        userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
+        persist()
     }
 
     func setAction(_ newAction: ControllerMappedAction, for input: ControllerInput) {
@@ -232,7 +274,7 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     func resetDefaults() {
-        mappings = Self.defaultMappings
+        mappings = Self.defaultMappings(for: controllerFamily)
         persist()
     }
 
@@ -241,14 +283,63 @@ final class ControllerMappingStore: ObservableObject {
         userDefaults.set(encoded, forKey: storageKey)
     }
 
+    private func migrateYesNoFaceButtonsIfNeeded() {
+        let migrationKey = "\(storageKey).yesNoFaceButtonsMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        if mappings[.functionButtonA] == .approve,
+           mappings[.functionButtonB] == .deny,
+           mappings[.functionButtonX] == .quickAction,
+           mappings[.functionButtonY] == .splitThread {
+            let defaults = Self.defaultMappings(for: controllerFamily)
+            for input in [
+                ControllerInput.functionButtonA,
+                .functionButtonB,
+                .functionButtonX,
+                .functionButtonY,
+            ] {
+                mappings[input] = defaults[input]
+            }
+            persist()
+        }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
+    private func migrateUnifiedFaceButtonLayoutIfNeeded() {
+        let migrationKey = "\(storageKey).unifiedFaceButtonLayoutMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        let currentFaceMappings = [
+            mappings[.functionButtonA],
+            mappings[.functionButtonB],
+            mappings[.functionButtonX],
+            mappings[.functionButtonY],
+        ]
+        let oldXboxDefaults: [ControllerMappedAction?] = [.approve, .deny, .answerYes, .answerNo]
+        let oldPlayStationDefaults: [ControllerMappedAction?] = [.approve, .answerNo, .deny, .answerYes]
+
+        if currentFaceMappings == oldXboxDefaults || currentFaceMappings == oldPlayStationDefaults {
+            for input in [
+                ControllerInput.functionButtonA,
+                .functionButtonB,
+                .functionButtonX,
+                .functionButtonY,
+            ] {
+                mappings[input] = Self.baseDefaultMappings[input]
+            }
+            persist()
+        }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
     private static func loadMappings(
         from userDefaults: UserDefaults,
-        key: String
+        key: String,
+        defaults: [ControllerInput: ControllerMappedAction]
     ) -> [ControllerInput: ControllerMappedAction] {
         guard let stored = userDefaults.dictionary(forKey: key) as? [String: String] else {
-            return defaultMappings
+            return defaults
         }
-        var result = defaultMappings
+        var result = defaults
         for (inputValue, actionValue) in stored {
             guard let input = ControllerInput(rawValue: inputValue),
                   let action = ControllerMappedAction(rawValue: actionValue),

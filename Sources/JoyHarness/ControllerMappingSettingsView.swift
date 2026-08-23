@@ -10,7 +10,7 @@ struct ControllerMappingSettingsView: View {
                 ForEach(ControllerInputGroup.allCases) { group in
                     Section(group.rawValue) {
                         ForEach(inputs(in: group)) { input in
-                            Picker(input.displayName, selection: binding(for: input)) {
+                            Picker(store.displayName(for: input), selection: binding(for: input)) {
                                 ForEach(input.availableActions) { action in
                                     Text(action.displayName).tag(action)
                                 }
@@ -33,6 +33,7 @@ struct ControllerMappingSettingsView: View {
                 }
             }
             .padding(16)
+            .background(.bar)
         }
         .frame(width: 560, height: 640)
         .navigationTitle("按键映射")
@@ -47,7 +48,13 @@ struct ControllerMappingSettingsView: View {
     }
 
     private func inputs(in group: ControllerInputGroup) -> [ControllerInput] {
-        ControllerInput.allCases.filter { $0.group == group }
+        ControllerInput.allCases.filter { input in
+            guard input.group == group else { return false }
+            if input == .touchpadButton {
+                return store.controllerFamily == .dualSense || store.controllerFamily == .dualShock
+            }
+            return true
+        }
     }
 
     private func binding(for input: ControllerInput) -> Binding<ControllerMappedAction> {

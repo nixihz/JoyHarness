@@ -28,10 +28,11 @@ EVENT_STATE = {
 def post(
     state: str,
     note: str,
+    thread_id: str,
 ) -> bool:
     if not SOCK.exists():
         return False
-    command = {"state": state, "note": note}
+    command = {"state": state, "note": note, "thread_id": thread_id}
     payload = json.dumps(command, ensure_ascii=False) + "\n"
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -69,6 +70,7 @@ def main() -> int:
     post(
         state,
         note=event,
+        thread_id=str(data.get("session_id") or data.get("thread_id") or ""),
     )
 
     # Hooks that expect JSON on stdout (Stop / SubagentStop) — empty continue is fine.

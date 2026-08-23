@@ -39,9 +39,19 @@ struct DashboardStatus: Decodable, Equatable {
     let selectedSlot: Int
     let slots: [DashboardSlot]
     let controller: String
+    let controllerConnected: Bool?
+    let controllerFamily: String?
+    let controllerTouchpad: Bool?
+    let controllerBatteryLevel: Float?
+    let controllerBatteryState: String?
     let haptics: Bool
     let accessibility: Bool
+    let inputMonitoring: Bool?
     let microphone: Bool
+    let voiceInput: String?
+    let voiceInputDefault: Bool?
+    let voiceInputTransport: String?
+    let defaultVoiceInput: String?
     let rp2040: Bool
     let mode: String
     let note: String
@@ -52,6 +62,16 @@ struct DashboardStatus: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case state, slots, controller, haptics, accessibility, microphone, rp2040, mode, note
+        case inputMonitoring = "input_monitoring"
+        case controllerConnected = "controller_connected"
+        case controllerFamily = "controller_family"
+        case controllerTouchpad = "controller_touchpad"
+        case controllerBatteryLevel = "controller_battery_level"
+        case controllerBatteryState = "controller_battery_state"
+        case voiceInput = "voice_input"
+        case voiceInputDefault = "voice_input_default"
+        case voiceInputTransport = "voice_input_transport"
+        case defaultVoiceInput = "default_voice_input"
         case selectedSlot = "selected_slot"
         case timestamp = "ts"
     }
@@ -69,9 +89,19 @@ struct DashboardStatus: Decodable, Equatable {
             )
         },
         controller: "No controller",
+        controllerConnected: false,
+        controllerFamily: nil,
+        controllerTouchpad: false,
+        controllerBatteryLevel: nil,
+        controllerBatteryState: nil,
         haptics: false,
         accessibility: false,
+        inputMonitoring: false,
         microphone: false,
+        voiceInput: nil,
+        voiceInputDefault: false,
+        voiceInputTransport: nil,
+        defaultVoiceInput: nil,
         rp2040: false,
         mode: "physical-codex-micro",
         note: "正在读取状态",
