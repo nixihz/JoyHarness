@@ -1,4 +1,12 @@
-# Joy Harness
+<p align="center">
+  <img src="Sources/JoyHarness/Resources/Brand/joy-harness-logo-readme.png" alt="Joy Harness logo" width="760">
+</p>
+
+<h1 align="center">Joy Harness</h1>
+
+<p align="center">
+  <img src="Sources/JoyHarness/Resources/Brand/joy-harness-app-icon-v5.png" alt="Joy Harness app icon" width="112">
+</p>
 
 Joy Harness 是一套面向 macOS Codex Desktop 的实体控制方案：它把 PS5 DualSense、Xbox
 等被 macOS `GameController` 框架识别的扩展型手柄变成 Codex Micro 控制器，同时用手柄震动
@@ -15,6 +23,15 @@ Joy Harness 是一套面向 macOS Codex Desktop 的实体控制方案：它把 P
 手柄和 RP2040 都连接 Mac，二者之间**不需要接线**。Joy Harness 会启动一个只读的 Codex
 app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，也不通过键盘模拟 Codex Micro；
 任务槽、审批、按住说话等操作最终都由 RP2040 的原生 Vendor HID 接口送入 Codex Desktop。
+
+## 近期更新
+
+- macOS 控制台已支持简体中文和 English，可跟随系统或在设置中手动切换。
+- Xbox RT 新增 Impulse Trigger 分级反馈；DualSense R2 继续使用自适应扳机阻力墙。
+- 十字键上默认改为右侧 Command，便于唤起按住说话类语音输入工具，并保留自定义映射能力。
+- 应用包已接入 Joy Harness 图标，开发启动和正式安装生成的 `.app` 都会显示一致的品牌资源。
+- 补充 DualSense 无线麦克风、无线 USB 方案和 Xbox 耳麦在 macOS 上的可行性研究，明确当前
+  推荐方案仍是手柄无线控制配合独立麦克风。
 
 ![Xbox 手柄布局](Sources/JoyHarness/Resources/controller-dashboard.png)
 
@@ -42,6 +59,8 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
   RP2040 连接状态以及辅助功能授权状态，并可直接发送批准、拒绝、快捷操作和打开任务。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
+- **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
+  也可在应用“设置”中手动固定为简体中文或 English，选择会自动保存。
 - **后台常驻**：安装后由 LaunchAgent 登录即启动；手柄或 RP2040 中途断开、重新连接时
   会自动重新检测。
 
@@ -136,7 +155,10 @@ DualSense 的实体静音键没有公开的 GameController 事件，是否静音
 DualSense 的 R2 使用系统公开的自适应扳机接口：进入约 8% 行程时先轻震一次，前 35% 为
 自由行程，35%–72% 提供最高 90% 的阻力，越过 72% 后突然释放并触发一次强震。快速直接
 按到底时会跳过轻震，避免反馈重叠；松开到 18% 以下会重新待命。此反馈只在
-DualSense 上启用，不改变 Xbox、DualShock 4 或通用手柄的 RT/R2 输入行为。macOS 会在
+DualSense 上启用，不改变 Xbox、DualShock 4 或通用手柄的 RT/R2 输入行为。Xbox 的 RT
+使用 Impulse Trigger 细微震动：进入约 8% 行程时轻触提示一次，越过 72% 并向 Codex Micro
+发送 `ACT12` 时再确认一次；松开到 18% 以下后重新待命。macOS 暴露 `.rightTrigger` locality
+时反馈只在 RT 马达播放，否则回退为更轻的全手柄震动。macOS 会在
 Joy Harness 退到后台时关闭 GameController 的扳机效果；USB 连接的 DualSense 会通过原始
 HID 输出自动恢复，因此在 Codex Desktop 前台也能保持阻力。蓝牙连接暂不支持后台恢复。
 
@@ -272,6 +294,7 @@ task demo
 
 可以从 macOS 菜单栏打开 `Joy Harness > 设置`，或点击控制映射区域的齿轮按钮，自定义每个
 数字按键和 LT 组合键。设置保存在当前用户的偏好设置中；“恢复默认映射”可还原下表行为。
+同一设置窗口顶部可以选择“跟随系统”“简体中文”或 `English`；手动选择会覆盖系统语言。
 Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴露对应事件时才会生效。
 
 ### 鼠标和系统控制
@@ -286,6 +309,7 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | R3 按下 / 松开 | 鼠标中键按下 / 松开 | 是 |
 | X | Backspace；按住后按系统节奏连续删除 | 是 |
 | Y | Esc | 是 |
+| 十字键上按下 / 松开 | 右侧 Command 按下 / 松开；默认用于唤起按住说话类语音输入工具 | 是 |
 
 这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
 改为滚动；Xbox 的 Y/X 输入 `yes` / `no`，PlayStation 的 △/□ 执行相同行为。文字只会
@@ -305,7 +329,11 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | Menu / Options 按住 / 松开 | `ACT10` 按下 / 松开 | Codex Desktop 原生按住说话 |
 | DualSense / DualShock 触控板按住 / 松开 | `ACT10` 按下 / 松开 | PlayStation 手柄的备用按住说话入口 |
 | RT / R2 扣过阻力墙 | `ACT12` | 到达确认行程后聚焦 Codex Desktop；轻按不会触发 |
-| 十字键（未按 LT）/ 右摇杆 | `v.oai.rad` | 发送角度和力度形式的径向输入 |
+| 十字键左 / 下 / 右（未按 LT）及右摇杆 | `v.oai.rad` | 发送角度和力度形式的径向输入；十字键上默认映射为右侧 Command |
+
+右侧 Command 与其他系统操作一样，也可在“设置”的任意可映射按键菜单中选择；修改后会
+即时生效并保存。升级前仍使用默认径向输入的十字键上会自动迁移为右侧 Command，自定义为
+其他操作的映射保持不变。
 
 LB/RB 和 LT 组合键直接操作 Codex Desktop 自己管理的六个 Micro 槽位。Joy Harness 通过
 Codex app-server 的只读 `thread/list` 获取六个最近任务的名称和顺序，并按 hook 携带的
@@ -478,7 +506,7 @@ AGENT_DECK_RP2040_PORT=/dev/cu.usbmodemXXXX task run
 
 ```text
 Sources/JoyHarness/             macOS 应用、控制台、手柄、鼠标、震动和串口桥
-Sources/JoyHarness/Resources/   控制台图片资源
+Sources/JoyHarness/Resources/   控制台图片、logo 与 macOS app icon
 firmware/rp2040/                RP2040 Codex Micro 固件与 USB 描述符
 bin/joy-harness-send            本地 Unix socket CLI
 codex-hooks/hook_bridge.py      Codex hook 事件到状态的映射
@@ -488,8 +516,15 @@ scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
 script/build_and_run.sh         前台 `.app` 构建与调试入口
 tests/                          Swift 和 Python 测试
+docs/research/                  手柄音频、无线麦克风与 USB-over-IP 可行性研究
 Taskfile.yml                    常用任务入口
 ```
+
+研究记录：
+
+- [DualSense 蓝牙麦克风可行性](docs/research/dualsense-wireless-microphone.md)
+- [DualSense 无线 USB / USB-over-IP 方案](docs/research/dualsense-wireless-usb-options.md)
+- [Xbox 手柄 3.5 mm 耳麦在 macOS 上的可用性](docs/research/xbox-controller-headset-macos.md)
 
 ## 当前边界
 
