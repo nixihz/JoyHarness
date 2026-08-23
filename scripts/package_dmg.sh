@@ -84,6 +84,13 @@ hdiutil create \
   -ov \
   -format UDZO \
   "${DMG_PATH}"
+
+if [[ "${JOY_HARNESS_SIGNING_IDENTITY:-}" == "Developer ID Application:"* ]]; then
+  echo "==> Signing ${DMG_PATH} with ${JOY_HARNESS_SIGNING_IDENTITY}"
+  codesign --force --sign "${JOY_HARNESS_SIGNING_IDENTITY}" --timestamp "${DMG_PATH}"
+  codesign --verify --verbose=2 "${DMG_PATH}"
+fi
+
 hdiutil verify "${DMG_PATH}"
 
 (

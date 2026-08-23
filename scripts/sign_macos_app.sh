@@ -17,9 +17,16 @@ fi
 
 if [[ -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
   echo "==> Signing ${APP_BUNDLE} with ${SIGNING_IDENTITY}"
-  codesign --force --deep --sign "${SIGNING_IDENTITY}" \
-    --identifier "${BUNDLE_ID}" \
-    "${APP_BUNDLE}"
+  CODESIGN_ARGS=(
+    --force
+    --deep
+    --sign "${SIGNING_IDENTITY}"
+    --identifier "${BUNDLE_ID}"
+  )
+  if [[ "${SIGNING_IDENTITY}" == "Developer ID Application:"* ]]; then
+    CODESIGN_ARGS+=(--options runtime --timestamp)
+  fi
+  codesign "${CODESIGN_ARGS[@]}" "${APP_BUNDLE}"
 else
   echo "==> Signing ${APP_BUNDLE} with a stable ad-hoc requirement"
   codesign --force --deep --sign - \

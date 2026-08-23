@@ -1,0 +1,235 @@
+name: Release DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version to release (for example, 0.2.0)
+        required: true
+        type: string
+      prerelease:
+        description: Publish as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate release request
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Releases must be dispatched from the main branch." >&2
+            exit 1
+          fi
+
+          VERSION="${VERSION_INPUT#v}"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: ${VERSION_INPUT}" >&2
+            exit 2
+          fi
+
+          TAG="v${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${TAG}" >&2
+            exit 1
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release already exists: ${TAG}" >&2
+            exit 1
+          fi
+
+          ARCH="$(uname -m)"
+          DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "TAG=${TAG}" >> "${GITHUB_ENV}"
+          echo "DMG_NAME=${DMG_NAME}" >> "${GITHUB_ENV}"
+          echo "DMG_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}" >> "${GITHUB_ENV}"
+          echo "CHECKSUM_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}.sha256" >> "${GITHUB_ENV}"
+
+      - name: Validate release secrets
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          VALUES=(
+            "${CERTIFICATE_BASE64}"
+            "${CERTIFICATE_PASSWORD}"
+            "${API_KEY_BASE64}"
+            "${API_KEY_ID}"
+            "${API_ISSUER_ID}"
+          )
+          CONFIGURED=0
+          for VALUE in "${VALUES[@]}"; do
+            if [[ -n "${VALUE}" ]]; then
+              CONFIGURED=$((CONFIGURED + 1))
+            fi
+          done
+
+          if [[ "${CONFIGURED}" -eq 0 ]]; then
+            echo "RELEASE_MODE=unnotarized" >> "${GITHUB_ENV}"
+            echo "JOY_HARNESS_SIGNING_IDENTITY=-" >> "${GITHUB_ENV}"
+          elif [[ "${CONFIGURED}" -ne "${#VALUES[@]}" ]]; then
+            echo "Signing/notarization secrets are only partially configured." >&2
+            exit 1
+          else
+            echo "RELEASE_MODE=notarized" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Run tests
+        run: |
+          swift test
+          python3 -m unittest discover -s tests -v
+
+      - name: Import Developer ID certificate
+        if: env.RELEASE_MODE == 'notarized'
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERTIFICATE_PATH="${RUNNER_TEMP}/developer-id.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/release-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "${CERTIFICATE_BASE64}" | base64 --decode -o "${CERTIFICATE_PATH}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERTIFICATE_PATH}" \
+            -P "${CERTIFICATE_PASSWORD}" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "${KEYCHAIN_PATH}"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "${KEYCHAIN_PASSWORD}" \
+            "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}"
+
+          SIGNING_IDENTITY="$({
+            security find-identity -v -p codesigning "${KEYCHAIN_PATH}" \
+              | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p'
+          } | head -n 1)"
+          if [[ -z "${SIGNING_IDENTITY}" ]]; then
+            echo "No Developer ID Application identity was imported." >&2
+            exit 1
+          fi
+          echo "JOY_HARNESS_SIGNING_IDENTITY=${SIGNING_IDENTITY}" >> "${GITHUB_ENV}"
+
+      - name: Build DMG
+        run: bash scripts/package_dmg.sh "${VERSION}"
+
+      - name: Notarize and staple DMG
+        if: env.RELEASE_MODE == 'notarized'
+        env:
+          API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          API_KEY_PATH="${RUNNER_TEMP}/AuthKey_${API_KEY_ID}.p8"
+          printf '%s' "${API_KEY_BASE64}" | base64 --decode -o "${API_KEY_PATH}"
+
+          xcrun notarytool submit "${DMG_PATH}" \
+            --key "${API_KEY_PATH}" \
+            --key-id "${API_KEY_ID}" \
+            --issuer "${API_ISSUER_ID}" \
+            --wait
+          xcrun stapler staple "${DMG_PATH}"
+          xcrun stapler validate "${DMG_PATH}"
+          spctl --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=4 \
+            "${DMG_PATH}"
+
+          (
+            cd "$(dirname "${DMG_PATH}")"
+            shasum -a 256 "${DMG_NAME}" > "${DMG_NAME}.sha256"
+          )
+
+      - name: Verify release assets
+        run: |
+          set -euo pipefail
+          hdiutil verify "${DMG_PATH}"
+          (
+            cd "$(dirname "${DMG_PATH}")"
+            shasum -a 256 -c "${DMG_NAME}.sha256"
+          )
+
+      - name: Write release notes
+        run: |
+          if [[ "${RELEASE_MODE}" == "notarized" ]]; then
+            SIGNING_NOTE="This build is signed with Developer ID Application and notarized by Apple."
+          else
+            SIGNING_NOTE="This build is not notarized. macOS may require approval in System Settings > Privacy & Security before first launch."
+          fi
+
+          cat > "${RUNNER_TEMP}/release-notes.md" <<EOF
+          Joy Harness ${TAG} for Apple Silicon Macs running macOS 13.0 or later.
+
+          ## Install
+
+          1. Download ${DMG_NAME} and its .sha256 file.
+          2. Open the DMG and drag Joy Harness.app to Applications.
+          3. Use the checksum file to verify the download when needed.
+
+          ${SIGNING_NOTE}
+
+          The DMG contains the desktop app. Install from source with task install when Codex hooks, login startup, notify bridge, and the local CLI are also required.
+          EOF
+
+      - name: Create draft release and upload assets
+        env:
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          PRERELEASE_ARGS=()
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            PRERELEASE_ARGS+=(--prerelease)
+          fi
+
+          gh release create "${TAG}" \
+            "${DMG_PATH}#Joy Harness ${TAG} for macOS arm64" \
+            "${CHECKSUM_PATH}#SHA-256 checksum" \
+            --target "${GITHUB_SHA}" \
+            --draft \
+            --title "Joy Harness ${TAG}" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            "${PRERELEASE_ARGS[@]}"
+
+      - name: Publish release
+        env:
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            gh release edit "${TAG}" --draft=false --latest=false
+          else
+            gh release edit "${TAG}" --draft=false --latest
+          fi
