@@ -8,7 +8,10 @@ struct JoyHarnessApp: App {
 
     var body: some Scene {
         WindowGroup("Joy Harness", id: "main") {
-            DashboardView(store: appDelegate.runtime.dashboard)
+            DashboardView(
+                store: appDelegate.runtime.dashboard,
+                mappingStore: appDelegate.runtime.mappings
+            )
                 .frame(minWidth: 980, minHeight: 680)
         }
         .defaultSize(width: 1240, height: 820)
@@ -25,6 +28,10 @@ struct JoyHarnessApp: App {
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
+        }
+
+        Settings {
+            ControllerMappingSettingsView(store: appDelegate.runtime.mappings)
         }
     }
 }
@@ -47,12 +54,13 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 final class JoyHarnessRuntime {
     let dashboard: DashboardStore
+    let mappings: ControllerMappingStore
 
     private let home: String
     private let statusURL: URL
     private let socketPath: String
     private let haptics = HapticEngine()
-    private let buttons = ButtonBridge()
+    private let buttons: ButtonBridge
     private let mouse = MouseBridge()
     private let rp2040 = RP2040Bridge()
     private var current: PadState = .idle
@@ -68,6 +76,9 @@ final class JoyHarnessRuntime {
         self.statusURL = URL(fileURLWithPath: "\(home)/.agent-deck/status.json")
         self.socketPath = ProcessInfo.processInfo.environment["AGENT_DECK_SOCK"]
             ?? "\(home)/.agent-deck/pad.sock"
+        let mappings = ControllerMappingStore()
+        self.mappings = mappings
+        self.buttons = ButtonBridge(mappingProvider: { mappings.action(for: $0) })
         self.dashboard = DashboardStore(statusURL: statusURL)
         self.dashboard.onAction = { [weak self] action in
             self?.perform(action) ?? false

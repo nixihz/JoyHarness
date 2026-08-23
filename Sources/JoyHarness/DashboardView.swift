@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @ObservedObject var store: DashboardStore
+    @ObservedObject var mappingStore: ControllerMappingStore
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,7 +13,7 @@ struct DashboardView: View {
 
                 Divider()
 
-                TaskDetail(store: store)
+                TaskDetail(store: store, mappingStore: mappingStore)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
@@ -123,6 +124,7 @@ private struct SlotRow: View {
 
 private struct TaskDetail: View {
     @ObservedObject var store: DashboardStore
+    @ObservedObject var mappingStore: ControllerMappingStore
 
     private var status: DashboardStatus { store.status }
     private var slot: DashboardSlot? { status.selected }
@@ -152,7 +154,7 @@ private struct TaskDetail: View {
 
             Divider()
 
-            ControllerMap()
+            ControllerMap(mappingStore: mappingStore)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(22)
         }
@@ -230,12 +232,30 @@ private struct CommandButtons: View {
 }
 
 private struct ControllerMap: View {
+    @ObservedObject var mappingStore: ControllerMappingStore
+
     var body: some View {
         VStack(spacing: 16) {
             HStack {
                 Label("控制映射", systemImage: "gamecontroller.fill")
                     .font(.headline)
                 Spacer()
+                if #available(macOS 14.0, *) {
+                    SettingsLink {
+                        Label("自定义按键", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("打开按键映射设置")
+                } else {
+                    Button {
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    } label: {
+                        Label("自定义按键", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("打开按键映射设置")
+                }
+
                 Text("Xbox / Codex Micro")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
@@ -243,13 +263,14 @@ private struct ControllerMap: View {
 
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 12) {
-                    MappingLabel(key: "LT + D-Pad", title: "槽位 1–4")
-                    MappingLabel(key: "LT + LB/RB", title: "槽位 5 / 6")
-                    MappingLabel(key: "LB / RB", title: "前 / 后槽位")
-                    MappingLabel(key: "Menu", title: "按住说话")
-                    MappingLabel(key: "D-Pad", title: "径向输入")
-                    MappingLabel(key: "LT + 左摇杆", title: "二维滚动")
-                    MappingLabel(key: "L3", title: "鼠标加速")
+                    MappingLabel(key: "LT + ↑", title: title(for: .functionDpadUp))
+                    MappingLabel(key: "LT + ←", title: title(for: .functionDpadLeft))
+                    MappingLabel(key: "LB", title: title(for: .leftShoulder))
+                    MappingLabel(key: "RB", title: title(for: .rightShoulder))
+                    MappingLabel(key: "Menu", title: title(for: .menu))
+                    MappingLabel(key: "D-Pad", title: dpadSummary)
+                    MappingLabel(key: "LT", title: title(for: .leftTrigger))
+                    MappingLabel(key: "L3", title: title(for: .leftThumbstickButton))
                 }
                 .frame(width: 176, alignment: .leading)
 
@@ -267,12 +288,14 @@ private struct ControllerMap: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    MappingLabel(key: "A / B", title: "左键 / 右键")
-                    MappingLabel(key: "X / Y", title: "退格 / Esc")
-                    MappingLabel(key: "LT + A/B", title: "批准 / 拒绝")
-                    MappingLabel(key: "LT + X/Y", title: "快捷 / 拆分")
-                    MappingLabel(key: "RT", title: "提交")
-                    MappingLabel(key: "R3", title: "鼠标中键")
+                    MappingLabel(key: "A", title: title(for: .buttonA))
+                    MappingLabel(key: "B", title: title(for: .buttonB))
+                    MappingLabel(key: "X", title: title(for: .buttonX))
+                    MappingLabel(key: "Y", title: title(for: .buttonY))
+                    MappingLabel(key: "LT + A", title: title(for: .functionButtonA))
+                    MappingLabel(key: "LT + B", title: title(for: .functionButtonB))
+                    MappingLabel(key: "RT", title: title(for: .rightTrigger))
+                    MappingLabel(key: "R3", title: title(for: .rightThumbstickButton))
                 }
                 .frame(width: 132, alignment: .leading)
             }
@@ -301,6 +324,20 @@ private struct ControllerMap: View {
         )
         guard let url else { return nil }
         return NSImage(contentsOf: url)
+    }
+
+    private func title(for input: ControllerInput) -> String {
+        mappingStore.action(for: input).displayName
+    }
+
+    private var dpadSummary: String {
+        let actions = [
+            mappingStore.action(for: .dpadUp),
+            mappingStore.action(for: .dpadLeft),
+            mappingStore.action(for: .dpadDown),
+            mappingStore.action(for: .dpadRight),
+        ]
+        return Set(actions).count == 1 ? actions[0].displayName : "自定义"
     }
 }
 

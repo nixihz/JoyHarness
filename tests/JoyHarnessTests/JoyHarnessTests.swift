@@ -83,6 +83,42 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func functionModifiedDPadSelectsSlotsCounterclockwise() {
+        #expect(ButtonBridge.slot(for: .up) == 0)
+        #expect(ButtonBridge.slot(for: .left) == 1)
+        #expect(ButtonBridge.slot(for: .down) == 2)
+        #expect(ButtonBridge.slot(for: .right) == 3)
+    }
+
+    @Test
+    func defaultMappingsPreserveExistingControllerBehavior() {
+        let store = ControllerMappingStore()
+        #expect(store.action(for: .buttonA).controllerAction == .mouseButton(.left))
+        #expect(store.action(for: .buttonB).controllerAction == .mouseButton(.right))
+        #expect(store.action(for: .leftTrigger) == .functionModifier)
+        #expect(store.action(for: .functionButtonA).controllerAction == .microKey("ACT07"))
+        #expect(store.action(for: .functionDpadUp).controllerAction == .selectSlot(0))
+        #expect(store.action(for: .functionDpadLeft).controllerAction == .selectSlot(1))
+        #expect(store.action(for: .functionDpadDown).controllerAction == .selectSlot(2))
+        #expect(store.action(for: .functionDpadRight).controllerAction == .selectSlot(3))
+    }
+
+    @Test
+    func customMappingPersistsAndCanBeReset() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setAction(.quickAction, for: .buttonA)
+
+        let reloaded = ControllerMappingStore(userDefaults: defaults)
+        #expect(reloaded.action(for: .buttonA) == .quickAction)
+        reloaded.resetDefaults()
+        #expect(reloaded.action(for: .buttonA) == .mouseLeft)
+    }
+
+    @Test
     func rightStickUsesScreenOrientedRadialAngles() {
         #expect(abs(ButtonBridge.radialAngle(x: 1, y: 0) - 0) < 0.000_001)
         #expect(abs(ButtonBridge.radialAngle(x: 0, y: -1) - 0.25) < 0.000_001)

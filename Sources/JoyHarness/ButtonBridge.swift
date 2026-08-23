@@ -19,18 +19,27 @@ enum FaceButton {
     case y
 }
 
-enum ControllerAction: Equatable {
+enum DPadDirection {
+    case up
+    case left
+    case down
+    case right
+}
+
+enum ControllerAction: Hashable {
     case mouseButton(MouseButton)
     case systemKey(SystemKey)
     case microKey(String)
+    case slotOffset(Int)
+    case selectSlot(Int)
+    case mouseSpeedBoost
 }
 
 final class ButtonBridge {
     private weak var controller: GCController?
     private var pressedButtons: Set<ObjectIdentifier> = []
-    private var activeKeys: [ObjectIdentifier: String] = [:]
-    private var pressedSlotControls: Set<ObjectIdentifier> = []
     private var activeControllerActions: [ObjectIdentifier: ControllerAction] = [:]
+    private var activeActionCounts: [ControllerAction: Int] = [:]
     private var functionPressed = false
     private var lastJoystick: (angle: Float, distance: Float)?
     private var mouseSpeedBoostPressed = false
@@ -43,6 +52,13 @@ final class ButtonBridge {
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
     var mouseSpeedBoostHandler: ((Bool) -> Void)?
     var onSlotSelected: ((Int) -> Void)?
+    var mappingProvider: (ControllerInput) -> ControllerMappedAction
+
+    init(mappingProvider: @escaping (ControllerInput) -> ControllerMappedAction = {
+        ControllerMappingStore.defaultMappings[$0] ?? .disabled
+    }) {
+        self.mappingProvider = mappingProvider
+    }
 
     func start() {
         GCController.shouldMonitorBackgroundEvents = true
@@ -97,50 +113,64 @@ final class ButtonBridge {
 
     private func handle(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
         if changedElement === gamepad.leftTrigger {
-            functionPressed = gamepad.leftTrigger.value >= 0.55
+            if mappingProvider(.leftTrigger) == .functionModifier {
+                functionPressed = gamepad.leftTrigger.value >= 0.55
+                if !gamepad.leftTrigger.isPressed { release(gamepad.leftTrigger) }
+            } else {
+                functionPressed = false
+                handleMappedButton(gamepad.leftTrigger, input: .leftTrigger)
+            }
         }
         leftStickHandler?(
             gamepad.leftThumbstick.xAxis.value,
             gamepad.leftThumbstick.yAxis.value,
             functionPressed
         )
-        updateModifiedSlotSelection(gamepad)
         updateJoystick(gamepad)
+        updateDPadButtons(gamepad)
         if changedElement === gamepad.leftTrigger { return }
 
-        let faceButtons: [(GCControllerButtonInput, FaceButton)] = [
-            (gamepad.buttonA, .a),
-            (gamepad.buttonB, .b),
-            (gamepad.buttonX, .x),
-            (gamepad.buttonY, .y),
+        let faceButtons: [(GCControllerButtonInput, ControllerInput, ControllerInput)] = [
+            (gamepad.buttonA, .buttonA, .functionButtonA),
+            (gamepad.buttonB, .buttonB, .functionButtonB),
+            (gamepad.buttonX, .buttonX, .functionButtonX),
+            (gamepad.buttonY, .buttonY, .functionButtonY),
         ]
-        for (button, faceButton) in faceButtons where changedElement === button {
-            handleControllerAction(
-                button,
-                action: Self.faceAction(for: faceButton, functionPressed: functionPressed)
-            )
+        for (button, primaryInput, functionInput) in faceButtons where changedElement === button {
+            handleMappedButton(button, input: functionPressed ? functionInput : primaryInput)
             return
         }
 
-        let slotStepButtons: [(GCControllerButtonInput, Int)] = [
-            (gamepad.leftShoulder, -1),
-            (gamepad.rightShoulder, 1),
+        let shoulderButtons: [(GCControllerButtonInput, ControllerInput, ControllerInput)] = [
+            (gamepad.leftShoulder, .leftShoulder, .functionLeftShoulder),
+            (gamepad.rightShoulder, .rightShoulder, .functionRightShoulder),
         ]
-        for (button, offset) in slotStepButtons where changedElement === button {
-            if !functionPressed { handleSlotStepButton(button, offset: offset) }
+        for (button, primaryInput, functionInput) in shoulderButtons where changedElement === button {
+            handleMappedButton(button, input: functionPressed ? functionInput : primaryInput)
             return
         }
 
         if changedElement === gamepad.buttonMenu {
-            handleKeyButton(gamepad.buttonMenu, key: "ACT10")
+            handleMappedButton(gamepad.buttonMenu, input: .menu)
+        } else if let button = gamepad.buttonOptions, changedElement === button {
+            handleMappedButton(button, input: .options)
+        } else if let button = gamepad.buttonHome, changedElement === button {
+            handleMappedButton(button, input: .home)
         } else if changedElement === gamepad.rightTrigger {
-            handleKeyButton(gamepad.rightTrigger, key: "ACT12")
+            handleMappedButton(gamepad.rightTrigger, input: .rightTrigger)
         } else if let button = gamepad.leftThumbstickButton, changedElement === button {
-            mouseSpeedBoostPressed = button.isPressed
-            mouseSpeedBoostHandler?(mouseSpeedBoostPressed)
+            handleMappedButton(button, input: .leftThumbstickButton)
         } else if let button = gamepad.rightThumbstickButton, changedElement === button {
-            handleControllerAction(button, action: .mouseButton(.middle))
+            handleMappedButton(button, input: .rightThumbstickButton)
         }
+    }
+
+    private func handleMappedButton(_ button: GCControllerButtonInput, input: ControllerInput) {
+        guard let action = mappingProvider(input).controllerAction else {
+            if !button.isPressed { release(button) }
+            return
+        }
+        handleControllerAction(button, action: action)
     }
 
     static func faceAction(for button: FaceButton, functionPressed: Bool) -> ControllerAction {
@@ -157,6 +187,15 @@ final class ButtonBridge {
         case .b: return .mouseButton(.right)
         case .x: return .systemKey(.backspace)
         case .y: return .systemKey(.escape)
+        }
+    }
+
+    static func slot(for direction: DPadDirection) -> Int {
+        switch direction {
+        case .up: return 0
+        case .left: return 1
+        case .down: return 2
+        case .right: return 3
         }
     }
 
@@ -178,19 +217,50 @@ final class ButtonBridge {
     }
 
     private func begin(_ action: ControllerAction) -> Bool {
+        if let count = activeActionCounts[action] {
+            activeActionCounts[action] = count + 1
+            return true
+        }
+
+        let succeeded: Bool
         switch action {
         case .mouseButton(let button):
             mouseButtonHandler?(button, true)
-            return true
+            succeeded = true
         case .systemKey(let key):
             systemKeyHandler?(key, true)
-            return true
+            succeeded = true
         case .microKey(let key):
-            return keyHandler?(key, 1) == true
+            succeeded = keyHandler?(key, 1) == true
+        case .slotOffset(let offset):
+            moveSlot(offset)
+            return true
+        case .selectSlot(let slot):
+            selectSlot(slot)
+            return true
+        case .mouseSpeedBoost:
+            mouseSpeedBoostPressed = true
+            mouseSpeedBoostHandler?(true)
+            succeeded = true
         }
+        if succeeded { activeActionCounts[action] = 1 }
+        return succeeded
     }
 
     private func end(_ action: ControllerAction) {
+        switch action {
+        case .slotOffset, .selectSlot:
+            return
+        default:
+            break
+        }
+        guard let count = activeActionCounts[action] else { return }
+        if count > 1 {
+            activeActionCounts[action] = count - 1
+            return
+        }
+        activeActionCounts.removeValue(forKey: action)
+
         switch action {
         case .mouseButton(let button):
             mouseButtonHandler?(button, false)
@@ -198,29 +268,11 @@ final class ButtonBridge {
             systemKeyHandler?(key, false)
         case .microKey(let key):
             _ = keyHandler?(key, 0)
-        }
-    }
-
-    private func handleSlotStepButton(_ button: GCControllerButtonInput, offset: Int) {
-        let id = ObjectIdentifier(button)
-        if button.isPressed {
-            guard pressedButtons.insert(id).inserted else { return }
-            selectedSlot = (selectedSlot + offset + 6) % 6
-            onSlotSelected?(selectedSlot)
-            let key = agentKey(for: selectedSlot)
-            if keyHandler?(key, 1) == true { activeKeys[id] = key }
-        } else {
-            release(button)
-        }
-    }
-
-    private func handleKeyButton(_ button: GCControllerButtonInput, key: String) {
-        let id = ObjectIdentifier(button)
-        if button.isPressed {
-            guard pressedButtons.insert(id).inserted else { return }
-            if keyHandler?(key, 1) == true { activeKeys[id] = key }
-        } else {
-            release(button)
+        case .slotOffset, .selectSlot:
+            break
+        case .mouseSpeedBoost:
+            mouseSpeedBoostPressed = false
+            mouseSpeedBoostHandler?(false)
         }
     }
 
@@ -229,9 +281,6 @@ final class ButtonBridge {
         pressedButtons.remove(id)
         if let action = activeControllerActions.removeValue(forKey: id) {
             end(action)
-        }
-        if let key = activeKeys.removeValue(forKey: id) {
-            _ = keyHandler?(key, 0)
         }
     }
 
@@ -253,34 +302,35 @@ final class ButtonBridge {
         }
     }
 
-    private func updateModifiedSlotSelection(_ gamepad: GCExtendedGamepad) {
-        guard functionPressed else {
-            pressedSlotControls.removeAll()
-            return
-        }
-
-        let slotControls: [(GCControllerButtonInput, Int)] = [
-            (gamepad.dpad.up, 0),
-            (gamepad.dpad.down, 1),
-            (gamepad.dpad.left, 2),
-            (gamepad.dpad.right, 3),
-            (gamepad.leftShoulder, 4),
-            (gamepad.rightShoulder, 5),
+    private func updateDPadButtons(_ gamepad: GCExtendedGamepad) {
+        let buttons: [(GCControllerButtonInput, ControllerInput, ControllerInput)] = [
+            (gamepad.dpad.up, .dpadUp, .functionDpadUp),
+            (gamepad.dpad.left, .dpadLeft, .functionDpadLeft),
+            (gamepad.dpad.down, .dpadDown, .functionDpadDown),
+            (gamepad.dpad.right, .dpadRight, .functionDpadRight),
         ]
-        for (button, slot) in slotControls {
-            let id = ObjectIdentifier(button)
-            if button.isPressed {
-                guard pressedSlotControls.insert(id).inserted else { continue }
-                selectSlot(slot)
-            } else {
-                pressedSlotControls.remove(id)
-            }
+        for (button, primaryInput, functionInput) in buttons {
+            handleMappedButton(button, input: functionPressed ? functionInput : primaryInput)
         }
     }
 
     private func updateJoystick(_ gamepad: GCExtendedGamepad) {
-        let dpadX = gamepad.dpad.xAxis.value
-        let dpadY = gamepad.dpad.yAxis.value
+        let rawDpadX = gamepad.dpad.xAxis.value
+        let rawDpadY = gamepad.dpad.yAxis.value
+        let dpadX: Float = if rawDpadX > 0.1 && mappingProvider(.dpadRight) == .radialInput {
+            rawDpadX
+        } else if rawDpadX < -0.1 && mappingProvider(.dpadLeft) == .radialInput {
+            rawDpadX
+        } else {
+            0
+        }
+        let dpadY: Float = if rawDpadY > 0.1 && mappingProvider(.dpadUp) == .radialInput {
+            rawDpadY
+        } else if rawDpadY < -0.1 && mappingProvider(.dpadDown) == .radialInput {
+            rawDpadY
+        } else {
+            0
+        }
         let x = !functionPressed && abs(dpadX) > 0.1
             ? dpadX : gamepad.rightThumbstick.xAxis.value
         let y = !functionPressed && abs(dpadY) > 0.1
@@ -301,13 +351,11 @@ final class ButtonBridge {
     }
 
     private func resetInputState() {
-        for key in activeKeys.values { _ = keyHandler?(key, 0) }
         for action in activeControllerActions.values { end(action) }
         if mouseSpeedBoostPressed { mouseSpeedBoostHandler?(false) }
         pressedButtons.removeAll()
-        activeKeys.removeAll()
         activeControllerActions.removeAll()
-        pressedSlotControls.removeAll()
+        activeActionCounts.removeAll()
         functionPressed = false
         lastJoystick = nil
         mouseSpeedBoostPressed = false
