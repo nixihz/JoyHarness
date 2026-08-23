@@ -211,12 +211,12 @@ private struct CommandButtons: View {
             .help(L10n.text("拒绝当前待处理请求", "Deny the current pending request"))
 
             Button {
-                store.perform(.quickAction)
+                store.perform(.toggleFastMode)
             } label: {
-                Label(L10n.text("快捷操作", "Quick Action"), systemImage: "bolt.fill")
+                Label(L10n.text("Fast 模式", "Fast Mode"), systemImage: "forward.fill")
             }
             .dashboardSecondaryButtonStyle()
-            .help(L10n.text("触发 Codex Micro 快捷操作", "Trigger the Codex Micro quick action"))
+            .help(L10n.text("切换 Fast 模式", "Toggle Fast Mode"))
 
             Button {
                 store.perform(.openThread)

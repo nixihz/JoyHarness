@@ -152,7 +152,7 @@ final class JoyHarnessRuntime {
             return tapMicroKey("ACT07")
         case .deny:
             return tapMicroKey("ACT08")
-        case .quickAction:
+        case .toggleFastMode:
             return tapMicroKey("ACT06")
         case .openThread:
             guard rp2040.isConnected else { return false }

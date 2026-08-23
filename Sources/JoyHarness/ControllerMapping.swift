@@ -127,7 +127,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case answerNo
     case approve
     case deny
-    case quickAction
+    case toggleFastMode = "quickAction"
     case splitThread
     case pushToTalk
     case focusCodex
@@ -158,7 +158,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .answerNo: L10n.text("输入 no", "Type no")
         case .approve: L10n.text("批准", "Approve")
         case .deny: L10n.text("拒绝", "Deny")
-        case .quickAction: L10n.text("快捷操作", "Quick Action")
+        case .toggleFastMode: L10n.text("切换 Fast 模式", "Toggle Fast Mode")
         case .splitThread: L10n.text("拆分任务", "Split Task")
         case .pushToTalk: L10n.text("按住说话", "Push to Talk")
         case .focusCodex: L10n.text("聚焦 Codex", "Focus Codex")
@@ -187,7 +187,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .answerNo: .textInput("no")
         case .approve: .microKey("ACT07")
         case .deny: .microKey("ACT08")
-        case .quickAction: .microKey("ACT06")
+        case .toggleFastMode: .microKey("ACT06")
         case .splitThread: .microKey("ACT09")
         case .pushToTalk: .microKey("ACT10")
         case .focusCodex: .microKey("ACT12")
@@ -308,7 +308,7 @@ final class ControllerMappingStore: ObservableObject {
         guard !userDefaults.bool(forKey: migrationKey) else { return }
         if mappings[.functionButtonA] == .approve,
            mappings[.functionButtonB] == .deny,
-           mappings[.functionButtonX] == .quickAction,
+           mappings[.functionButtonX] == .toggleFastMode,
            mappings[.functionButtonY] == .splitThread {
             let defaults = Self.defaultMappings(for: controllerFamily)
             for input in [

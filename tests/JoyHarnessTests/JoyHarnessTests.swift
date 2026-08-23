@@ -246,7 +246,7 @@ struct JoyHarnessTests {
                 ControllerInput.buttonA.rawValue: ControllerMappedAction.mouseMiddle.rawValue,
                 ControllerInput.functionButtonA.rawValue: ControllerMappedAction.approve.rawValue,
                 ControllerInput.functionButtonB.rawValue: ControllerMappedAction.deny.rawValue,
-                ControllerInput.functionButtonX.rawValue: ControllerMappedAction.quickAction.rawValue,
+                ControllerInput.functionButtonX.rawValue: ControllerMappedAction.toggleFastMode.rawValue,
                 ControllerInput.functionButtonY.rawValue: ControllerMappedAction.splitThread.rawValue,
             ],
             forKey: "controllerMappings.v1"
@@ -291,10 +291,10 @@ struct JoyHarnessTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let store = ControllerMappingStore(userDefaults: defaults)
-        store.setAction(.quickAction, for: .buttonA)
+        store.setAction(.toggleFastMode, for: .buttonA)
 
         let reloaded = ControllerMappingStore(userDefaults: defaults)
-        #expect(reloaded.action(for: .buttonA) == .quickAction)
+        #expect(reloaded.action(for: .buttonA) == .toggleFastMode)
         reloaded.resetDefaults()
         #expect(reloaded.action(for: .buttonA) == .mouseLeft)
     }

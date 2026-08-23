@@ -6,7 +6,7 @@ enum DashboardAction: Equatable {
     case selectSlot(Int)
     case approve
     case deny
-    case quickAction
+    case toggleFastMode
     case openThread
     case testState(PadState)
 }
@@ -161,7 +161,7 @@ final class DashboardStore: ObservableObject {
             return "\(L10n.text("已切换到槽位", "Switched to slot")) \(index + 1)"
         case .approve: return L10n.text("已发送批准", "Approval sent")
         case .deny: return L10n.text("已发送拒绝", "Denial sent")
-        case .quickAction: return L10n.text("已发送快捷操作", "Quick action sent")
+        case .toggleFastMode: return L10n.text("已切换 Fast 模式", "Fast Mode toggled")
         case .openThread: return L10n.text("正在打开任务", "Opening task")
         case .testState(let state):
             return L10n.text("已测试 \(state.displayName) 反馈", "Tested \(state.displayName) feedback")
