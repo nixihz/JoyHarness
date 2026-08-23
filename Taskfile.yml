@@ -22,7 +22,7 @@ tasks:
       - bash scripts/flash_rp2040_firmware.sh
 
   test:
-    desc: Test the Swift bridge and Codex hook integration
+    desc: Test the Swift bridge and installation migrations
     cmds:
       - swift test
       - python3 -m unittest discover -s tests -v
@@ -38,7 +38,7 @@ tasks:
       - python3 bin/joy-harness-send {{.CLI_ARGS}}
 
   install:
-    desc: Build, install LaunchAgent, wire Codex hooks/notify
+    desc: Build and install the Joy Harness LaunchAgent
     cmds:
       - bash scripts/install.sh
 

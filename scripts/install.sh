@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Joy Harness: build daemon, wire ~/.codex hooks and notify fan-out.
+# Install Joy Harness and remove obsolete Codex hook/notify integration.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,12 +18,9 @@ LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
 PLIST="${LAUNCH_AGENTS}/tech.joyharness.daemon.plist"
 LEGACY_AGENTDECK_PLIST="${LAUNCH_AGENTS}/tech.agentdeck.daemon.plist"
 LEGACY_CODEXPAD_PLIST="${LAUNCH_AGENTS}/tech.codexpad.daemon.plist"
-HOOKS_DST="${HOME}/.codex/hooks.json"
 SEND="${ROOT}/bin/joy-harness-send"
-BRIDGE="${BIN_DIR}/hook_bridge.py"
-FANOUT="${BIN_DIR}/notify_fanout.py"
 
-mkdir -p "${HOME}/.agent-deck" "${BIN_DIR}" "${HOME}/.codex" "${LAUNCH_AGENTS}"
+mkdir -p "${HOME}/.agent-deck" "${BIN_DIR}" "${LAUNCH_AGENTS}"
 mkdir -p "${STAGED_CONTENTS}/MacOS" "${STAGED_CONTENTS}/Resources"
 
 echo "==> Building Joy Harness"
@@ -77,129 +74,177 @@ fi
 ln -sfn "${APP_EXE}" "${BIN_DIR}/AgentDeck"
 install -m 755 "${SEND}" "${BIN_DIR}/joy-harness-send"
 ln -sfn "${BIN_DIR}/joy-harness-send" "${BIN_DIR}/agent-deck-send"
-install -m 755 "${ROOT}/codex-hooks/hook_bridge.py" "${BRIDGE}"
-install -m 755 "${ROOT}/codex-hooks/notify_fanout.py" "${FANOUT}"
 mkdir -p "${HOME}/.local/bin"
 ln -sfn "${BIN_DIR}/joy-harness-send" "${HOME}/.local/bin/joy-harness-send" 2>/dev/null || true
 ln -sfn "${BIN_DIR}/joy-harness-send" "${HOME}/.local/bin/agent-deck-send" 2>/dev/null || true
 
-# hooks.json
-python3 - <<'PY' "${ROOT}" "${HOOKS_DST}" "${BRIDGE}"
-import json, sys
+# Remove the lifecycle integration installed by older Joy Harness versions.
+python3 - <<'PY'
+import json
+import re
 from pathlib import Path
-root, dst, bridge = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
-tpl = (root / "codex-hooks" / "hooks.template.json").read_text(encoding="utf-8")
-tpl = tpl.replace("__BRIDGE__", str(bridge))
-new_hooks = json.loads(tpl)
+home = Path.home()
+hooks_path = home / ".codex" / "hooks.json"
+cfg = Path.home() / ".codex" / "config.toml"
+chain_path = home / ".agent-deck" / "notify-chain.json"
+legacy_chain_path = home / ".codex-pad" / "notify-chain.json"
+legacy_descriptions = {
+    "Xbox / gamepad haptic bridge for Codex runtime states (Codex-Pad).",
+    "Xbox / gamepad haptic bridge for Codex runtime states (Joy Harness).",
+    "Minimal Codex runtime state bridge for Joy Harness.",
+}
+removed_hooks_source = False
 
-if dst.exists():
-    existing = json.loads(dst.read_text(encoding="utf-8"))
-    # Backup once
-    bak = dst.with_suffix(".json.bak-agentdeck")
-    if not bak.exists():
-        bak.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    merged = existing if isinstance(existing, dict) else {"hooks": {}}
-    hooks = merged.setdefault("hooks", {})
-    for event, groups in new_hooks.get("hooks", {}).items():
-        # Replace only our bridge hooks; keep others
-        kept = []
+def backup_config():
+    backup = cfg.with_suffix(".toml.bak-joyharness-removal")
+    if not backup.exists():
+        backup.write_text(cfg.read_text(encoding="utf-8"), encoding="utf-8")
+
+if hooks_path.exists():
+    original_hooks = hooks_path.read_text(encoding="utf-8")
+    data = json.loads(original_hooks)
+    hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
+    changed = False
+    for event in list(hooks):
+        kept_groups = []
         for group in hooks.get(event, []):
             handlers = [
-                h for h in group.get("hooks", [])
-                if "hook_bridge.py" not in str(h.get("command", ""))
+                handler for handler in group.get("hooks", [])
+                if "hook_bridge.py" not in str(handler.get("command", ""))
             ]
             if handlers:
-                g = dict(group)
-                g["hooks"] = handlers
-                kept.append(g)
-        hooks[event] = kept + groups
-    if "description" not in merged:
-        merged["description"] = new_hooks.get("description", "")
-    dst.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"merged hooks → {dst}")
-else:
-    dst.write_text(json.dumps(new_hooks, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"wrote hooks → {dst}")
-PY
+                kept_group = dict(group)
+                kept_group["hooks"] = handlers
+                kept_groups.append(kept_group)
+            if len(handlers) != len(group.get("hooks", [])):
+                changed = True
+        if kept_groups:
+            hooks[event] = kept_groups
+        else:
+            hooks.pop(event, None)
+    if changed:
+        removed_hooks_source = True
+        backup = hooks_path.with_suffix(".json.bak-joyharness-removal")
+        if not backup.exists():
+            backup.write_text(original_hooks, encoding="utf-8")
+        if data.get("description") in legacy_descriptions:
+            data.pop("description", None)
+        if hooks:
+            data["hooks"] = hooks
+        else:
+            data.pop("hooks", None)
+        if data:
+            hooks_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        else:
+            hooks_path.unlink()
+        print(f"removed obsolete Joy Harness hooks from {hooks_path}")
 
-# notify fan-out (preserve existing notify)
-python3 - <<PY
-import json, re
-from pathlib import Path
+legacy_chain = []
+chain_source = chain_path if chain_path.exists() else legacy_chain_path
+if chain_source.exists():
+    legacy_chain = json.loads(chain_source.read_text(encoding="utf-8"))
+    if not isinstance(legacy_chain, list):
+        raise SystemExit(f"cannot restore invalid notify chain from {chain_source}")
 
-cfg = Path.home() / ".codex" / "config.toml"
-fanout = Path("${FANOUT}")
-chain_path = Path.home() / ".agent-deck" / "notify-chain.json"
-legacy_chain_path = Path.home() / ".codex-pad" / "notify-chain.json"
+def remove_fanout(command):
+    if not isinstance(command, list):
+        return command
+    if any(
+        isinstance(item, str) and item.endswith("notify_fanout.py")
+        for item in command
+    ):
+        return legacy_chain
+    cleaned = []
+    index = 0
+    while index < len(command):
+        item = command[index]
+        if item == "--previous-notify" and index + 1 < len(command):
+            encoded = command[index + 1]
+            try:
+                nested = json.loads(encoded)
+            except (TypeError, json.JSONDecodeError):
+                cleaned.extend([item, encoded])
+            else:
+                restored = remove_fanout(nested)
+                if restored:
+                    cleaned.extend([
+                        item,
+                        json.dumps(restored, separators=(",", ":")),
+                    ])
+            index += 2
+            continue
+        cleaned.append(item)
+        index += 1
+    return cleaned
 
-if not chain_path.exists() and legacy_chain_path.exists():
-    chain_path.write_text(legacy_chain_path.read_text(encoding="utf-8"), encoding="utf-8")
-    print(f"migrated previous notify chain → {chain_path}")
-
-text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
-# Codex documents notify as a single-line string array. Parse the whole line so
-# JSON embedded in an argument cannot terminate the match at its inner ']'.
-lines = text.splitlines(keepends=True)
-notify_indexes = [
-    index for index, line in enumerate(lines)
-    if re.match(r"^notify\s*=", line)
-]
-existing = []
-primary_index = notify_indexes[0] if notify_indexes else None
-if primary_index is not None:
-    raw = lines[primary_index].split("=", 1)[1].strip()
-    try:
-        existing = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"cannot parse existing notify config: {exc}")
-
-def migrate_fanout(value):
-    if isinstance(value, list):
-        migrated = [migrate_fanout(item) for item in value]
-        return migrated
-    if not isinstance(value, str) or "notify_fanout.py" not in value:
-        return value
-    if value.endswith("notify_fanout.py") and not value.lstrip().startswith("["):
-        return str(fanout)
-    try:
-        nested = json.loads(value)
-    except json.JSONDecodeError:
-        return value
-    return json.dumps(migrate_fanout(nested), separators=(",", ":"))
-
-migrated = migrate_fanout(existing)
-already = any("notify_fanout.py" in str(x) for x in migrated)
-if already:
-    if migrated != existing or len(notify_indexes) > 1:
-        new_line = f"notify = {json.dumps(migrated)}\n"
-        lines[primary_index] = new_line
-        for index in reversed(notify_indexes[1:]):
+if cfg.exists():
+    lines = cfg.read_text(encoding="utf-8").splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if not re.match(r"^notify\s*=", line):
+            continue
+        raw = line.split("=", 1)[1].strip()
+        try:
+            notify = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"cannot parse existing notify config: {exc}")
+        if "notify_fanout.py" not in str(notify):
+            break
+        backup_config()
+        restored = remove_fanout(notify)
+        if restored:
+            lines[index] = f"notify = {json.dumps(restored)}\n"
+        else:
             del lines[index]
         cfg.write_text("".join(lines), encoding="utf-8")
-        print(f"migrated notify fanout path in {cfg}")
-    else:
-        print("notify already points at installed fanout; leaving config.toml alone")
-else:
-    if existing:
-        chain_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-        print(f"saved previous notify chain → {chain_path}")
-    else:
-        chain_path.write_text("[]\n", encoding="utf-8")
+        print(f"removed obsolete Joy Harness notify fan-out from {cfg}")
+        break
 
-    new_line = f'notify = ["python3", "{fanout}"]\n'
-    if primary_index is not None:
-        lines[primary_index] = new_line
-        for index in reversed(notify_indexes[1:]):
-            del lines[index]
-        text = "".join(lines)
-    else:
-        text = (text.rstrip() + "\n\n" + new_line) if text else new_line
-    bak = cfg.with_suffix(".toml.bak-agentdeck")
-    if cfg.exists() and not bak.exists():
-        bak.write_text(cfg.read_text(encoding="utf-8"), encoding="utf-8")
-    cfg.write_text(text, encoding="utf-8")
-    print(f"updated notify in {cfg}")
+if removed_hooks_source and not hooks_path.exists() and cfg.exists():
+    lines = cfg.read_text(encoding="utf-8").splitlines(keepends=True)
+    source_prefix = f'[hooks.state."{hooks_path}:'
+    cleaned = []
+    skipping = False
+    changed = False
+    for line in lines:
+        if line.startswith(source_prefix):
+            skipping = True
+            changed = True
+            continue
+        if skipping and re.match(r"^\[.*\]\s*$", line):
+            skipping = False
+        if not skipping:
+            cleaned.append(line)
+    for index, line in enumerate(cleaned):
+        if line.strip() != "[hooks.state]":
+            continue
+        next_index = index + 1
+        while next_index < len(cleaned) and not cleaned[next_index].strip():
+            next_index += 1
+        if (
+            next_index == len(cleaned)
+            or not cleaned[next_index].startswith("[hooks.state.")
+        ):
+            del cleaned[index:next_index]
+            changed = True
+        break
+    if changed:
+        backup_config()
+        cfg.write_text("".join(cleaned), encoding="utf-8")
+        print(f"removed obsolete Joy Harness hook trust state from {cfg}")
+
+for obsolete_chain in (chain_path, legacy_chain_path):
+    if obsolete_chain.exists():
+        obsolete_chain.unlink()
 PY
+
+for obsolete in "${BIN_DIR}/hook_bridge.py" "${BIN_DIR}/notify_fanout.py"; do
+  if [[ -f "${obsolete}" ]]; then
+    unlink "${obsolete}"
+  fi
+done
 
 # LaunchAgent
 cat > "${PLIST}" <<EOF
@@ -244,7 +289,6 @@ echo "Installed."
 echo "  app:     ${APP_DIR}"
 echo "  daemon:  ${APP_EXE}"
 echo "  send:    ${BIN_DIR}/joy-harness-send"
-echo "  hooks:   ${HOOKS_DST}"
 echo "  status:  ~/.agent-deck/status.json"
 echo
 echo "Next:"

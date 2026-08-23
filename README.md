@@ -9,16 +9,14 @@
 </p>
 
 Joy Harness 是一套面向 macOS Codex Desktop 的实体控制方案：它把 PS5 DualSense、Xbox
-等被 macOS `GameController` 框架识别的扩展型手柄变成 Codex Micro 控制器，同时用手柄震动
-反馈 Codex 的运行状态。
+等被 macOS `GameController` 框架识别的扩展型手柄变成 Codex Micro 控制器，并提供操作
+确认震动和本地诊断界面。
 
-这套方案由三部分组成：
+这套方案由两部分组成：
 
 1. **Joy Harness macOS 应用**：读取手柄输入、控制鼠标、播放震动，并提供六任务槽控制台。
 2. **RP2040 固件**：让一块 Raspberry Pi Pico 兼容板在 USB 侧模拟 Codex Desktop 能识别的
    `Codex Micro`，再通过串口接收 Joy Harness 转发的手柄操作。
-3. **Codex hooks 与 notify bridge**：把开始工作、等待审批、完成和失败等状态发送给
-   Joy Harness，让你不盯着屏幕也能通过震动感知任务进度。
 
 手柄和 RP2040 都连接 Mac，二者之间**不需要接线**。Joy Harness 会启动一个只读的 Codex
 app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，也不通过键盘模拟 Codex Micro；
@@ -42,7 +40,7 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 安装完成后，可以获得以下能力：
 
 - **离开键盘操作 Codex**：用手柄在六个 Codex Micro 任务槽之间切换、打开当前任务、
-  批准或拒绝权限请求、触发快捷操作和拆分任务。
+  批准或拒绝权限请求、切换 Fast 模式和拆分任务。
 - **按住说话**：按住 Menu/Options 键时发送 Codex Micro `ACT10`，松开时结束；DualSense
   还可用触控板按键。录音仍由 Codex Desktop 原生完成。
 - **DualSense 语音诊断**：检测通过 USB 暴露的手柄麦克风，并提示它是否已被设为 macOS
@@ -51,12 +49,10 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
   时释放阻力并补一次短促强震，形成分级的操作确认。
 - **用手柄控制 macOS**：左摇杆移动鼠标，LT + 左摇杆滚动，A/B 负责左右键，R3 负责
   中键，X/Y 负责 Backspace 和 Esc。
-- **用震动了解任务状态**：任务工作中、等待审批、完成或失败时使用不同节奏，尤其适合
-  同时处理多个任务或暂时离开屏幕时使用。
 - **管理六个任务槽**：LB/RB 顺序切换，或用 LT 组合键直接跳到 1–6 号槽位；切换后以
   对应次数的短震确认当前槽号。
-- **可视化诊断**：macOS 控制台展示当前槽位、每个槽位最近状态、手柄电量与震动能力、
-  RP2040 连接状态以及辅助功能授权状态，并可直接发送批准、拒绝、快捷操作和打开任务。
+- **可视化诊断**：macOS 控制台展示当前槽位、手柄电量与震动能力、
+  RP2040 连接状态以及辅助功能授权状态，并可直接发送批准、拒绝、切换 Fast 模式和打开任务。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
 - **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
@@ -68,18 +64,14 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 | 当前条件 | 可以使用的能力 |
 |---|---|
-| 只有 Joy Harness 应用 | 查看控制台和本地状态，使用 CLI 测试状态流转 |
-| 应用 + 手柄 | 鼠标、滚动、系统按键；支持震动的手柄还可接收任务状态反馈 |
+| 只有 Joy Harness 应用 | 查看控制台和本地状态，使用 CLI 进行诊断 |
+| 应用 + 手柄 | 鼠标、滚动、系统按键、槽位确认震动和手动震动测试 |
 | 应用 + RP2040 | 控制台可向 Codex Micro 发送任务槽和审批等操作 |
-| 应用 + 手柄 + RP2040 | 完整体验：手柄控制 Codex、鼠标操作、按住说话和任务震动反馈 |
-| 再启用 Codex hooks / notify | Codex 状态会自动同步到控制台和手柄震动，无需手动发送 |
+| 应用 + 手柄 + RP2040 | 完整体验：手柄控制 Codex、鼠标操作、按住说话和操作确认震动 |
 
 ## 工作原理
 
 ```text
-Codex hooks / notify_fanout.py
-        │ Unix socket：idle / busy / waiting / done / error
-        ▼
 Joy Harness macOS 应用 ── Core Haptics ──▶ 手柄震动
         ▲
         │ GameController
@@ -109,9 +101,9 @@ Joy Harness 只有在串口收到兼容握手 `READY agentdeck-rp2040` 后才认
 | 项目 | 要求 | 用途 |
 |---|---|---|
 | macOS | 13.0 或更高 | SwiftUI、GameController、Core Haptics 和辅助功能接口 |
-| Codex Desktop | 支持 Codex Micro 与 hooks 的版本 | 接收 RP2040 HID 输入并产生任务状态事件 |
+| Codex Desktop | 支持 Codex Micro 的版本 | 接收 RP2040 Vendor HID 输入 |
 | Xcode Command Line Tools | 提供 Swift 5.9+ 和 macOS SDK | 编译 Joy Harness macOS 应用 |
-| Python | Python 3 | 运行本地状态 CLI、hook bridge 和 notify fan-out |
+| Python | Python 3 | 运行本地状态与诊断 CLI |
 | Git | 可访问 GitHub | 首次构建固件时自动下载 Pico SDK 2.2.0 |
 
 可以先检查本机环境：
@@ -236,8 +228,8 @@ task install
 # 不使用 task：bash scripts/install.sh
 ```
 
-安装脚本会编译 release 应用、注册后台 LaunchAgent、合并 Codex hooks，并为现有 `notify`
-配置创建 fan-out，避免覆盖原来的通知命令。详细文件改动见“安装会改动什么”。
+安装脚本会编译 release 应用并注册后台 LaunchAgent。从旧版升级时，脚本还会移除
+Joy Harness 旧的 Codex hooks 和 `notify` fan-out，但会保留其他工具的 Hook 和通知配置。
 部署或开发启动前会按完整应用路径停止所有旧 Joy Harness / AgentDeck 实例，确认退出后再启动
 唯一的新实例，避免多个应用争抢手柄和 Unix socket。应用本身也持有跨副本的进程锁；即使
 从其他目录手动打开旧副本，后启动的实例也会立即退出。
@@ -248,8 +240,6 @@ task install
 2. 保持刷好固件的 RP2040 通过数据线连接 Mac。
 3. 完全退出 Codex Desktop 后重新打开，让它重新扫描 `Codex Micro` HID 设备。
 4. 在系统设置中给 Joy Harness 授予辅助功能权限，给 Codex Desktop 授予输入监控权限。
-5. 若 Codex 提示 hooks 信任变更，在 Codex 中使用 `/hooks` 检查并确认。
-6. 若 `~/.codex/config.toml` 中显式设置过 `[features] hooks = false`，改回 `true`。
 
 ### 4. 验证安装结果
 
@@ -284,11 +274,9 @@ task demo
 
 最后在 Codex Desktop 中打开一个任务，依次验证：
 
-1. 提交提示词后手柄进入低频轻震。
-2. 出现权限请求时变为急促脉冲。
-3. 按 `LT + A` 批准，或按 `LT + B` 拒绝。
-4. 任务结束时收到两下短震，然后自动回到 idle。
-5. 使用 LB/RB 切换任务槽，并通过短震次数确认槽号。
+1. 按 `LT + A` 批准，或按 `LT + B` 拒绝。
+2. 使用 LB/RB 切换任务槽，并通过短震次数确认槽号。
+3. 按住 Menu/Options 使用 Codex Desktop 的原生按住说话。
 
 ## 手柄按键与实际效果
 
@@ -336,37 +324,31 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 其他操作的映射保持不变。
 
 LB/RB 和 LT 组合键直接操作 Codex Desktop 自己管理的六个 Micro 槽位。Joy Harness 通过
-Codex app-server 的只读 `thread/list` 获取六个最近任务的名称和顺序，并按 hook 携带的
-`session_id` 记录每个任务的最近状态；本地状态文件只保存用于槽位展示的名称，未命名任务
-会保存首条消息摘要，不保存完整会话正文。
+Codex app-server 的只读 `thread/list` 获取六个最近任务的名称和顺序；本地状态文件只保存用于
+槽位展示的名称，未命名任务会保存首条消息摘要，不保存完整会话正文。
 
-### Codex 状态与震动
+### 震动反馈
 
-| Codex 事件 | 状态 | 手柄反馈 |
-|---|---|---|
-| `SessionStart` / `SessionEnd` | `idle` | 静止 |
-| `UserPromptSubmit` / `PreToolUse` / `PostToolUse` | `busy` | 每约 0.85 秒一次低频轻震 |
-| `SubagentStart` / `SubagentStop` | `busy` | 继续低频轻震 |
-| `PermissionRequest` | `waiting` | 每约 0.45 秒一次明显的急促脉冲 |
-| `Stop` / `agent-turn-complete` | `done` | 两下短震，约 1.2 秒后自动回到 idle |
-| 手动发送或内部失败 | `error` | 三下重震，约 1.2 秒后自动回到 idle |
+| 操作 | 手柄反馈 |
+|---|---|
+| 切换任务槽 | 用 1–6 下短震报告当前槽号 |
+| RT / R2 越过触发行程 | 执行分级手感和短促确认震动 |
+| 控制台或 CLI 手动测试 | 播放 `busy`、`waiting`、`done` 或 `error` 的诊断节奏 |
 
-手柄在任务进行中才连接时，Joy Harness 会恢复当前槽位对应的震动状态。切换槽位时会先用
-1–6 下短震报告槽号；如果目标槽位仍为 `busy` 或 `waiting`，随后继续播放该状态的节奏。
+Joy Harness 不订阅 Codex 任务生命周期，也不会根据任务开始、等待审批或完成自动播放震动。
 
 ## macOS 控制台
 
 Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，LaunchAgent 也会保持它运行。
 控制台提供：
 
-- 六个槽位及每个槽位最近记录的 `idle`、`busy`、`waiting`、`done`、`error` 状态。
-- 当前槽位的状态横幅和完整手柄映射。
+- 六个槽位、当前槽位和完整手柄映射。
 - 手柄名称、震动是否可用、RP2040 是否连接、当前是否为物理 Codex Micro 模式。
 - 辅助功能权限诊断。
-- 批准、拒绝、快捷操作、打开任务和震动状态测试按钮。
+- 批准、拒绝、Fast 模式开关、打开任务和震动状态测试按钮。
 
 控制台中的任务命令同样依赖 RP2040 已连接。任务名称来自 Codex app-server；未命名任务会
-回退显示首条消息摘要。状态按任务 ID 跟随，不会因切换槽位而记到另一个任务上。
+回退显示首条消息摘要。
 
 ## 常用命令
 
@@ -375,7 +357,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 | `task build` | 编译 release 版 macOS 可执行文件 |
 | `task dmg -- 0.1.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
-| `task install` | 编译、安装应用、注册 LaunchAgent 并接入 Codex |
+| `task install` | 编译、安装应用并注册 LaunchAgent |
 | `task firmware` | 构建 RP2040 UF2 固件 |
 | `task flash` | 将固件复制到处于 BOOTSEL 模式的 RP2040 |
 | `task status` | 输出 `~/.agent-deck/status.json` |
@@ -445,23 +427,22 @@ Developer ID 签名并通过 Apple 公证。
 |---|---|
 | `~/.agent-deck/Joy Harness.app` | 临时签名的 Joy Harness 应用 |
 | `~/Library/LaunchAgents/tech.joyharness.daemon.plist` | 登录启动并保持运行的 LaunchAgent |
-| `~/.agent-deck/bin/` | 应用入口、CLI、hook bridge 和 notify fan-out |
+| `~/.agent-deck/bin/` | 应用入口和 CLI |
 | `~/.local/bin/joy-harness-send` | 指向已安装 CLI 的符号链接 |
-| `~/.codex/hooks.json` | 合并 Joy Harness hooks，保留其他已有 hook |
-| `~/.codex/config.toml` | 将 `notify` 指向 fan-out，原 notify 链仍会继续执行 |
-| `~/.agent-deck/notify-chain.json` | 安装前的 Codex notify 命令 |
 | `~/.agent-deck/status.json` | 当前连接、权限、槽位和状态快照 |
-| `~/.agent-deck/pad.sock` | hook、CLI 与应用通信的本地 Unix socket，权限为 `0600` |
+| `~/.agent-deck/pad.sock` | CLI 与应用通信的本地 Unix socket，权限为 `0600` |
 | `~/.agent-deck/daemon.log` | 后台运行日志 |
 
-第一次修改现有配置时还会创建：
+从含 Hooks / `notify` 的旧版升级时，安装脚本会在移除 Joy Harness 旧配置前创建：
 
-- `~/.codex/hooks.json.bak-agentdeck`
-- `~/.codex/config.toml.bak-agentdeck`
+- `~/.codex/hooks.json.bak-joyharness-removal`
+- `~/.codex/config.toml.bak-joyharness-removal`
+
+新安装不会写入 `~/.codex/hooks.json` 或 Codex `notify` 配置。
 
 为兼容旧版，安装脚本保留 `agent-deck-send` 和 `AgentDeck` 入口别名，并迁移/移除旧的
 `tech.agentdeck.daemon`、`tech.codexpad.daemon` LaunchAgent。运行目录继续使用
-`~/.agent-deck`，避免升级时丢失已有配置和通知链。
+`~/.agent-deck`，避免升级时丢失已有配置。
 
 ## 常见问题
 
@@ -497,16 +478,8 @@ AGENT_DECK_RP2040_PORT=/dev/cu.usbmodemXXXX task run
 
 - 确认 `status.json` 中 `haptics` 为 `true`。
 - Xbox Series 手柄优先改用蓝牙连接。
-- 运行 `~/.agent-deck/bin/joy-harness-send waiting` 排除 Codex hook 问题。
+- 运行 `~/.agent-deck/bin/joy-harness-send waiting` 直接测试本地震动链路。
 - 查看 `daemon.log` 中是否出现 `no haptic engine` 或 `rumble skipped`。
-
-### Codex 状态没有自动同步
-
-- 确认 Joy Harness daemon 正在运行，`~/.agent-deck/pad.sock` 存在。
-- 检查 `~/.codex/hooks.json` 是否包含已安装的 `hook_bridge.py`。
-- 检查 `[features] hooks` 没有被设为 `false`。
-- 修改 hooks 后完全重启 Codex Desktop，并使用 `/hooks` 完成信任确认。
-- `notify` 已有自定义命令时，确认 `~/.agent-deck/notify-chain.json` 中保留了原命令。
 
 ### 摇杆不能控制鼠标
 
@@ -531,9 +504,7 @@ Sources/JoyHarness/             macOS 应用、控制台、手柄、鼠标、震
 Sources/JoyHarness/Resources/   控制台图片、logo 与 macOS app icon
 firmware/rp2040/                RP2040 Codex Micro 固件与 USB 描述符
 bin/joy-harness-send            本地 Unix socket CLI
-codex-hooks/hook_bridge.py      Codex hook 事件到状态的映射
-codex-hooks/notify_fanout.py    保留原 notify 的完成通知分发器
-scripts/install.sh              release 构建、安装、配置合并和 LaunchAgent 注册
+scripts/install.sh              release 构建、安装、旧配置清理和 LaunchAgent 注册
 scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
 scripts/package_dmg.sh           构建版本化 macOS DMG 与 SHA-256 校验文件
@@ -553,9 +524,9 @@ Taskfile.yml                    常用任务入口
 
 - 项目依赖 macOS 专有的 GameController、Core Haptics、SwiftUI 和 CoreGraphics，不支持
   Windows 或 Linux。
-- 手柄灯光没有 macOS 公共控制 API，因此状态反馈只使用震动。
-- `PermissionRequest` hook 只负责发送 `waiting` 状态；实际批准和拒绝由 Codex Desktop 的
-  Codex Micro 处理。
+- 手柄灯光没有 macOS 公共控制 API，因此操作反馈只使用震动。
+- Joy Harness 不使用 Codex Hooks 或 `notify`；审批、拒绝和任务槽操作均由 Codex
+  Micro 直接处理。
 - Joy Harness 只读取任务 ID、显示名称和未命名任务的首条消息摘要，不持有完整 Codex
   会话数据；六个槽位的任务顺序仍由 Codex app-server 管理。
 - 没有手柄时 daemon 仍会运行并更新 `status.json`；震动请求会在日志中标记为 skipped。

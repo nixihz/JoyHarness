@@ -25,6 +25,17 @@ class LaunchAgentMigrationTests(unittest.TestCase):
         self.assertIn("tech.agentdeck.daemon", stop_script)
         self.assertIn("tech.codexpad.daemon", stop_script)
 
+    def test_install_removes_obsolete_codex_integration(self) -> None:
+        script = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn('install -m 755 "${ROOT}/codex-hooks/', script)
+        self.assertIn("hook_bridge.py", script)
+        self.assertIn("notify_fanout.py", script)
+        self.assertIn("bak-joyharness-removal", script)
+        self.assertIn("remove_fanout", script)
+        self.assertIn("removed_hooks_source", script)
+        self.assertIn("source_prefix", script)
+
     def test_development_run_unloads_installed_daemons(self) -> None:
         script = (ROOT / "scripts" / "build_and_run.sh").read_text(encoding="utf-8")
 
