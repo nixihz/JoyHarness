@@ -210,19 +210,22 @@ jobs:
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          PRERELEASE_ARGS=()
-          if [[ "${PRERELEASE}" == "true" ]]; then
-            PRERELEASE_ARGS+=(--prerelease)
-          fi
+          create_release() {
+            gh release create "${TAG}" \
+              "${DMG_PATH}#Joy Harness ${TAG} for macOS arm64" \
+              "${CHECKSUM_PATH}#SHA-256 checksum" \
+              --target "${GITHUB_SHA}" \
+              --draft \
+              --title "Joy Harness ${TAG}" \
+              --notes-file "${RUNNER_TEMP}/release-notes.md" \
+              "$@"
+          }
 
-          gh release create "${TAG}" \
-            "${DMG_PATH}#Joy Harness ${TAG} for macOS arm64" \
-            "${CHECKSUM_PATH}#SHA-256 checksum" \
-            --target "${GITHUB_SHA}" \
-            --draft \
-            --title "Joy Harness ${TAG}" \
-            --notes-file "${RUNNER_TEMP}/release-notes.md" \
-            "${PRERELEASE_ARGS[@]}"
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            create_release --prerelease
+          else
+            create_release
+          fi
 
       - name: Publish release
         env:
