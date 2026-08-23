@@ -373,6 +373,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
+| `task dmg -- 0.1.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
 | `task install` | 编译、安装应用、注册 LaunchAgent 并接入 Codex |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -414,6 +415,27 @@ python3 bin/joy-harness-send error --note manual-test
 
 Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可以直接使用项目的
 **Run** 操作构建并打开控制台。
+
+## 创建 DMG
+
+构建适用于当前 Mac 架构的发布镜像：
+
+```bash
+task dmg -- 0.1.0
+# 或：bash scripts/package_dmg.sh 0.1.0
+```
+
+产物会写入 `dist/`：
+
+```text
+Joy-Harness-v0.1.0-macOS-arm64.dmg
+Joy-Harness-v0.1.0-macOS-arm64.dmg.sha256
+```
+
+DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、
+`Info.plist` 与 DMG 完整性。本地没有 `Developer ID Application` 证书时，现有签名脚本会
+使用 Apple Development 或稳定的 ad-hoc 签名；公开分发若要避免 Gatekeeper 警告，仍需
+Developer ID 签名并通过 Apple 公证。
 
 ## 安装会改动什么
 
@@ -514,6 +536,7 @@ codex-hooks/notify_fanout.py    保留原 notify 的完成通知分发器
 scripts/install.sh              release 构建、安装、配置合并和 LaunchAgent 注册
 scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
+scripts/package_dmg.sh           构建版本化 macOS DMG 与 SHA-256 校验文件
 scripts/build_and_run.sh        前台 `.app` 构建与调试入口
 tests/                          Swift 和 Python 测试
 docs/research/                  手柄音频、无线麦克风与 USB-over-IP 可行性研究

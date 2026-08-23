@@ -6,6 +6,11 @@ tasks:
     cmds:
       - swift build -c release
 
+  dmg:
+    desc: Build a versioned macOS DMG (default version 0.1.0)
+    cmds:
+      - bash scripts/package_dmg.sh {{.CLI_ARGS}}
+
   firmware:
     desc: Build the Joy Harness RP2040 UF2 firmware
     cmds:
