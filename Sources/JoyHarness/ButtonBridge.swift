@@ -8,9 +8,13 @@ enum MouseButton: Hashable {
 }
 
 enum SystemKey: Hashable {
+    case enter
     case backspace
     case escape
     case rightCommand
+    case copy
+    case paste
+    case screenshotTool
 }
 
 enum FaceButton {
@@ -210,20 +214,27 @@ final class ButtonBridge {
             handleMappedButton(button, input: .home)
         } else if changedElement === gamepad.rightTrigger {
             rightTriggerFeedbackHandler?(gamepad.rightTrigger.value)
+            let input: ControllerInput = functionPressed ? .functionRightTrigger : .rightTrigger
             if controllerFamily == .dualSense,
                let isPressed = rightTriggerPressState.update(value: gamepad.rightTrigger.value) {
                 handleMappedButton(
                     gamepad.rightTrigger,
-                    input: .rightTrigger,
+                    input: input,
                     isPressed: isPressed
                 )
             } else if controllerFamily != .dualSense {
-                handleMappedButton(gamepad.rightTrigger, input: .rightTrigger)
+                handleMappedButton(gamepad.rightTrigger, input: input)
             }
         } else if let button = gamepad.leftThumbstickButton, changedElement === button {
-            handleMappedButton(button, input: .leftThumbstickButton)
+            handleMappedButton(
+                button,
+                input: functionPressed ? .functionLeftThumbstickButton : .leftThumbstickButton
+            )
         } else if let button = gamepad.rightThumbstickButton, changedElement === button {
-            handleMappedButton(button, input: .rightThumbstickButton)
+            handleMappedButton(
+                button,
+                input: functionPressed ? .functionRightThumbstickButton : .rightThumbstickButton
+            )
         } else if let button = Self.touchpadButton(for: gamepad), changedElement === button {
             handleMappedButton(button, input: .touchpadButton)
         }

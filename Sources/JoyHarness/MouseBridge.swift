@@ -10,6 +10,8 @@ struct SystemKeyEventDescriptor {
 extension SystemKey {
     func eventDescriptor(pressed: Bool) -> SystemKeyEventDescriptor {
         switch self {
+        case .enter:
+            return SystemKeyEventDescriptor(keyCode: 0x24, flags: [])
         case .backspace:
             return SystemKeyEventDescriptor(keyCode: 51, flags: [])
         case .escape:
@@ -19,6 +21,12 @@ extension SystemKey {
             let rightCommandDeviceFlag = CGEventFlags(rawValue: 0x10)
             let flags: CGEventFlags = pressed ? [.maskCommand, rightCommandDeviceFlag] : []
             return SystemKeyEventDescriptor(keyCode: 0x36, flags: flags)
+        case .copy:
+            return SystemKeyEventDescriptor(keyCode: 0x08, flags: .maskCommand)
+        case .paste:
+            return SystemKeyEventDescriptor(keyCode: 0x09, flags: .maskCommand)
+        case .screenshotTool:
+            return SystemKeyEventDescriptor(keyCode: 0x00, flags: [.maskCommand, .maskShift])
         }
     }
 }

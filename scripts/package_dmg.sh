@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION_INPUT="${1:-0.1.0}"
+DEFAULT_VERSION="$(tr -d '[:space:]' < "${ROOT}/Sources/JoyHarness/Resources/VERSION")"
+VERSION_INPUT="${1:-${DEFAULT_VERSION}}"
 VERSION="${VERSION_INPUT#v}"
 APP_NAME="Joy Harness"
 BUNDLE_ID="tech.joyharness.daemon"

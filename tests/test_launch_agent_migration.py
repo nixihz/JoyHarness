@@ -83,6 +83,15 @@ class LaunchAgentMigrationTests(unittest.TestCase):
         self.assertIn('scripts/sign_macos_app.sh"', installer)
         self.assertNotIn('"${APP_BUNDLE}/JoyHarness_JoyHarness.bundle"', development)
 
+    def test_installed_and_development_apps_use_the_shared_version(self) -> None:
+        development = (ROOT / "scripts" / "build_and_run.sh").read_text(encoding="utf-8")
+        installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+        for script in (development, installer):
+            self.assertIn("Sources/JoyHarness/Resources/VERSION", script)
+            self.assertIn("CFBundleShortVersionString", script)
+            self.assertIn("CFBundleVersion", script)
+
     def test_signing_step_produces_a_valid_app_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             app = Path(temporary_directory) / "Fixture.app"

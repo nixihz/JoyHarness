@@ -102,7 +102,7 @@ final class CodexThreadProvider {
                     "clientInfo": [
                         "name": "joy-harness",
                         "title": "Joy Harness",
-                        "version": "0.1.0",
+                        "version": AppVersion.current,
                     ],
                 ],
             ])

@@ -6,6 +6,12 @@ import Testing
 
 struct JoyHarnessTests {
     @Test
+    func appVersionLoadsFromTheBundledVersionResource() {
+        #expect(AppVersion.current == "0.2.0")
+        #expect(AppVersion.displayName == "Joy Harness v0.2.0")
+    }
+
+    @Test
     func rightCommandEventDescriptorKeepsItsDeviceSide() {
         let descriptor = SystemKey.rightCommand.eventDescriptor(pressed: true)
 
@@ -14,6 +20,29 @@ struct JoyHarnessTests {
         #expect(descriptor.flags.rawValue & 0x10 != 0)
         #expect(descriptor.flags.rawValue & 0x08 == 0)
         #expect(SystemKey.rightCommand.eventDescriptor(pressed: false).flags.isEmpty)
+    }
+
+    @Test
+    func clipboardAndScreenshotDescriptorsUseMacShortcuts() {
+        let copy = SystemKey.copy.eventDescriptor(pressed: true)
+        let paste = SystemKey.paste.eventDescriptor(pressed: true)
+        let screenshot = SystemKey.screenshotTool.eventDescriptor(pressed: true)
+
+        #expect(copy.keyCode == 0x08)
+        #expect(copy.flags == .maskCommand)
+        #expect(paste.keyCode == 0x09)
+        #expect(paste.flags == .maskCommand)
+        #expect(screenshot.keyCode == 0x00)
+        #expect(screenshot.flags.contains(.maskCommand))
+        #expect(screenshot.flags.contains(.maskShift))
+    }
+
+    @Test
+    func enterDescriptorUsesTheUnmodifiedReturnKey() {
+        let enter = SystemKey.enter.eventDescriptor(pressed: true)
+
+        #expect(enter.keyCode == 0x24)
+        #expect(enter.flags.isEmpty)
     }
 
     @Test
@@ -192,7 +221,7 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func functionModifierRestoresCodexFaceButtonActions() {
+    func functionModifierProvidesApprovalAndYesNoActions() {
         #expect(ButtonBridge.faceAction(for: .a, functionPressed: true) == .microKey("ACT07"))
         #expect(ButtonBridge.faceAction(for: .b, functionPressed: true) == .microKey("ACT08"))
         #expect(ButtonBridge.faceAction(for: .x, functionPressed: true) == .textInput("no"))
@@ -214,8 +243,13 @@ struct JoyHarnessTests {
         #expect(store.action(for: .buttonB).controllerAction == .mouseButton(.right))
         #expect(store.action(for: .leftTrigger) == .functionModifier)
         #expect(store.action(for: .dpadUp).controllerAction == .systemKey(.rightCommand))
+        #expect(store.action(for: .options).controllerAction == .systemKey(.screenshotTool))
         #expect(store.action(for: .functionButtonX).controllerAction == .textInput("no"))
         #expect(store.action(for: .functionButtonY).controllerAction == .textInput("yes"))
+        #expect(store.action(for: .rightTrigger).controllerAction == .microKey("ACT12"))
+        #expect(store.action(for: .functionRightTrigger).controllerAction == .systemKey(.enter))
+        #expect(store.action(for: .functionLeftThumbstickButton).controllerAction == .systemKey(.copy))
+        #expect(store.action(for: .functionRightThumbstickButton).controllerAction == .systemKey(.paste))
         #expect(store.action(for: .functionDpadUp).controllerAction == .selectSlot(0))
         #expect(store.action(for: .functionDpadLeft).controllerAction == .selectSlot(1))
         #expect(store.action(for: .functionDpadDown).controllerAction == .selectSlot(2))
@@ -234,6 +268,8 @@ struct JoyHarnessTests {
         #expect(store.action(for: .functionButtonY).controllerAction == .textInput("yes"))
         #expect(store.action(for: .functionButtonB).controllerAction == .microKey("ACT08"))
         #expect(store.action(for: .functionButtonX).controllerAction == .textInput("no"))
+        #expect(store.action(for: .functionLeftThumbstickButton).controllerAction == .systemKey(.copy))
+        #expect(store.action(for: .functionRightThumbstickButton).controllerAction == .systemKey(.paste))
     }
 
     @Test
@@ -257,6 +293,7 @@ struct JoyHarnessTests {
         #expect(store.action(for: .buttonA) == .mouseMiddle)
         #expect(store.action(for: .functionButtonX) == .answerNo)
         #expect(store.action(for: .functionButtonY) == .answerYes)
+        #expect(store.action(for: .options) == .screenshotTool)
     }
 
     @Test
@@ -282,6 +319,53 @@ struct JoyHarnessTests {
         #expect(store.action(for: .functionButtonB) == .deny)
         #expect(store.action(for: .functionButtonX) == .answerNo)
         #expect(store.action(for: .functionButtonY) == .answerYes)
+    }
+
+    @Test
+    func clipboardMigrationPreservesCustomizedFunctionButtons() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "controllerMappings.v1.yesNoFaceButtonsMigrated")
+        defaults.set(true, forKey: "controllerMappings.v1.unifiedFaceButtonLayoutMigrated")
+        defaults.set(
+            [
+                ControllerInput.options.rawValue: ControllerMappedAction.disabled.rawValue,
+                ControllerInput.functionButtonX.rawValue: ControllerMappedAction.answerNo.rawValue,
+                ControllerInput.functionButtonY.rawValue: ControllerMappedAction.mouseMiddle.rawValue,
+            ],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .options) == .screenshotTool)
+        #expect(store.action(for: .functionButtonX) == .answerNo)
+        #expect(store.action(for: .functionButtonY) == .mouseMiddle)
+    }
+
+    @Test
+    func clipboardMigrationMovesTemporaryFaceButtonDefaultsToThumbsticks() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "controllerMappings.v1.yesNoFaceButtonsMigrated")
+        defaults.set(true, forKey: "controllerMappings.v1.unifiedFaceButtonLayoutMigrated")
+        defaults.set(true, forKey: "controllerMappings.v1.clipboardAndScreenshotDefaultsMigrated")
+        defaults.set(
+            [
+                ControllerInput.functionButtonX.rawValue: ControllerMappedAction.copy.rawValue,
+                ControllerInput.functionButtonY.rawValue: ControllerMappedAction.paste.rawValue,
+            ],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .functionButtonX) == .answerNo)
+        #expect(store.action(for: .functionButtonY) == .answerYes)
+        #expect(store.action(for: .functionLeftThumbstickButton) == .copy)
+        #expect(store.action(for: .functionRightThumbstickButton) == .paste)
     }
 
     @Test
@@ -347,6 +431,10 @@ struct JoyHarnessTests {
         #expect(ControllerInput.buttonA.displayName(for: .dualSense) == "×")
         #expect(ControllerInput.buttonB.displayName(for: .dualSense) == "○")
         #expect(ControllerInput.functionButtonX.displayName(for: .dualSense) == "L2 + □")
+        #expect(ControllerInput.functionLeftThumbstickButton.displayName(for: .xbox) == "LT + L3")
+        #expect(ControllerInput.functionRightThumbstickButton.displayName(for: .dualSense) == "L2 + R3")
+        #expect(ControllerInput.functionRightTrigger.displayName(for: .xbox) == "LT + RT")
+        #expect(ControllerInput.functionRightTrigger.displayName(for: .dualSense) == "L2 + R2")
         #expect(ControllerMappingStore.defaultMappings[.touchpadButton] == .pushToTalk)
     }
 

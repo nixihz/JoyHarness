@@ -7,7 +7,7 @@ tasks:
       - swift build -c release
 
   dmg:
-    desc: Build a versioned macOS DMG (default version 0.1.0)
+    desc: Build a versioned macOS DMG (default version from app resources)
     cmds:
       - bash scripts/package_dmg.sh {{.CLI_ARGS}}
 

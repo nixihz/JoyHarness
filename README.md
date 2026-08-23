@@ -52,7 +52,7 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 - **管理六个任务槽**：LB/RB 顺序切换，或用 LT 组合键直接跳到 1–6 号槽位；切换后以
   对应次数的短震确认当前槽号。
 - **可视化诊断**：macOS 控制台展示当前槽位、手柄电量与震动能力、
-  RP2040 连接状态以及辅助功能授权状态，并可直接发送批准、拒绝、切换 Fast 模式和打开任务。
+  RP2040 连接状态以及辅助功能授权状态，并可打开当前任务。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
 - **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
@@ -297,11 +297,16 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | R3 按下 / 松开 | 鼠标中键按下 / 松开 | 是 |
 | X | Backspace；按住后按系统节奏连续删除 | 是 |
 | Y | Esc | 是 |
+| Xbox：LT + RT；PlayStation：L2 + R2 | 普通回车（Enter） | 是 |
+| LT + L3 | 复制（`Command-C`） | 是 |
+| LT + R3 | 粘贴（`Command-V`） | 是 |
+| Xbox：Options / View；PlayStation：Create | 飞书截图（`Command-Shift-A`） | 是 |
 | 十字键上按下 / 松开 | 右侧 Command 按下 / 松开；默认用于唤起按住说话类语音输入工具 | 是 |
 
 这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
-改为滚动；Xbox 的 Y/X 输入 `yes` / `no`，PlayStation 的 △/□ 执行相同行为。文字只会
-填入当前输入框，不会自动按 Return，提交前仍可检查或修改。
+改为滚动，L3/R3 执行复制/粘贴。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
+默认单按触发飞书截图；如果手柄驱动未向 macOS 暴露该键，可在设置中把“飞书截图”改配到
+其他按键。该功能要求飞书正在运行，并将截图快捷键设置为 `Command-Shift-A`。
 
 ### Codex Micro 控制
 
@@ -345,7 +350,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 - 六个槽位、当前槽位和完整手柄映射。
 - 手柄名称、震动是否可用、RP2040 是否连接、当前是否为物理 Codex Micro 模式。
 - 辅助功能权限诊断。
-- 批准、拒绝、Fast 模式开关、打开任务和震动状态测试按钮。
+- 打开当前任务和震动状态测试按钮。
 
 控制台中的任务命令同样依赖 RP2040 已连接。任务名称来自 Codex app-server；未命名任务会
 回退显示首条消息摘要。
@@ -355,7 +360,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.1.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
+| `task dmg -- 0.2.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
 | `task install` | 编译、安装应用并注册 LaunchAgent |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -403,15 +408,15 @@ Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可
 构建适用于当前 Mac 架构的发布镜像：
 
 ```bash
-task dmg -- 0.1.0
-# 或：bash scripts/package_dmg.sh 0.1.0
+task dmg -- 0.2.0
+# 或：bash scripts/package_dmg.sh 0.2.0
 ```
 
 产物会写入 `dist/`：
 
 ```text
-Joy-Harness-v0.1.0-macOS-arm64.dmg
-Joy-Harness-v0.1.0-macOS-arm64.dmg.sha256
+Joy-Harness-v0.2.0-macOS-arm64.dmg
+Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256
 ```
 
 DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、

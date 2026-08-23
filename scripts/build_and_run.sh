@@ -7,6 +7,7 @@ BUNDLE_ID="tech.joyharness.daemon"
 MIN_SYSTEM_VERSION="13.0"
 MODE="${1:-run}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="$(tr -d '[:space:]' < "${PROJECT_ROOT}/Sources/JoyHarness/Resources/VERSION")"
 APP_BUNDLE="${PROJECT_ROOT}/dist/${DISPLAY_NAME}.app"
 APP_CONTENTS="${APP_BUNDLE}/Contents"
 APP_BINARY="${APP_CONTENTS}/MacOS/${APP_NAME}"
@@ -43,6 +44,10 @@ cat > "${APP_CONTENTS}/Info.plist" <<PLIST
   <string>${DISPLAY_NAME}</string>
   <key>CFBundleIconFile</key>
   <string>JoyHarness.icns</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${VERSION}</string>
+  <key>CFBundleVersion</key>
+  <string>${VERSION}</string>
   <key>LSMinimumSystemVersion</key>
   <string>${MIN_SYSTEM_VERSION}</string>
   <key>NSPrincipalClass</key>

@@ -7,49 +7,22 @@ struct DashboardView: View {
     @EnvironmentObject private var languageSettings: AppLanguageSettings
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                SlotSidebar(store: store)
-                    .frame(width: 224)
-
-                Divider()
-
-                TaskDetail(store: store, mappingStore: mappingStore)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Divider()
-
-                ConnectionInspector(status: store.status, store: store)
-                    .frame(width: 252)
-            }
+        HStack(spacing: 0) {
+            SlotSidebar(store: store)
+                .frame(width: 224)
 
             Divider()
-            ActivityBar(status: store.status, message: store.actionMessage)
+
+            TaskDetail(store: store, mappingStore: mappingStore)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            ConnectionInspector(status: store.status, store: store)
+                .frame(width: 252)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle("Joy Harness")
         .id(languageSettings.preference)
-        .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    store.perform(.refresh)
-                } label: {
-                    Label(L10n.text("刷新", "Refresh"), systemImage: "arrow.clockwise")
-                }
-                .help(L10n.text("刷新任务和连接状态", "Refresh tasks and connection status"))
-
-                Button {
-                    store.perform(.openThread)
-                } label: {
-                    Label(L10n.text("打开任务", "Open Task"), systemImage: "arrow.up.forward.app")
-                }
-                .help(L10n.text("在 Codex 中打开当前任务", "Open the current task in Codex"))
-            }
-
-            ToolbarItem {
-                HealthIndicator(status: store.status)
-            }
-        }
     }
 }
 
@@ -151,8 +124,6 @@ private struct TaskDetail: View {
                 }
 
                 Spacer(minLength: 12)
-
-                CommandButtons(store: store, waiting: status.padState == .waiting)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
@@ -184,49 +155,6 @@ private struct StateBanner: View {
         .padding(.horizontal, 18)
         .frame(height: 62)
         .dashboardGlassSurface(cornerRadius: 7, tint: state.color)
-    }
-}
-
-private struct CommandButtons: View {
-    @ObservedObject var store: DashboardStore
-    let waiting: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Button {
-                store.perform(.approve)
-            } label: {
-                Label(L10n.text("批准", "Approve"), systemImage: "checkmark")
-            }
-            .dashboardPrimaryButtonStyle()
-            .tint(waiting ? .orange : .accentColor)
-            .help(L10n.text("批准当前待处理请求", "Approve the current pending request"))
-
-            Button {
-                store.perform(.deny)
-            } label: {
-                Label(L10n.text("拒绝", "Deny"), systemImage: "xmark")
-            }
-            .dashboardSecondaryButtonStyle()
-            .help(L10n.text("拒绝当前待处理请求", "Deny the current pending request"))
-
-            Button {
-                store.perform(.toggleFastMode)
-            } label: {
-                Label(L10n.text("Fast 模式", "Fast Mode"), systemImage: "forward.fill")
-            }
-            .dashboardSecondaryButtonStyle()
-            .help(L10n.text("切换 Fast 模式", "Toggle Fast Mode"))
-
-            Button {
-                store.perform(.openThread)
-            } label: {
-                Label(L10n.text("打开任务", "Open Task"), systemImage: "arrow.up.forward.app")
-            }
-            .dashboardSecondaryButtonStyle()
-            .help(L10n.text("在 Codex 中打开当前任务", "Open the current task in Codex"))
-        }
-        .controlSize(.large)
     }
 }
 
@@ -280,6 +208,10 @@ private struct ControllerMap: View {
                     MappingLabel(key: "D-Pad", title: dpadSummary)
                     MappingLabel(key: key(for: .leftTrigger), title: title(for: .leftTrigger))
                     MappingLabel(key: "L3", title: title(for: .leftThumbstickButton))
+                    MappingLabel(
+                        key: key(for: .functionLeftThumbstickButton),
+                        title: title(for: .functionLeftThumbstickButton)
+                    )
                 }
                 .frame(width: 176, alignment: .leading)
 
@@ -317,6 +249,10 @@ private struct ControllerMap: View {
                     MappingLabel(key: key(for: .functionButtonY), title: title(for: .functionButtonY))
                     MappingLabel(key: key(for: .rightTrigger), title: title(for: .rightTrigger))
                     MappingLabel(key: "R3", title: title(for: .rightThumbstickButton))
+                    MappingLabel(
+                        key: key(for: .functionRightThumbstickButton),
+                        title: title(for: .functionRightThumbstickButton)
+                    )
                 }
                 .frame(width: 132, alignment: .leading)
             }
@@ -457,10 +393,16 @@ private struct ConnectionInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.text("连接与诊断", "Connections and Diagnostics"))
-                .font(.headline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+            HStack(spacing: 8) {
+                Text(L10n.text("链路状态", "Connection Status"))
+                    .font(.headline)
+
+                Spacer(minLength: 8)
+
+                HealthIndicator(status: status)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
 
             Divider()
 
@@ -543,6 +485,15 @@ private struct ConnectionInspector: View {
                 }
             }
             .padding(16)
+
+            HStack {
+                Spacer()
+                Text(AppVersion.displayName)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
         }
         .background(.regularMaterial)
     }
@@ -651,39 +602,6 @@ private struct HealthIndicator: View {
                 : L10n.text("检查连接", "Check Connections"))
                 .font(.caption)
         }
-    }
-}
-
-private struct ActivityBar: View {
-    let status: DashboardStatus
-    let message: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Label(L10n.text("活动", "Activity"), systemImage: "waveform.path.ecg")
-                .font(.caption.weight(.semibold))
-            Divider().frame(height: 16)
-            Text(message.isEmpty ? activityText : message)
-                .font(.caption)
-                .foregroundStyle(message.isEmpty ? Color.secondary : Color.primary)
-                .lineLimit(1)
-            Spacer()
-            Text(formattedTimestamp)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 38)
-        .background(.bar)
-    }
-
-    private var activityText: String {
-        status.note.isEmpty ? L10n.text("等待事件", "Waiting for events") : status.note
-    }
-
-    private var formattedTimestamp: String {
-        guard let date = ISO8601DateFormatter().date(from: status.timestamp) else { return "--:--:--" }
-        return date.formatted(date: .omitted, time: .standard)
     }
 }
 

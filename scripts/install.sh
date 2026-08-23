@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="$(tr -d '[:space:]' < "${ROOT}/Sources/JoyHarness/Resources/VERSION")"
 BIN_DIR="${HOME}/.agent-deck/bin"
 APP_DIR="${HOME}/.agent-deck/Joy Harness.app"
 LEGACY_APP_DIR="${HOME}/.agent-deck/AgentDeck.app"
@@ -31,7 +32,7 @@ BUILT="${BUILT_DIR}/JoyHarness"
 RESOURCE_BUNDLE="${BUILT_DIR}/JoyHarness_JoyHarness.bundle"
 install -m 755 "${BUILT}" "${STAGED_APP_EXE}"
 /usr/bin/ditto "${RESOURCE_BUNDLE}/" "${STAGED_CONTENTS}/Resources/"
-cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
+cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,6 +45,10 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
   <string>Joy Harness</string>
   <key>CFBundleIconFile</key>
   <string>JoyHarness.icns</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${VERSION}</string>
+  <key>CFBundleVersion</key>
+  <string>${VERSION}</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

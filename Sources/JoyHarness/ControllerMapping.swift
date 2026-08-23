@@ -42,6 +42,9 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
     case functionButtonY
     case functionLeftShoulder
     case functionRightShoulder
+    case functionRightTrigger
+    case functionLeftThumbstickButton
+    case functionRightThumbstickButton
     case functionDpadUp
     case functionDpadLeft
     case functionDpadDown
@@ -76,6 +79,9 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         case .functionButtonY: playStation ? "L2 + △" : "LT + Y"
         case .functionLeftShoulder: playStation ? "L2 + L1" : "LT + LB"
         case .functionRightShoulder: playStation ? "L2 + R1" : "LT + RB"
+        case .functionRightTrigger: playStation ? "L2 + R2" : "LT + RT"
+        case .functionLeftThumbstickButton: playStation ? "L2 + L3" : "LT + L3"
+        case .functionRightThumbstickButton: playStation ? "L2 + R3" : "LT + R3"
         case .functionDpadUp: playStation
             ? L10n.text("L2 + 十字键 上", "L2 + D-Pad Up")
             : L10n.text("LT + 十字键 上", "LT + D-Pad Up")
@@ -97,6 +103,8 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
             .dpad
         case .functionButtonA, .functionButtonB, .functionButtonX, .functionButtonY,
              .functionLeftShoulder, .functionRightShoulder,
+             .functionRightTrigger,
+             .functionLeftThumbstickButton, .functionRightThumbstickButton,
              .functionDpadUp, .functionDpadLeft, .functionDpadDown, .functionDpadRight:
             .functionLayer
         default:
@@ -120,9 +128,13 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case mouseLeft
     case mouseRight
     case mouseMiddle
+    case enter
     case backspace
     case escape
     case rightCommand
+    case copy
+    case paste
+    case screenshotTool
     case answerYes
     case answerNo
     case approve
@@ -151,9 +163,13 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseLeft: L10n.text("鼠标左键", "Left Mouse Button")
         case .mouseRight: L10n.text("鼠标右键", "Right Mouse Button")
         case .mouseMiddle: L10n.text("鼠标中键", "Middle Mouse Button")
+        case .enter: L10n.text("回车", "Enter")
         case .backspace: L10n.text("退格", "Backspace")
         case .escape: "Esc"
         case .rightCommand: L10n.text("右侧 Command", "Right Command")
+        case .copy: L10n.text("复制", "Copy")
+        case .paste: L10n.text("粘贴", "Paste")
+        case .screenshotTool: L10n.text("飞书截图", "Feishu Screenshot")
         case .answerYes: L10n.text("输入 yes", "Type yes")
         case .answerNo: L10n.text("输入 no", "Type no")
         case .approve: L10n.text("批准", "Approve")
@@ -180,9 +196,13 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseLeft: .mouseButton(.left)
         case .mouseRight: .mouseButton(.right)
         case .mouseMiddle: .mouseButton(.middle)
+        case .enter: .systemKey(.enter)
         case .backspace: .systemKey(.backspace)
         case .escape: .systemKey(.escape)
         case .rightCommand: .systemKey(.rightCommand)
+        case .copy: .systemKey(.copy)
+        case .paste: .systemKey(.paste)
+        case .screenshotTool: .systemKey(.screenshotTool)
         case .answerYes: .textInput("yes")
         case .answerNo: .textInput("no")
         case .approve: .microKey("ACT07")
@@ -214,7 +234,7 @@ final class ControllerMappingStore: ObservableObject {
         .rightShoulder: .nextSlot,
         .leftTrigger: .functionModifier,
         .menu: .pushToTalk,
-        .options: .disabled,
+        .options: .screenshotTool,
         .home: .disabled,
         .rightTrigger: .focusCodex,
         .leftThumbstickButton: .mouseSpeedBoost,
@@ -230,6 +250,9 @@ final class ControllerMappingStore: ObservableObject {
         .functionButtonY: .answerYes,
         .functionLeftShoulder: .slot5,
         .functionRightShoulder: .slot6,
+        .functionRightTrigger: .enter,
+        .functionLeftThumbstickButton: .copy,
+        .functionRightThumbstickButton: .paste,
         .functionDpadUp: .slot1,
         .functionDpadLeft: .slot2,
         .functionDpadDown: .slot3,
@@ -265,6 +288,8 @@ final class ControllerMappingStore: ObservableObject {
         migrateYesNoFaceButtonsIfNeeded()
         migrateUnifiedFaceButtonLayoutIfNeeded()
         migrateDPadUpToRightCommandIfNeeded()
+        migrateClipboardAndScreenshotDefaultsIfNeeded()
+        migrateClipboardToThumbsticksIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
@@ -356,6 +381,32 @@ final class ControllerMappingStore: ObservableObject {
         guard !userDefaults.bool(forKey: migrationKey) else { return }
         if mappings[.dpadUp] == .radialInput {
             mappings[.dpadUp] = .rightCommand
+            persist()
+        }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
+    private func migrateClipboardAndScreenshotDefaultsIfNeeded() {
+        let migrationKey = "\(storageKey).clipboardAndScreenshotDefaultsMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        var changed = false
+        if mappings[.options] == .disabled {
+            mappings[.options] = .screenshotTool
+            changed = true
+        }
+        if changed { persist() }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
+    private func migrateClipboardToThumbsticksIfNeeded() {
+        let migrationKey = "\(storageKey).clipboardThumbstickDefaultsMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        if mappings[.functionButtonX] == .copy,
+           mappings[.functionButtonY] == .paste {
+            mappings[.functionButtonX] = .answerNo
+            mappings[.functionButtonY] = .answerYes
             persist()
         }
         userDefaults.set(true, forKey: migrationKey)
