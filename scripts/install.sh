@@ -54,15 +54,8 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
 </dict>
 </plist>
 EOF
-codesign --force --deep --sign - \
-  --identifier tech.joyharness.daemon \
-  --requirements '=designated => identifier "tech.joyharness.daemon"' \
-  "${STAGED_APP_DIR}"
-launchctl bootout "gui/$(id -u)/tech.joyharness.daemon" 2>/dev/null || true
-launchctl bootout "gui/$(id -u)/tech.codexpad.daemon" 2>/dev/null || true
-launchctl bootout "gui/$(id -u)/tech.agentdeck.daemon" 2>/dev/null || true
-pkill -x "JoyHarness" 2>/dev/null || true
-pkill -x "AgentDeck" 2>/dev/null || true
+"${ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_DIR}" "tech.joyharness.daemon"
+"${ROOT}/scripts/stop_joy_harness_instances.sh"
 for legacy_plist in "${LEGACY_AGENTDECK_PLIST}" "${LEGACY_CODEXPAD_PLIST}"; do
   if [[ -f "${legacy_plist}" ]]; then
     unlink "${legacy_plist}"

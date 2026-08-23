@@ -1,3 +1,8 @@
+import os
+import plistlib
+import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,21 +13,102 @@ ROOT = Path(__file__).resolve().parents[1]
 class LaunchAgentMigrationTests(unittest.TestCase):
     def test_install_migrates_agentdeck_service_to_joy_harness(self) -> None:
         script = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        stop_script = (
+            ROOT / "scripts" / "stop_joy_harness_instances.sh"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("tech.joyharness.daemon.plist", script)
         self.assertIn("<string>tech.joyharness.daemon</string>", script)
-        self.assertIn('tech.agentdeck.daemon"', script)
-        self.assertIn('pkill -x "JoyHarness"', script)
-        self.assertIn('pkill -x "AgentDeck"', script)
+        self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
+        self.assertNotIn("pkill -x", script)
+        self.assertIn("tech.joyharness.daemon", stop_script)
+        self.assertIn("tech.agentdeck.daemon", stop_script)
+        self.assertIn("tech.codexpad.daemon", stop_script)
 
     def test_development_run_unloads_installed_daemons(self) -> None:
         script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
 
-        self.assertIn(
-            "for service in tech.joyharness.daemon tech.agentdeck.daemon "
-            "tech.codexpad.daemon; do",
-            script,
-        )
+        self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
+        self.assertIn('pgrep -f -x "${APP_BINARY}"', script)
+
+    def test_shared_stop_step_terminates_bundle_process_by_full_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            executable = (
+                Path(temporary_directory)
+                / "Joy Harness.app"
+                / "Contents"
+                / "MacOS"
+                / "JoyHarness"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.symlink_to("/usr/bin/yes")
+            process = subprocess.Popen(
+                [str(executable)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.addCleanup(lambda: process.poll() is None and process.kill())
+
+            environment = os.environ.copy()
+            environment["JOY_HARNESS_SKIP_LAUNCH_AGENTS"] = "1"
+            environment["JOY_HARNESS_PROCESS_PATTERN"] = (
+                f"^{re.escape(str(executable))}$"
+            )
+            subprocess.run(
+                [str(ROOT / "scripts" / "stop_joy_harness_instances.sh")],
+                check=True,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIsNotNone(process.wait(timeout=2))
+
+    def test_all_app_builds_use_the_shared_signing_step(self) -> None:
+        development = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
+        installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+        self.assertIn('scripts/sign_macos_app.sh"', development)
+        self.assertIn('scripts/sign_macos_app.sh"', installer)
+        self.assertNotIn('"${APP_BUNDLE}/JoyHarness_JoyHarness.bundle"', development)
+
+    def test_signing_step_produces_a_valid_app_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            app = Path(temporary_directory) / "Fixture.app"
+            executable = app / "Contents" / "MacOS" / "Fixture"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            with (app / "Contents" / "Info.plist").open("wb") as plist_file:
+                plistlib.dump(
+                    {
+                        "CFBundleExecutable": "Fixture",
+                        "CFBundleIdentifier": "tech.joyharness.fixture",
+                        "CFBundleName": "Fixture",
+                        "CFBundlePackageType": "APPL",
+                    },
+                    plist_file,
+                )
+
+            environment = os.environ.copy()
+            environment["JOY_HARNESS_SIGNING_IDENTITY"] = "-"
+            subprocess.run(
+                [
+                    str(ROOT / "scripts" / "sign_macos_app.sh"),
+                    str(app),
+                    "tech.joyharness.fixture",
+                ],
+                check=True,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                ["codesign", "--verify", "--deep", "--strict", str(app)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
 
 
 if __name__ == "__main__":

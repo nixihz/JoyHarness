@@ -11,11 +11,7 @@ APP_BUNDLE="${PROJECT_ROOT}/dist/${DISPLAY_NAME}.app"
 APP_CONTENTS="${APP_BUNDLE}/Contents"
 APP_BINARY="${APP_CONTENTS}/MacOS/${APP_NAME}"
 
-for service in tech.joyharness.daemon tech.agentdeck.daemon tech.codexpad.daemon; do
-  launchctl bootout "gui/$(id -u)/${service}" 2>/dev/null || true
-done
-pkill -x "${APP_NAME}" 2>/dev/null || true
-pkill -x "AgentDeck" 2>/dev/null || true
+"${PROJECT_ROOT}/scripts/stop_joy_harness_instances.sh"
 cd "${PROJECT_ROOT}"
 swift build -c debug --product "${APP_NAME}"
 BUILT_DIR="$(swift build -c debug --show-bin-path)"
@@ -29,7 +25,6 @@ chmod +x "${APP_BINARY}"
 RESOURCE_BUNDLE="$(swift build -c debug --show-bin-path)/JoyHarness_JoyHarness.bundle"
 mkdir -p "${APP_CONTENTS}/Resources"
 /usr/bin/ditto "${RESOURCE_BUNDLE}/" "${APP_CONTENTS}/Resources/"
-/usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/JoyHarness_JoyHarness.bundle"
 
 cat > "${APP_CONTENTS}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -50,11 +45,11 @@ cat > "${APP_CONTENTS}/Info.plist" <<PLIST
   <string>${MIN_SYSTEM_VERSION}</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>Joy Harness records while the controller Menu button is held and sends the audio to the selected Codex task.</string>
 </dict>
 </plist>
 PLIST
+
+"${PROJECT_ROOT}/scripts/sign_macos_app.sh" "${APP_BUNDLE}" "${BUNDLE_ID}"
 
 open_app() {
   /usr/bin/open -n "${APP_BUNDLE}"
@@ -78,7 +73,7 @@ case "${MODE}" in
   --verify|verify)
     open_app
     sleep 1
-    pgrep -x "${APP_NAME}" >/dev/null
+    pgrep -f -x "${APP_BINARY}" >/dev/null
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
