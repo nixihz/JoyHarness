@@ -1,7 +1,7 @@
 # Joy Harness
 
-Joy Harness 是一套面向 macOS Codex Desktop 的实体控制方案：它把 Xbox 手柄（或其他被
-macOS `GameController` 框架识别的扩展型手柄）变成 Codex Micro 控制器，同时用手柄震动
+Joy Harness 是一套面向 macOS Codex Desktop 的实体控制方案：它把 PS5 DualSense、Xbox
+等被 macOS `GameController` 框架识别的扩展型手柄变成 Codex Micro 控制器，同时用手柄震动
 反馈 Codex 的运行状态。
 
 这套方案由三部分组成：
@@ -12,11 +12,13 @@ macOS `GameController` 框架识别的扩展型手柄）变成 Codex Micro 控�
 3. **Codex hooks 与 notify bridge**：把开始工作、等待审批、完成和失败等状态发送给
    Joy Harness，让你不盯着屏幕也能通过震动感知任务进度。
 
-Xbox 手柄和 RP2040 都连接 Mac，二者之间**不需要接线**。Joy Harness 不启动或代理
-Codex app-server，也不通过键盘模拟 Codex Micro；任务槽、审批、按住说话等 Codex 操作
-最终都由 RP2040 的原生 Vendor HID 接口送入 Codex Desktop。
+手柄和 RP2040 都连接 Mac，二者之间**不需要接线**。Joy Harness 会启动一个只读的 Codex
+app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，也不通过键盘模拟 Codex Micro；
+任务槽、审批、按住说话等操作最终都由 RP2040 的原生 Vendor HID 接口送入 Codex Desktop。
 
 ![Xbox 手柄布局](Sources/JoyHarness/Resources/controller-dashboard.png)
+
+![PS5 DualSense 手柄布局](Sources/JoyHarness/Resources/controller-dashboard-dualsense.png)
 
 ## 能达到什么效果
 
@@ -24,15 +26,19 @@ Codex app-server，也不通过键盘模拟 Codex Micro；任务槽、审批、�
 
 - **离开键盘操作 Codex**：用手柄在六个 Codex Micro 任务槽之间切换、打开当前任务、
   批准或拒绝权限请求、触发快捷操作和拆分任务。
-- **按住说话**：按住 Menu 键时发送 Codex Micro `ACT10`，松开时结束，由 Codex Desktop
-  原生完成录音和语音输入。
+- **按住说话**：按住 Menu/Options 键时发送 Codex Micro `ACT10`，松开时结束；DualSense
+  还可用触控板按键。录音仍由 Codex Desktop 原生完成。
+- **DualSense 语音诊断**：检测通过 USB 暴露的手柄麦克风，并提示它是否已被设为 macOS
+  默认输入；Joy Harness 不抢占录音设备，也不改动全局声音设置。
+- **DualSense R2 强反馈**：R2 轻触时给一次轻震，中段形成明显阻力墙，完全按下越过触发点
+  时释放阻力并补一次短促强震，形成分级的操作确认。
 - **用手柄控制 macOS**：左摇杆移动鼠标，LT + 左摇杆滚动，A/B 负责左右键，R3 负责
   中键，X/Y 负责 Backspace 和 Esc。
 - **用震动了解任务状态**：任务工作中、等待审批、完成或失败时使用不同节奏，尤其适合
   同时处理多个任务或暂时离开屏幕时使用。
 - **管理六个任务槽**：LB/RB 顺序切换，或用 LT 组合键直接跳到 1–6 号槽位；切换后以
   对应次数的短震确认当前槽号。
-- **可视化诊断**：macOS 控制台展示当前槽位、每个槽位最近状态、手柄与震动能力、
+- **可视化诊断**：macOS 控制台展示当前槽位、每个槽位最近状态、手柄电量与震动能力、
   RP2040 连接状态以及辅助功能授权状态，并可直接发送批准、拒绝、快捷操作和打开任务。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
@@ -58,7 +64,7 @@ Codex hooks / notify_fanout.py
 Joy Harness macOS 应用 ── Core Haptics ──▶ 手柄震动
         ▲
         │ GameController
-        └────────────────────────────────── Xbox / 兼容手柄
+        └────────────────────────────────── DualSense / Xbox / 兼容手柄
 
 手柄操作 ──▶ Joy Harness ── USB CDC 串口 ──▶ RP2040
                                                 │
@@ -107,14 +113,32 @@ xcode-select --install
 ### 必需的硬件
 
 - 一台运行 macOS 的 Mac。
-- 一只可被 macOS `GameController` 框架识别、具有 Extended Gamepad 布局的手柄。项目主要按
-  Xbox Series 手柄设计；其他手柄能否完整映射取决于 macOS 是否提供对应按键与摇杆。
+- 一只可被 macOS `GameController` 框架识别、具有 Extended Gamepad 布局的手柄。项目原生
+  适配 PS5 DualSense、PS4 DualShock 4 和 Xbox Series 手柄；其他手柄可使用标准按键、
+  摇杆与十字键，具体能力取决于 macOS 暴露的输入与震动接口。
 - 一块 RP2040 开发板，例如 Raspberry Pi Pico 或兼容板。
 - 一根**支持数据传输**的 USB 线。只能充电的线无法刷写固件或创建串口/HID 设备。
 
 手柄可以通过蓝牙或 USB 连接，但当前测试的 Xbox Series 手柄在 macOS 26.5.2 下只有
 **蓝牙模式可以正常震动**；USB 模式虽可被系统识别，系统原生 Identify 也不会触发震动。
 需要状态反馈时优先使用蓝牙。
+
+DualSense 的标准按键、触控板按键和震动由 Apple 的 `GCDualSenseGamepad` / Core Haptics
+接口支持。若要使用手柄内置麦克风，应通过支持数据传输的 USB 线连接，并在“系统设置 →
+声音 → 输入”中选择 `DualSense Wireless Controller` 或 `Wireless Controller`。这里的
+`Wireless` 是产品名，不代表音频正在走无线；Joy Harness 会另外显示真实的 `USB` 传输。
+蓝牙模式只提供手柄 HID 输入，不会向 macOS 发布麦克风音频设备，软件无法从不存在的音频
+端点采集声音。若希望手柄保持无线，可继续用 Options/触控板触发按住说话，并把 Codex 的
+录音输入设为 Mac 内置麦克风、AirPods 或其他无线麦克风；控制台会显示当前系统默认输入。
+DualSense 的实体静音键没有公开的 GameController 事件，是否静音由手柄固件和系统音频设备
+自行管理。
+
+DualSense 的 R2 使用系统公开的自适应扳机接口：进入约 8% 行程时先轻震一次，前 35% 为
+自由行程，35%–72% 提供最高 90% 的阻力，越过 72% 后突然释放并触发一次强震。快速直接
+按到底时会跳过轻震，避免反馈重叠；松开到 18% 以下会重新待命。此反馈只在
+DualSense 上启用，不改变 Xbox、DualShock 4 或通用手柄的 RT/R2 输入行为。macOS 会在
+Joy Harness 退到后台时关闭 GameController 的扳机效果；USB 连接的 DualSense 会通过原始
+HID 输出自动恢复，因此在 Codex Desktop 前台也能保持阻力。蓝牙连接暂不支持后台恢复。
 
 ### 构建 RP2040 固件所需工具
 
@@ -138,6 +162,7 @@ task --version
 | 权限 | 授权对象 | 影响 |
 |---|---|---|
 | 辅助功能（Accessibility） | Joy Harness | 允许左摇杆移动/滚动鼠标，以及 A/B/X/Y/R3 发送鼠标或系统按键 |
+| 输入监控（Input Monitoring） | Joy Harness | 允许应用退到后台后继续接收手柄输入 |
 | 输入监控（Input Monitoring） | Codex Desktop | 允许 Codex Desktop 接收 Codex Micro 的物理输入 |
 | 麦克风 | Codex Desktop | 仅在使用原生按住说话时由 Codex Desktop 管理；Joy Harness 不申请麦克风权限 |
 
@@ -191,10 +216,13 @@ task install
 
 安装脚本会编译 release 应用、注册后台 LaunchAgent、合并 Codex hooks，并为现有 `notify`
 配置创建 fan-out，避免覆盖原来的通知命令。详细文件改动见“安装会改动什么”。
+部署或开发启动前会按完整应用路径停止所有旧 Joy Harness / AgentDeck 实例，确认退出后再启动
+唯一的新实例，避免多个应用争抢手柄和 Unix socket。应用本身也持有跨副本的进程锁；即使
+从其他目录手动打开旧副本，后启动的实例也会立即退出。
 
 ### 3. 连接设备并重启 Codex
 
-1. 通过蓝牙或 USB 连接手柄；若需要 Xbox 震动，优先使用蓝牙。
+1. 通过蓝牙或 USB 连接手柄；Xbox 震动优先使用蓝牙，DualSense 内置麦克风使用 USB。
 2. 保持刷好固件的 RP2040 通过数据线连接 Mac。
 3. 完全退出 Codex Desktop 后重新打开，让它重新扫描 `Codex Micro` HID 设备。
 4. 在系统设置中给 Joy Harness 授予辅助功能权限，给 Codex Desktop 授予输入监控权限。
@@ -223,6 +251,7 @@ task status
 
 其中 `haptics: false` 只表示当前手柄没有可用的 Core Haptics 引擎，不影响普通按键输入；
 `accessibility: false` 不影响 RP2040/Codex Micro 操作，但会禁用鼠标和系统按键。
+控制台的“语音输入”会显示检测到的 DualSense 音频设备，并标记它是否为系统默认输入。
 
 测试单个震动状态和完整震动序列：
 
@@ -259,25 +288,29 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | Y | Esc | 是 |
 
 这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
-改为滚动，A/B/X/Y 改为 Codex Micro 操作，不再发送鼠标或系统按键。
+改为滚动；Xbox 的 Y/X 输入 `yes` / `no`，PlayStation 的 △/□ 执行相同行为。文字只会
+填入当前输入框，不会自动按 Return，提交前仍可检查或修改。
 
 ### Codex Micro 控制
 
 | 按键 | Micro 输入 | 实际效果 |
 |---|---|---|
-| LT + A | `ACT07` | 批准当前权限请求 |
-| LT + B | `ACT08` | 拒绝当前权限请求 |
-| LT + X | `ACT06` | 触发 Codex 快捷操作 |
-| LT + Y | `ACT09` | 拆分任务 |
+| Xbox：LT + A；PlayStation：L2 + × | `ACT07` | 批准当前权限请求 |
+| Xbox：LT + B；PlayStation：L2 + ○ | `ACT08` | 拒绝当前权限请求 |
+| Xbox：LT + Y；PlayStation：L2 + △ | 键盘输入 | 在当前输入框填入 `yes`，不自动提交 |
+| Xbox：LT + X；PlayStation：L2 + □ | 键盘输入 | 在当前输入框填入 `no`，不自动提交 |
 | LB / RB | `AG00`–`AG05` | 切换到上一个 / 下一个任务槽，首尾循环 |
 | LT + 上 / 左 / 下 / 右 | `AG00`–`AG03` | 逆时针直接选择任务槽 1 / 2 / 3 / 4 |
 | LT + LB / RB | `AG04` / `AG05` | 直接选择任务槽 5 / 6 |
-| Menu 按住 / 松开 | `ACT10` 按下 / 松开 | Codex Desktop 原生按住说话 |
-| RT | `ACT12` | 默认聚焦 Codex Desktop |
+| Menu / Options 按住 / 松开 | `ACT10` 按下 / 松开 | Codex Desktop 原生按住说话 |
+| DualSense / DualShock 触控板按住 / 松开 | `ACT10` 按下 / 松开 | PlayStation 手柄的备用按住说话入口 |
+| RT / R2 扣过阻力墙 | `ACT12` | 到达确认行程后聚焦 Codex Desktop；轻按不会触发 |
 | 十字键（未按 LT）/ 右摇杆 | `v.oai.rad` | 发送角度和力度形式的径向输入 |
 
-LB/RB 和 LT 组合键直接操作 Codex Desktop 自己管理的六个 Micro 槽位。Joy Harness 只记录
-当前槽号和最近一次状态，不维护第二份任务列表，也不会把任务正文写入本地状态文件。
+LB/RB 和 LT 组合键直接操作 Codex Desktop 自己管理的六个 Micro 槽位。Joy Harness 通过
+Codex app-server 的只读 `thread/list` 获取六个最近任务的名称和顺序，并按 hook 携带的
+`session_id` 记录每个任务的最近状态；本地状态文件只保存用于槽位展示的名称，未命名任务
+会保存首条消息摘要，不保存完整会话正文。
 
 ### Codex 状态与震动
 
@@ -304,8 +337,8 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 - 辅助功能权限诊断。
 - 批准、拒绝、快捷操作、打开任务和震动状态测试按钮。
 
-控制台中的任务命令同样依赖 RP2040 已连接。当前版本不会从 Codex app-server 拉取任务标题
-或正文，因此空标题会显示为“Micro 槽位”；状态是当前会话内按槽位记录的最近事件。
+控制台中的任务命令同样依赖 RP2040 已连接。任务名称来自 Codex app-server；未命名任务会
+回退显示首条消息摘要。状态按任务 ID 跟随，不会因切换槽位而记到另一个任务上。
 
 ## 常用命令
 
@@ -430,6 +463,10 @@ AGENT_DECK_RP2040_PORT=/dev/cu.usbmodemXXXX task run
 在“系统设置 → 隐私与安全性 → 辅助功能”中允许 Joy Harness，然后重新启动应用。该权限只
 影响鼠标、滚动、Backspace 和 Esc，不影响通过 RP2040 发送的 Codex Micro 操作。
 
+开发和安装脚本会在最终 `.app` 组装完成后统一签名，避免重新构建时辅助功能开关自动失效。
+脚本优先使用钥匙串中已有的 Apple Development 身份；没有开发身份时使用固定 requirement
+的 ad-hoc 签名。签名策略改变后，macOS 可能要求重新授权一次，后续重建不会重复丢失权限。
+
 ### Codex 收不到任务槽或审批按键
 
 - 确认 `rp2040` 为 `true`。
@@ -461,7 +498,7 @@ Taskfile.yml                    常用任务入口
 - 手柄灯光没有 macOS 公共控制 API，因此状态反馈只使用震动。
 - `PermissionRequest` hook 只负责发送 `waiting` 状态；实际批准和拒绝由 Codex Desktop 的
   Codex Micro 处理。
-- Joy Harness 不读取任务正文，也不持有 Codex 会话数据；六个槽位的权威状态仍由
-  Codex Desktop 管理。
+- Joy Harness 只读取任务 ID、显示名称和未命名任务的首条消息摘要，不持有完整 Codex
+  会话数据；六个槽位的任务顺序仍由 Codex app-server 管理。
 - 没有手柄时 daemon 仍会运行并更新 `status.json`；震动请求会在日志中标记为 skipped。
 - 按住说话完全由 Codex Desktop 管理，Joy Harness 本身不录音。
