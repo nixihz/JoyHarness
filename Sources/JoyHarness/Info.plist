@@ -8,5 +8,7 @@
   <string>Joy Harness</string>
   <key>CFBundleDisplayName</key>
   <string>Joy Harness</string>
+  <key>CFBundleIconFile</key>
+  <string>JoyHarness.icns</string>
 </dict>
 </plist>

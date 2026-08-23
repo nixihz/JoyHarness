@@ -45,6 +45,8 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
   <string>tech.joyharness.daemon</string>
   <key>CFBundleName</key>
   <string>Joy Harness</string>
+  <key>CFBundleIconFile</key>
+  <string>JoyHarness.icns</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

@@ -41,6 +41,8 @@ cat > "${APP_CONTENTS}/Info.plist" <<PLIST
   <string>${DISPLAY_NAME}</string>
   <key>CFBundleDisplayName</key>
   <string>${DISPLAY_NAME}</string>
+  <key>CFBundleIconFile</key>
+  <string>JoyHarness.icns</string>
   <key>LSMinimumSystemVersion</key>
   <string>${MIN_SYSTEM_VERSION}</string>
   <key>NSPrincipalClass</key>
