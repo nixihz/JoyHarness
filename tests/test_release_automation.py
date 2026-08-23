@@ -13,7 +13,7 @@ class ReleaseAutomationTests(unittest.TestCase):
 
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("contents: write", workflow)
-        self.assertIn("runs-on: macos-15", workflow)
+        self.assertIn("runs-on: macos-26", workflow)
         self.assertIn('refs/heads/main', workflow)
         self.assertIn("gh release create", workflow)
         self.assertIn("--draft", workflow)
