@@ -26,7 +26,7 @@ class LaunchAgentMigrationTests(unittest.TestCase):
         self.assertIn("tech.codexpad.daemon", stop_script)
 
     def test_development_run_unloads_installed_daemons(self) -> None:
-        script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
+        script = (ROOT / "scripts" / "build_and_run.sh").read_text(encoding="utf-8")
 
         self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
         self.assertIn('pgrep -f -x "${APP_BINARY}"', script)
@@ -65,7 +65,7 @@ class LaunchAgentMigrationTests(unittest.TestCase):
             self.assertIsNotNone(process.wait(timeout=2))
 
     def test_all_app_builds_use_the_shared_signing_step(self) -> None:
-        development = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
+        development = (ROOT / "scripts" / "build_and_run.sh").read_text(encoding="utf-8")
         installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
 
         self.assertIn('scripts/sign_macos_app.sh"', development)

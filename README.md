@@ -398,15 +398,15 @@ python3 bin/joy-harness-send error --note manual-test
 不使用 LaunchAgent，构建 `.app` 后直接打开：
 
 ```bash
-./script/build_and_run.sh
+./scripts/build_and_run.sh
 ```
 
 其他调试模式：
 
 ```bash
-./script/build_and_run.sh --verify
-./script/build_and_run.sh --logs
-./script/build_and_run.sh --debug
+./scripts/build_and_run.sh --verify
+./scripts/build_and_run.sh --logs
+./scripts/build_and_run.sh --debug
 ```
 
 注意：该脚本会先停止已安装的 Joy Harness / AgentDeck LaunchAgent 和进程，以避免多个实例
@@ -514,7 +514,7 @@ codex-hooks/notify_fanout.py    保留原 notify 的完成通知分发器
 scripts/install.sh              release 构建、安装、配置合并和 LaunchAgent 注册
 scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
-script/build_and_run.sh         前台 `.app` 构建与调试入口
+scripts/build_and_run.sh        前台 `.app` 构建与调试入口
 tests/                          Swift 和 Python 测试
 docs/research/                  手柄音频、无线麦克风与 USB-over-IP 可行性研究
 Taskfile.yml                    常用任务入口
