@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Send an AgentDeck state over the local unix socket."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import socket
+import sys
+from pathlib import Path
+
+DEFAULT_SOCK = Path.home() / ".agent-deck" / "pad.sock"
+VALID = ("idle", "busy", "waiting", "done", "error")
+
+
+def send(payload: dict, sock_path: Path, timeout: float = 0.8) -> int:
+    if not sock_path.exists():
+        print(f"[agent-deck-send] daemon not running ({sock_path})", file=sys.stderr)
+        return 2
+    data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect(str(sock_path))
+            s.sendall(data)
+            try:
+                s.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            try:
+                s.recv(64)
+            except OSError:
+                pass
+    except OSError as exc:
+        print(f"[agent-deck-send] send failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Drive AgentDeck haptic states")
+    parser.add_argument(
+        "state",
+        nargs="?",
+        help="Pad state (idle|busy|waiting|done|error) or action alias (ping|status)",
+    )
+    parser.add_argument("--note", default="", help="Optional note for status.json")
+    parser.add_argument(
+        "--action",
+        default="",
+        help="Daemon action (ping|status|slot-next|slot-previous|slot-open)",
+    )
+    parser.add_argument(
+        "--sock",
+        default=os.environ.get("AGENT_DECK_SOCK", str(DEFAULT_SOCK)),
+        help="Unix socket path",
+    )
+    args = parser.parse_args()
+
+    state = args.state
+    action = args.action
+    if state in {"ping", "status"} and not action:
+        action, state = state, None
+    if state and state not in VALID:
+        parser.error(f"invalid state {state!r}; choose from {', '.join(VALID)}")
+
+    payload: dict = {}
+    if action:
+        payload["action"] = action
+    if state:
+        payload["state"] = state
+    if args.note:
+        payload["note"] = args.note
+    if not payload:
+        parser.error("provide a state or --action / ping|status")
+
+    return send(payload, Path(args.sock))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

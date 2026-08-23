@@ -1,0 +1,56 @@
+version: "3"
+
+tasks:
+  build:
+    desc: Build AgentDeck release binary
+    cmds:
+      - swift build -c release
+
+  firmware:
+    desc: Build the AgentDeck RP2040 UF2 firmware
+    cmds:
+      - bash scripts/build_rp2040_firmware.sh
+
+  flash:
+    desc: Flash firmware to an RP2040 currently in BOOTSEL mode
+    cmds:
+      - bash scripts/flash_rp2040_firmware.sh
+
+  test:
+    desc: Test the Swift bridge and Codex hook integration
+    cmds:
+      - swift test
+      - python3 -m unittest discover -s tests -v
+
+  run:
+    desc: Run daemon in foreground
+    cmds:
+      - swift run AgentDeck
+
+  send:
+    desc: "Send a state: task send -- waiting"
+    cmds:
+      - python3 bin/agent-deck-send {{.CLI_ARGS}}
+
+  install:
+    desc: Build, install LaunchAgent, wire Codex hooks/notify
+    cmds:
+      - bash scripts/install.sh
+
+  demo:
+    desc: Cycle through haptic states (daemon must be running)
+    cmds:
+      - python3 bin/agent-deck-send busy --note demo
+      - sleep 2
+      - python3 bin/agent-deck-send waiting --note demo
+      - sleep 2
+      - python3 bin/agent-deck-send done --note demo
+      - sleep 1
+      - python3 bin/agent-deck-send error --note demo
+      - sleep 1
+      - python3 bin/agent-deck-send idle --note demo
+
+  status:
+    desc: Show ~/.agent-deck/status.json
+    cmds:
+      - cat ~/.agent-deck/status.json 2>/dev/null || echo "no status yet"
