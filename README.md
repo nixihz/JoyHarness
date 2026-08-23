@@ -8,125 +8,107 @@
   <img src="Sources/JoyHarness/Resources/Brand/joy-harness-app-icon-v5.png" alt="Joy Harness app icon" width="112">
 </p>
 
-Joy Harness 是一套面向 macOS Codex Desktop 的实体控制方案。它把 PS5 DualSense、Xbox
-等被 macOS `GameController` 框架识别的扩展型手柄，连接到鼠标与系统快捷键、六个 Codex
-Micro 任务槽、权限审批和按住说话，并提供操作确认震动与本地诊断界面。
+<p align="center">
+  <a href="docs/README.zh-CN.md">简体中文</a>
+</p>
 
-这套方案由两部分组成：
+Joy Harness is a physical control system for Codex Desktop on macOS. It connects a PS5 DualSense, Xbox controller, or another extended gamepad recognized by macOS to mouse controls, system shortcuts, six Codex Micro task slots, permission approvals, push-to-talk, haptic confirmation, and a local diagnostics dashboard.
 
-1. **Joy Harness macOS 应用**：读取手柄输入、控制鼠标、播放震动，并提供六任务槽控制台。
-2. **RP2040 固件**：让一块 Raspberry Pi Pico 兼容板在 USB 侧模拟 Codex Desktop 能识别的
-   `Codex Micro`，再通过串口接收 Joy Harness 转发的手柄操作。
+The system has two parts:
 
-手柄和 RP2040 都连接 Mac，二者之间**不需要接线**。Joy Harness 会启动一个只读的 Codex
-app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，也不通过键盘模拟 Codex Micro；
-任务槽、审批、按住说话等操作最终都由 RP2040 的原生 Vendor HID 接口送入 Codex Desktop。
-鼠标、回车、复制、粘贴和截图等系统操作则直接发送给当前前台应用。
+1. **Joy Harness for macOS** reads controller input, controls the mouse, plays haptic feedback, and provides a six-slot dashboard.
+2. **RP2040 firmware** turns a Raspberry Pi Pico-compatible board into a `Codex Micro` device recognized by Codex Desktop and receives controller actions from Joy Harness over serial.
 
-## 下载
+Both the controller and RP2040 connect to the Mac; no wiring is required between them. Joy Harness starts a read-only Codex app-server subprocess to retrieve task names and ordering. It does not proxy Codex actions or emulate Codex Micro with keyboard events. Slot selection, approvals, and push-to-talk reach Codex Desktop through the RP2040's native Vendor HID interface. Mouse actions and system shortcuts are sent directly to the foreground macOS application.
 
-当前版本为 **v0.2.0**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
+## Download
 
-- [下载 Joy-Harness-v0.2.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.0/Joy-Harness-v0.2.0-macOS-arm64.dmg)
-- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.2.0/Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256)
-- [查看 v0.2.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.0)
+The current release is **v0.2.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-DMG 只包含可手动启动的 `Joy Harness.app`。如需登录时自动启动、本地 CLI，或需要构建和
-刷写 RP2040 固件，请使用下方的[源码安装](#从零安装)。当前 v0.2.0 Release 使用 ad-hoc
-签名且未经 Apple 公证，首次打开可能需要右键选择“打开”，或在“系统设置 → 隐私与安全性”
-中允许。校验下载文件：
+- [Download Joy-Harness-v0.2.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.0/Joy-Harness-v0.2.0-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.2.0/Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256)
+- [View the v0.2.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.0)
+
+The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need launch-at-login, the local CLI, or RP2040 firmware build and flashing tools. The v0.2.0 release is ad-hoc signed and not notarized by Apple, so the first launch may require right-clicking the app and choosing **Open**, or allowing it under **System Settings > Privacy & Security**.
+
+Verify the download with:
 
 ```bash
 shasum -a 256 -c Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256
 ```
 
-## v0.2.0 更新
+## What's New in v0.2.0
 
-- 新增 `LT + RT` 回车、`LT + L3/R3` 复制/粘贴，以及 Options/View 飞书截图快捷键。
-- 控制台改为更紧凑的三栏布局，并统一展示应用版本和链路健康状态。
-- 应用版本集中由 `VERSION` 资源管理，应用、安装脚本和 DMG 使用同一个版本号。
-- Xbox RT 提供 Impulse Trigger 分级反馈；DualSense R2 使用自适应扳机阻力墙。
-- 简体中文和 English 界面可跟随系统，也可在设置中手动切换。
+- Added `LT + RT` for Enter, `LT + L3/R3` for copy/paste, and an Options/View shortcut for Lark screenshots.
+- Redesigned the dashboard into a compact three-column layout with consistent app version and connection health indicators.
+- Centralized version metadata in the `VERSION` resource for the app, installer, and DMG.
+- Added graduated Xbox Impulse Trigger feedback and a resistance wall for the DualSense R2 adaptive trigger.
+- Added Simplified Chinese and English interfaces with system-language and manual selection modes.
 
-![Xbox 手柄布局](Sources/JoyHarness/Resources/controller-dashboard.png)
+![Xbox controller layout](Sources/JoyHarness/Resources/controller-dashboard.png)
 
-![PS5 DualSense 手柄布局](Sources/JoyHarness/Resources/controller-dashboard-dualsense.png)
+![PS5 DualSense controller layout](Sources/JoyHarness/Resources/controller-dashboard-dualsense.png)
 
-## 能达到什么效果
+## Features
 
-安装完成后，可以获得以下能力：
+- **Control Codex away from the keyboard:** switch among six Codex Micro task slots, open the active task, approve or reject permission prompts, and enter `yes` or `no`. Fast mode and task splitting can still be assigned as custom mappings.
+- **Push-to-talk:** hold Menu/Options to send Codex Micro `ACT10`, then release to stop. DualSense controllers can also use the touchpad button. Recording remains native to Codex Desktop.
+- **DualSense audio diagnostics:** detect the controller microphone exposed over USB and report whether it is the default macOS input. Joy Harness does not claim the recording device or change global audio settings.
+- **Graduated trigger feedback:** DualSense R2 provides a light touch, a resistance wall, and a stronger confirmation after the trigger point. Xbox RT uses Impulse Trigger feedback where supported.
+- **Control macOS:** move and scroll with the left stick; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
+- **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
+- **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
+- **Customize mappings:** assign base buttons, the D-pad, and the LT layer to mouse, system, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
+- **Run in the background:** a LaunchAgent starts Joy Harness at login, and disconnected controllers or RP2040 boards are detected again when reconnected.
 
-- **离开键盘操作 Codex**：用手柄在六个 Codex Micro 任务槽之间切换、打开当前任务、
-  批准或拒绝权限请求，以及输入 `yes` / `no`；Fast 模式和拆分任务仍可配置为自定义映射。
-- **按住说话**：按住 Menu/Options 键时发送 Codex Micro `ACT10`，松开时结束；DualSense
-  还可用触控板按键。录音仍由 Codex Desktop 原生完成。
-- **DualSense 语音诊断**：检测通过 USB 暴露的手柄麦克风，并提示它是否已被设为 macOS
-  默认输入；Joy Harness 不抢占录音设备，也不改动全局声音设置。
-- **DualSense R2 强反馈**：R2 轻触时给一次轻震，中段形成明显阻力墙，完全按下越过触发点
-  时释放阻力并补一次短促强震，形成分级的操作确认。
-- **用手柄控制 macOS**：左摇杆移动鼠标，LT + 左摇杆滚动，A/B 负责左右键，R3 负责
-  中键，X/Y 负责 Backspace 和 Esc；LT 功能层还提供回车、复制和粘贴。
-- **管理六个任务槽**：LB/RB 顺序切换，或用 LT 组合键直接跳到 1–6 号槽位；切换后以
-  对应次数的短震确认当前槽号。
-- **可视化诊断**：macOS 控制台展示当前槽位、手柄电量与震动能力、
-  RP2040 连接状态以及辅助功能授权状态，并可打开当前任务。
-- **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
-  系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
-- **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
-  也可在应用“设置”中手动固定为简体中文或 English，选择会自动保存。
-- **后台常驻**：安装后由 LaunchAgent 登录即启动；手柄或 RP2040 中途断开、重新连接时
-  会自动重新检测。
+### Capabilities by Hardware
 
-### 不同硬件组合的能力
-
-| 当前条件 | 可以使用的能力 |
+| Connected hardware | Available features |
 |---|---|
-| 只有 Joy Harness 应用 | 查看控制台和本地状态，使用 CLI 进行诊断 |
-| 应用 + 手柄 | 鼠标、滚动、系统按键、槽位确认震动和手动震动测试 |
-| 应用 + RP2040 | 通过控制台选择或打开 Codex Micro 任务槽；无手柄时不能使用手柄审批操作 |
-| 应用 + 手柄 + RP2040 | 完整体验：手柄控制 Codex、鼠标操作、按住说话和操作确认震动 |
+| Joy Harness app only | Dashboard and local CLI diagnostics |
+| App + controller | Mouse, scrolling, system keys, slot-confirmation haptics, and manual haptic tests |
+| App + RP2040 | Select or open Codex Micro task slots from the dashboard; controller approval actions are unavailable |
+| App + controller + RP2040 | Full controller input for Codex, mouse control, push-to-talk, and haptic confirmation |
 
-## 工作原理
+## How It Works
 
 ```text
-Joy Harness macOS 应用 ── Core Haptics ──▶ 手柄震动
-        ▲
-        │ GameController
-        └────────────────────────────────── DualSense / Xbox / 兼容手柄
+Joy Harness macOS app -- Core Haptics --> Controller haptics
+        ^
+        | GameController
+        +-------------------------------- DualSense / Xbox / compatible controller
 
-手柄操作 ──▶ Joy Harness ── USB CDC 串口 ──▶ RP2040
-                                                │
-                                                │ Vendor HID
-                                                ▼
-                                   Codex Desktop / Codex Micro
+Controller input --> Joy Harness --> USB CDC serial --> RP2040
+                                                        |
+                                                        | Vendor HID
+                                                        v
+                                             Codex Desktop / Codex Micro
 
-左摇杆、A/B/X/Y、R3 ──▶ Joy Harness ── CoreGraphics ──▶ macOS 前台应用
+Left stick, A/B/X/Y, R3 --> Joy Harness --> CoreGraphics --> Foreground macOS app
 ```
 
-RP2040 固件同时暴露两个 USB 接口：
+The RP2040 firmware exposes two USB interfaces:
 
-- `Codex Micro` Vendor HID：由 Codex Desktop 读取，传递任务槽、审批、按住说话和径向输入。
-- `Joy Harness Bridge` USB CDC 串口：由 Joy Harness 使用，负责把手柄事件发送给 RP2040。
+- `Codex Micro` Vendor HID, read by Codex Desktop for task slots, approvals, push-to-talk, and radial input.
+- `Joy Harness Bridge` USB CDC serial, used by Joy Harness to forward controller events to the RP2040.
 
-Joy Harness 只有在串口收到兼容握手 `READY agentdeck-rp2040` 后才认为桥接成功，因此不会
-把其他 USB 串口设备误识别为 RP2040。握手名称保留旧项目名是为了兼容已经刷入的固件。
+Joy Harness accepts a serial device only after receiving the compatible `READY agentdeck-rp2040` handshake, so unrelated serial devices are ignored. The legacy handshake name is retained for compatibility with existing firmware.
 
-## 开始前的准备
+## Requirements
 
-### 源码安装所需软件
+### Software
 
-直接下载 DMG 使用时不需要 Xcode、Python 或 Git。只有从源码安装、使用 CLI 或构建固件时
-才需要下列工具。
+Using the DMG does not require Xcode, Python, or Git. The following tools are needed only for source installation, CLI use, or firmware builds.
 
-| 项目 | 要求 | 用途 |
+| Component | Requirement | Purpose |
 |---|---|---|
-| macOS | 13.0 或更高 | SwiftUI、GameController、Core Haptics 和辅助功能接口 |
-| Codex Desktop | 支持 Codex Micro 的版本 | 接收 RP2040 Vendor HID 输入 |
-| Xcode Command Line Tools | 提供 Swift 5.9+ 和 macOS SDK | 编译 Joy Harness macOS 应用 |
-| Python | Python 3 | 运行本地状态与诊断 CLI |
-| Git | 可访问 GitHub | 首次构建固件时自动下载 Pico SDK 2.2.0 |
+| macOS | 13.0 or later | SwiftUI, GameController, Core Haptics, and Accessibility APIs |
+| Codex Desktop | A version with Codex Micro support | Receives RP2040 Vendor HID input |
+| Xcode Command Line Tools | Swift 5.9+ and a macOS SDK | Builds the macOS app |
+| Python | Python 3 | Runs the local status and diagnostics CLI |
+| Git | GitHub access | Downloads Pico SDK 2.2.0 for the first firmware build |
 
-可以先检查本机环境：
+Check the local environment:
 
 ```bash
 xcode-select -p
@@ -135,145 +117,106 @@ python3 --version
 git --version
 ```
 
-若没有 Xcode Command Line Tools：
+Install Xcode Command Line Tools if needed:
 
 ```bash
 xcode-select --install
 ```
 
-### 完整体验所需硬件
+### Hardware
 
-只使用鼠标、系统快捷键、控制台和手动震动时，可以不连接 RP2040；要控制 Codex Micro
-任务槽、审批和按住说话，则需要完整硬件链路。
+The RP2040 is optional for mouse control, system shortcuts, the dashboard, and manual haptic tests. Codex Micro task slots, approvals, and push-to-talk require the complete hardware path:
 
-- 一台运行 macOS 的 Mac。
-- 一只可被 macOS `GameController` 框架识别、具有 Extended Gamepad 布局的手柄。项目原生
-  适配 PS5 DualSense、PS4 DualShock 4 和 Xbox Series 手柄；其他手柄可使用标准按键、
-  摇杆与十字键，具体能力取决于 macOS 暴露的输入与震动接口。
-- 一块 RP2040 开发板，例如 Raspberry Pi Pico 或兼容板。
-- 一根**支持数据传输**的 USB 线。只能充电的线无法刷写固件或创建串口/HID 设备。
+- A Mac running macOS.
+- An extended gamepad recognized by macOS `GameController`. Joy Harness directly supports PS5 DualSense, PS4 DualShock 4, and Xbox Series controllers. Other controllers depend on the inputs and haptics exposed by macOS.
+- A Raspberry Pi Pico or compatible RP2040 development board.
+- A data-capable USB cable. Charge-only cables cannot flash firmware or expose serial/HID devices.
 
-手柄可以通过蓝牙或 USB 连接，但当前测试的 Xbox Series 手柄在 macOS 26.5.2 下只有
-**蓝牙模式可以正常震动**；USB 模式虽可被系统识别，系统原生 Identify 也不会触发震动。
-需要状态反馈时优先使用蓝牙。
+Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
 
-DualSense 的标准按键、触控板按键和震动由 Apple 的 `GCDualSenseGamepad` / Core Haptics
-接口支持。若要使用手柄内置麦克风，应通过支持数据传输的 USB 线连接，并在“系统设置 →
-声音 → 输入”中选择 `DualSense Wireless Controller` 或 `Wireless Controller`。这里的
-`Wireless` 是产品名，不代表音频正在走无线；Joy Harness 会另外显示真实的 `USB` 传输。
-蓝牙模式只提供手柄 HID 输入，不会向 macOS 发布麦克风音频设备，软件无法从不存在的音频
-端点采集声音。若希望手柄保持无线，可继续用 Options/触控板触发按住说话，并把 Codex 的
-录音输入设为 Mac 内置麦克风、AirPods 或其他无线麦克风；控制台会显示当前系统默认输入。
-DualSense 的实体静音键没有公开的 GameController 事件，是否静音由手柄固件和系统音频设备
-自行管理。
+The DualSense microphone appears as `DualSense Wireless Controller` or `Wireless Controller` even when connected over USB. Select it under **System Settings > Sound > Input**. Joy Harness reports the actual USB transport and whether the device is the default input. The controller's physical mute button is not exposed through the public GameController API.
 
-DualSense 的 R2 使用系统公开的自适应扳机接口：进入约 8% 行程时先轻震一次，前 35% 为
-自由行程，35%–72% 提供最高 90% 的阻力，越过 72% 后突然释放并触发一次强震。快速直接
-按到底时会跳过轻震，避免反馈重叠；松开到 18% 以下会重新待命。此反馈只在
-DualSense 上启用，不改变 Xbox、DualShock 4 或通用手柄的 RT/R2 输入行为。Xbox 的 RT
-使用 Impulse Trigger 细微震动：进入约 8% 行程时轻触提示一次，越过 72% 并向 Codex Micro
-发送 `ACT12` 时再确认一次；松开到 18% 以下后重新待命。macOS 暴露 `.rightTrigger` locality
-时反馈只在 RT 马达播放，否则回退为更轻的全手柄震动。macOS 会在
-Joy Harness 退到后台时关闭 GameController 的扳机效果；USB 连接的 DualSense 会通过原始
-HID 输出自动恢复，因此在 Codex Desktop 前台也能保持阻力。蓝牙连接暂不支持后台恢复。
+### Firmware Build Tools
 
-### 构建 RP2040 固件所需工具
-
-固件构建脚本使用 CMake、Ninja 和 ARM GCC。使用 Homebrew 安装：
+Install CMake, Ninja, and ARM GCC with Homebrew:
 
 ```bash
 brew install cmake ninja arm-none-eabi-gcc
 ```
 
-`task` 只是项目命令的快捷入口，不是硬性依赖：
+The `task` command is a convenience rather than a requirement:
 
 ```bash
 brew install go-task
 task --version
 ```
 
-不安装 `task` 也可以直接运行每一节列出的 Bash 脚本。
+### macOS Permissions
 
-### 需要授予的系统权限
-
-| 权限 | 授权对象 | 影响 |
+| Permission | Grant to | Effect |
 |---|---|---|
-| 辅助功能（Accessibility） | Joy Harness | 允许发送鼠标、回车、复制、粘贴、截图和其他系统按键 |
-| 输入监控（Input Monitoring） | Joy Harness | 允许应用退到后台后继续接收手柄输入 |
-| 输入监控（Input Monitoring） | Codex Desktop | 允许 Codex Desktop 接收 Codex Micro 的物理输入 |
-| 麦克风 | Codex Desktop | 仅在使用原生按住说话时由 Codex Desktop 管理；Joy Harness 不申请麦克风权限 |
+| Accessibility | Joy Harness | Mouse, Enter, copy, paste, screenshots, and other system keys |
+| Input Monitoring | Joy Harness | Controller input while the app is in the background |
+| Input Monitoring | Codex Desktop | Physical Codex Micro input |
+| Microphone | Codex Desktop | Native push-to-talk recording; Joy Harness does not request microphone access |
 
-权限位置通常在“系统设置 → 隐私与安全性”。没有辅助功能权限时，Codex Micro 操作和震动
-仍可工作，但鼠标和所有系统快捷键不会生效。
+Permissions are under **System Settings > Privacy & Security**. Without Accessibility access, RP2040/Codex Micro actions and haptics still work, but mouse and system-key actions do not.
 
-## 从零安装
+## Install from Source
 
-以下命令均在项目根目录执行。
+Run all commands from the repository root.
 
-### 1. 构建并刷入 RP2040
+### 1. Build and Flash the RP2040
 
 ```bash
 task firmware
-# 不使用 task：bash scripts/build_rp2040_firmware.sh
+# Without task: bash scripts/build_rp2040_firmware.sh
 ```
 
-首次执行会把 Pico SDK 2.2.0 下载到 `~/.agent-deck/toolchains/pico-sdk`，固件产物位于：
+The first build downloads Pico SDK 2.2.0 to `~/.agent-deck/toolchains/pico-sdk`. The firmware is written to:
 
 ```text
 firmware/rp2040/build/joy_harness_rp2040.uf2
 ```
 
-按住开发板上的 `BOOTSEL` 键，将 RP2040 插入 Mac。Finder 中出现 `RPI-RP2` 磁盘后执行：
+Hold the board's `BOOTSEL` button while connecting it to the Mac. When the `RPI-RP2` volume appears in Finder, run:
 
 ```bash
 task flash
-# 不使用 task：bash scripts/flash_rp2040_firmware.sh
+# Without task: bash scripts/flash_rp2040_firmware.sh
 ```
 
-UF2 文件复制完成后，RP2040 会自动重启并退出磁盘模式。
-
-默认按 Raspberry Pi Pico 构建。如果兼容板需要其他 Pico SDK 板型：
+The board reboots automatically after the UF2 is copied. Raspberry Pi Pico is the default board target. Override it for a compatible board or reuse an existing SDK with:
 
 ```bash
 PICO_BOARD=<board-name> task firmware
-```
-
-已有 Pico SDK 时可避免重复下载：
-
-```bash
 PICO_SDK_PATH=/absolute/path/to/pico-sdk task firmware
 ```
 
-### 2. 从源码安装 Joy Harness
+### 2. Install Joy Harness
 
 ```bash
 task install
-# 不使用 task：bash scripts/install.sh
+# Without task: bash scripts/install.sh
 ```
 
-安装脚本会编译 release 应用并注册后台 LaunchAgent。从旧版升级时，脚本还会移除
-Joy Harness 旧的 Codex hooks 和 `notify` fan-out，但会保留其他工具的 Hook 和通知配置。
-部署或开发启动前会按完整应用路径停止所有旧 Joy Harness / AgentDeck 实例，确认退出后再启动
-唯一的新实例，避免多个应用争抢手柄和 Unix socket。应用本身也持有跨副本的进程锁；即使
-从其他目录手动打开旧副本，后启动的实例也会立即退出。
+The installer builds the release app and registers its LaunchAgent. Upgrades remove obsolete Joy Harness Codex hooks and `notify` fan-out while preserving unrelated tool configuration. Deployment stops older Joy Harness or AgentDeck instances before launching a single new instance, preventing multiple apps from competing for the controller, serial port, or Unix socket.
 
-### 3. 连接设备并重启 Codex
+### 3. Connect and Restart
 
-1. 通过蓝牙或 USB 连接手柄；Xbox 震动优先使用蓝牙，DualSense 内置麦克风使用 USB。
-2. 保持刷好固件的 RP2040 通过数据线连接 Mac。
-3. 完全退出 Codex Desktop 后重新打开，让它重新扫描 `Codex Micro` HID 设备。
-4. 在系统设置中给 Joy Harness 授予辅助功能权限，给 Codex Desktop 授予输入监控权限。
+1. Connect the controller over Bluetooth or USB. Prefer Bluetooth for Xbox haptics and USB for the DualSense microphone.
+2. Keep the flashed RP2040 connected to the Mac with a data cable.
+3. Fully quit and reopen Codex Desktop so it rescans the `Codex Micro` HID device.
+4. Grant Accessibility to Joy Harness and Input Monitoring to Codex Desktop.
 
-### 4. 验证安装结果
-
-查看运行状态：
+### 4. Verify
 
 ```bash
 task status
-# 或：cat ~/.agent-deck/status.json
+# Or: cat ~/.agent-deck/status.json
 ```
 
-完整链路正常时，至少应看到：
+A healthy complete connection includes at least:
 
 ```json
 {
@@ -284,116 +227,96 @@ task status
 }
 ```
 
-其中 `haptics: false` 只表示当前手柄没有可用的 Core Haptics 引擎，不影响普通按键输入；
-`accessibility: false` 不影响 RP2040/Codex Micro 操作，但会禁用鼠标和系统按键。
-控制台的“语音输入”会显示检测到的 DualSense 音频设备，并标记它是否为系统默认输入。
+`haptics: false` means the current controller has no available Core Haptics engine; regular button input still works. `accessibility: false` disables mouse and system-key actions but does not affect RP2040/Codex Micro input.
 
-测试单个震动状态和完整震动序列：
+Test one haptic state and the full sequence:
 
 ```bash
 ~/.agent-deck/bin/joy-harness-send waiting
 task demo
 ```
 
-最后在 Codex Desktop 中打开一个任务，依次验证：
+Finally, open a task in Codex Desktop and verify approval with `LT + A`, rejection with `LT + B`, slot switching with LB/RB, and push-to-talk by holding Menu/Options.
 
-1. 按 `LT + A` 批准，或按 `LT + B` 拒绝。
-2. 使用 LB/RB 切换任务槽，并通过短震次数确认槽号。
-3. 按住 Menu/Options 使用 Codex Desktop 的原生按住说话。
+## Default Controls
 
-## 手柄按键与实际效果
+Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in the mapping area, to customize buttons and LT combinations. Settings apply immediately and are stored in the current user's preferences. **Restore Default Mapping** restores the behavior below.
 
-可以从 macOS 菜单栏打开 `Joy Harness > 设置`，或点击控制映射区域的齿轮按钮，自定义每个
-数字按键和 LT 组合键。设置保存在当前用户的偏好设置中；“恢复默认映射”可还原下表行为。
-同一设置窗口顶部可以选择“跟随系统”“简体中文”或 `English`；手动选择会覆盖系统语言。
-Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴露对应事件时才会生效。
+### Mouse and System Controls
 
-### 鼠标和系统控制
-
-| 按键 | 实际效果 | 是否需要辅助功能权限 |
+| Input | Action | Accessibility required |
 |---|---|---|
-| 左摇杆 | 以 120Hz 平滑移动 macOS 鼠标，带死区和渐进加速 | 是 |
-| LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度 | 是 |
-| L3 按住 | 鼠标速度临时提升到 `1.8x`，松开恢复精细速度 | 是 |
-| A 按下 / 松开 | 鼠标左键按下 / 松开，可单击、长按或拖动 | 是 |
-| B 按下 / 松开 | 鼠标右键按下 / 松开，可右击或拖动 | 是 |
-| R3 按下 / 松开 | 鼠标中键按下 / 松开 | 是 |
-| X | Backspace；按住后按系统节奏连续删除 | 是 |
-| Y | Esc | 是 |
-| Xbox：LT + RT；PlayStation：L2 + R2 | 普通回车（Enter） | 是 |
-| LT + L3 | 复制（`Command-C`） | 是 |
-| LT + R3 | 粘贴（`Command-V`） | 是 |
-| Xbox：Options / View；PlayStation：Create | 飞书截图（`Command-Shift-A`） | 是 |
-| 十字键上按下 / 松开 | 右侧 Command 按下 / 松开；默认用于唤起按住说话类语音输入工具 | 是 |
+| Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
+| LT + left stick | Vertical and horizontal scrolling with speed based on stick travel | Yes |
+| Hold L3 | Temporarily increase pointer speed to `1.8x` | Yes |
+| A press/release | Left mouse button, including hold and drag | Yes |
+| B press/release | Right mouse button, including hold and drag | Yes |
+| R3 press/release | Middle mouse button | Yes |
+| X | Backspace with system-rate key repeat | Yes |
+| Y | Escape | Yes |
+| Xbox: LT + RT; PlayStation: L2 + R2 | Enter | Yes |
+| LT + L3 | Copy (`Command-C`) | Yes |
+| LT + R3 | Paste (`Command-V`) | Yes |
+| Xbox: Options/View; PlayStation: Create | Lark screenshot (`Command-Shift-A`) | Yes |
+| D-pad Up press/release | Right Command press/release, useful for voice-input tools | Yes |
 
-这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
-改为滚动，L3/R3 执行复制/粘贴。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
-默认单按触发飞书截图；如果手柄驱动未向 macOS 暴露该键，可在设置中把“飞书截图”改配到
-其他按键。该功能要求飞书正在运行，并将截图快捷键设置为 `Command-Shift-A`。
+These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling and L3/R3 to copy/paste. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
 
-### Codex Micro 控制
+### Codex Micro Controls
 
-| 按键 | Micro 输入 | 实际效果 |
+| Input | Micro input | Action |
 |---|---|---|
-| Xbox：LT + A；PlayStation：L2 + × | `ACT07` | 批准当前权限请求 |
-| Xbox：LT + B；PlayStation：L2 + ○ | `ACT08` | 拒绝当前权限请求 |
-| Xbox：LT + Y；PlayStation：L2 + △ | 键盘输入 | 在当前输入框填入 `yes`，不自动提交 |
-| Xbox：LT + X；PlayStation：L2 + □ | 键盘输入 | 在当前输入框填入 `no`，不自动提交 |
-| LB / RB | `AG00`–`AG05` | 切换到上一个 / 下一个任务槽，首尾循环 |
-| LT + 上 / 左 / 下 / 右 | `AG00`–`AG03` | 逆时针直接选择任务槽 1 / 2 / 3 / 4 |
-| LT + LB / RB | `AG04` / `AG05` | 直接选择任务槽 5 / 6 |
-| Menu / Options 按住 / 松开 | `ACT10` 按下 / 松开 | Codex Desktop 原生按住说话 |
-| DualSense / DualShock 触控板按住 / 松开 | `ACT10` 按下 / 松开 | PlayStation 手柄的备用按住说话入口 |
-| RT / R2 扣过阻力墙 | `ACT12` | 到达确认行程后聚焦 Codex Desktop；轻按不会触发 |
-| 十字键左 / 下 / 右（未按 LT）及右摇杆 | `v.oai.rad` | 发送角度和力度形式的径向输入；十字键上默认映射为右侧 Command |
+| Xbox: LT + A; PlayStation: L2 + Cross | `ACT07` | Approve the current permission request |
+| Xbox: LT + B; PlayStation: L2 + Circle | `ACT08` | Reject the current permission request |
+| Xbox: LT + Y; PlayStation: L2 + Triangle | Keyboard input | Type `yes` without submitting |
+| Xbox: LT + X; PlayStation: L2 + Square | Keyboard input | Type `no` without submitting |
+| LB / RB | `AG00`-`AG05` | Select previous/next task slot with wraparound |
+| LT + Up / Left / Down / Right | `AG00`-`AG03` | Select task slots 1/2/3/4 counterclockwise |
+| LT + LB / RB | `AG04` / `AG05` | Select task slots 5/6 |
+| Hold/release Menu or Options | `ACT10` press/release | Native Codex Desktop push-to-talk |
+| Hold/release DualSense/DualShock touchpad | `ACT10` press/release | Alternate PlayStation push-to-talk input |
+| RT / R2 past the resistance wall | `ACT12` | Focus Codex Desktop after the confirmation travel point |
+| D-pad Left/Down/Right without LT and right stick | `v.oai.rad` | Radial input as angle and magnitude |
 
-右侧 Command 与其他系统操作一样，也可在“设置”的任意可映射按键菜单中选择；修改后会
-即时生效并保存。升级前仍使用默认径向输入的十字键上会自动迁移为右侧 Command，自定义为
-其他操作的映射保持不变。
+Joy Harness reads the six most recent task names and ordering through the read-only Codex app-server `thread/list` method. Local state stores only display names, or a first-message summary for unnamed tasks, and never stores full conversation content.
 
-LB/RB 和 LT 组合键直接操作 Codex Desktop 自己管理的六个 Micro 槽位。Joy Harness 通过
-Codex app-server 的只读 `thread/list` 获取六个最近任务的名称和顺序；本地状态文件只保存用于
-槽位展示的名称，未命名任务会保存首条消息摘要，不保存完整会话正文。
+### Haptic Feedback
 
-### 震动反馈
-
-| 操作 | 手柄反馈 |
+| Event | Feedback |
 |---|---|
-| 切换任务槽 | 用 1–6 下短震报告当前槽号 |
-| RT / R2 越过触发行程 | 执行分级手感和短促确认震动 |
-| 控制台或 CLI 手动测试 | 播放 `busy`、`waiting`、`done` 或 `error` 的诊断节奏 |
+| Switch task slots | 1-6 short pulses indicate the selected slot |
+| RT/R2 crosses the trigger point | Graduated feel followed by a short confirmation |
+| Dashboard or CLI test | Diagnostic patterns for `busy`, `waiting`, `done`, and `error` |
 
-Joy Harness 不订阅 Codex 任务生命周期，也不会根据任务开始、等待审批或完成自动播放震动。
+Joy Harness does not subscribe to the Codex task lifecycle and does not automatically vibrate when a task starts, waits for approval, or completes.
 
-## macOS 控制台
+## Dashboard
 
-Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，LaunchAgent 也会保持它运行。
-控制台提供：
+Joy Harness is a background app with a window. Closing the window does not quit the process, and the LaunchAgent keeps it running. The dashboard shows:
 
-- 六个槽位、当前槽位和完整手柄映射。
-- 手柄名称、震动是否可用、RP2040 是否连接、当前是否为物理 Codex Micro 模式。
-- 辅助功能权限诊断。
-- 打开当前任务和震动状态测试按钮。
+- Six task slots, the active slot, and the full controller mapping.
+- Controller name, haptic availability, RP2040 connection, and physical Codex Micro mode.
+- Accessibility and voice-input diagnostics.
+- Controls to open the active task and test haptic states.
 
-控制台中的任务命令同样依赖 RP2040 已连接。任务名称来自 Codex app-server；未命名任务会
-回退显示首条消息摘要。
+Dashboard task commands require a connected RP2040. Task names come from Codex app-server, with first-message summaries used for unnamed tasks.
 
-## 常用命令
+## Commands
 
-| 命令 | 用途 |
+| Command | Purpose |
 |---|---|
-| `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.2.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
-| `task run` | 用 SwiftPM 在前台运行 Joy Harness |
-| `task install` | 编译、安装应用并注册 LaunchAgent |
-| `task firmware` | 构建 RP2040 UF2 固件 |
-| `task flash` | 将固件复制到处于 BOOTSEL 模式的 RP2040 |
-| `task status` | 输出 `~/.agent-deck/status.json` |
-| `task send -- waiting` | 手动发送一个状态 |
-| `task demo` | 顺序演示全部震动状态 |
-| `task test` | 运行 Swift 与 Python 测试 |
+| `task build` | Build the release macOS executable |
+| `task dmg -- 0.2.0` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task run` | Run Joy Harness in the foreground with SwiftPM |
+| `task install` | Build and install the app and LaunchAgent |
+| `task firmware` | Build the RP2040 UF2 firmware |
+| `task flash` | Copy firmware to an RP2040 in BOOTSEL mode |
+| `task status` | Print `~/.agent-deck/status.json` |
+| `task send -- waiting` | Send one haptic state manually |
+| `task demo` | Play every haptic state in sequence |
+| `task test` | Run Swift and Python tests |
 
-CLI 也支持检查 daemon 和操作槽位：
+The CLI can also inspect the daemon and control slots:
 
 ```bash
 python3 bin/joy-harness-send ping
@@ -404,15 +327,15 @@ python3 bin/joy-harness-send --action slot-open
 python3 bin/joy-harness-send error --note manual-test
 ```
 
-## 前台开发与调试
+## Development
 
-不使用 LaunchAgent，构建 `.app` 后直接打开：
+Build the `.app` and launch it without the LaunchAgent:
 
 ```bash
 ./scripts/build_and_run.sh
 ```
 
-其他调试模式：
+Additional modes:
 
 ```bash
 ./scripts/build_and_run.sh --verify
@@ -420,143 +343,109 @@ python3 bin/joy-harness-send error --note manual-test
 ./scripts/build_and_run.sh --debug
 ```
 
-注意：该脚本会先停止已安装的 Joy Harness / AgentDeck LaunchAgent 和进程，以避免多个实例
-争用同一个 Unix socket 或 RP2040 串口。调试结束后可再次运行 `task install` 恢复后台服务。
+The script first stops installed Joy Harness/AgentDeck processes and LaunchAgents to avoid contention for the Unix socket or RP2040 serial port. Run `task install` afterward to restore the background service.
 
-Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可以直接使用项目的
-**Run** 操作构建并打开控制台。
-
-## 创建 DMG
-
-构建适用于当前 Mac 架构的发布镜像：
+Create a release image for the current Mac architecture with:
 
 ```bash
 task dmg -- 0.2.0
-# 或：bash scripts/package_dmg.sh 0.2.0
+# Or: bash scripts/package_dmg.sh 0.2.0
 ```
 
-产物会写入 `dist/`：
+Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.
 
-```text
-Joy-Harness-v0.2.0-macOS-arm64.dmg
-Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256
-```
+## Installation Footprint
 
-DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、
-`Info.plist` 与 DMG 完整性。本地没有 `Developer ID Application` 证书时，现有签名脚本会
-使用 Apple Development 或稳定的 ad-hoc 签名；公开分发若要避免 Gatekeeper 警告，仍需
-Developer ID 签名并通过 Apple 公证。
+`scripts/install.sh` creates or updates:
 
-## 安装会改动什么
-
-`scripts/install.sh` 会进行以下本机修改：
-
-| 路径 | 内容 |
+| Path | Content |
 |---|---|
-| `~/.agent-deck/Joy Harness.app` | 临时签名的 Joy Harness 应用 |
-| `~/Library/LaunchAgents/tech.joyharness.daemon.plist` | 登录启动并保持运行的 LaunchAgent |
-| `~/.agent-deck/bin/` | 应用入口和 CLI |
-| `~/.local/bin/joy-harness-send` | 指向已安装 CLI 的符号链接 |
-| `~/.agent-deck/status.json` | 当前连接、权限、槽位和状态快照 |
-| `~/.agent-deck/pad.sock` | CLI 与应用通信的本地 Unix socket，权限为 `0600` |
-| `~/.agent-deck/daemon.log` | 后台运行日志 |
+| `~/.agent-deck/Joy Harness.app` | Signed Joy Harness app |
+| `~/Library/LaunchAgents/tech.joyharness.daemon.plist` | Login LaunchAgent |
+| `~/.agent-deck/bin/` | App entry point and CLI |
+| `~/.local/bin/joy-harness-send` | Symlink to the installed CLI |
+| `~/.agent-deck/status.json` | Connection, permission, slot, and state snapshot |
+| `~/.agent-deck/pad.sock` | Local CLI/app Unix socket with `0600` permissions |
+| `~/.agent-deck/daemon.log` | Background log |
 
-从含 Hooks / `notify` 的旧版升级时，安装脚本会在移除 Joy Harness 旧配置前创建：
+When upgrading an older hooks/`notify` installation, the installer backs up the affected configuration before removing obsolete Joy Harness entries. New installations do not write to `~/.codex/hooks.json` or Codex `notify` configuration. Legacy `agent-deck-send`, `AgentDeck`, and `~/.agent-deck` names remain for upgrade compatibility.
 
-- `~/.codex/hooks.json.bak-joyharness-removal`
-- `~/.codex/config.toml.bak-joyharness-removal`
+## Troubleshooting
 
-新安装不会写入 `~/.codex/hooks.json` 或 Codex `notify` 配置。
-
-为兼容旧版，安装脚本保留 `agent-deck-send` 和 `AgentDeck` 入口别名，并迁移/移除旧的
-`tech.agentdeck.daemon`、`tech.codexpad.daemon` LaunchAgent。运行目录继续使用
-`~/.agent-deck`，避免升级时丢失已有配置。
-
-## 常见问题
-
-### `task firmware` 提示缺少工具或找不到 Ninja
+### Firmware tools or Ninja are missing
 
 ```bash
 brew install cmake ninja arm-none-eabi-gcc
 ```
 
-然后确认 `cmake`、`ninja`、`arm-none-eabi-gcc` 都在 `PATH` 中。
+Confirm that `cmake`, `ninja`, and `arm-none-eabi-gcc` are on `PATH`.
 
-### `task flash` 提示找不到 `RPI-RP2`
+### The `RPI-RP2` volume is missing
 
-拔下 RP2040，按住 `BOOTSEL` 再插入，看到 Finder 中的 `RPI-RP2` 磁盘后重试。仍然没有
-磁盘时，优先更换一根确认支持数据传输的 USB 线。
+Disconnect the RP2040, hold `BOOTSEL`, reconnect it, and retry after the `RPI-RP2` volume appears in Finder. If it still does not appear, try a known data-capable USB cable.
 
-### `status.json` 中 `rp2040` 一直是 `false`
+### `rp2040` remains `false` in `status.json`
 
-确认固件已刷入、开发板已经退出 BOOTSEL 磁盘模式，并检查日志：
+Confirm that firmware is flashed and the board has left BOOTSEL mode, then inspect:
 
 ```bash
 tail -f ~/.agent-deck/daemon.log
 ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null
 ```
 
-如果系统有多个串口，可以临时指定：
+With multiple serial devices, select one temporarily:
 
 ```bash
 AGENT_DECK_RP2040_PORT=/dev/cu.usbmodemXXXX task run
 ```
 
-### 手柄有输入但没有震动
+### Controller input works but haptics do not
 
-- 确认 `status.json` 中 `haptics` 为 `true`。
-- Xbox Series 手柄优先改用蓝牙连接。
-- 运行 `~/.agent-deck/bin/joy-harness-send waiting` 直接测试本地震动链路。
-- 查看 `daemon.log` 中是否出现 `no haptic engine` 或 `rumble skipped`。
+- Confirm that `haptics` is `true` in `status.json`.
+- Prefer Bluetooth for Xbox Series controllers.
+- Run `~/.agent-deck/bin/joy-harness-send waiting` to test the local haptic path.
+- Check `daemon.log` for `no haptic engine` or `rumble skipped`.
 
-### 鼠标或系统快捷键不生效
+### Mouse or system shortcuts do not work
 
-在“系统设置 → 隐私与安全性 → 辅助功能”中允许 Joy Harness，然后重新启动应用。该权限只
-影响鼠标与回车、复制、粘贴、截图等系统快捷键，不影响通过 RP2040 发送的 Codex Micro 操作。
+Allow Joy Harness under **System Settings > Privacy & Security > Accessibility**, then restart the app. This permission affects mouse and system shortcuts only, not RP2040 Codex Micro actions.
 
-开发和安装脚本会在最终 `.app` 组装完成后统一签名，避免重新构建时辅助功能开关自动失效。
-脚本优先使用钥匙串中已有的 Apple Development 身份；没有开发身份时使用固定 requirement
-的 ad-hoc 签名。签名策略改变后，macOS 可能要求重新授权一次，后续重建不会重复丢失权限。
+### Codex does not receive slot or approval input
 
-### Codex 收不到任务槽或审批按键
+- Confirm that `rp2040` is `true`.
+- Fully quit and restart Codex Desktop so it rescans HID devices.
+- Grant Input Monitoring to Codex Desktop.
+- Confirm that the installed Codex Desktop version supports native Codex Micro.
 
-- 确认 `rp2040` 为 `true`。
-- 完全退出并重启 Codex Desktop，让它重新扫描 HID。
-- 在“输入监控”中允许 Codex Desktop。
-- 确认当前 Codex Desktop 版本支持原生 Codex Micro。
-
-## 项目结构
+## Project Structure
 
 ```text
-Sources/JoyHarness/             macOS 应用、控制台、手柄、鼠标、震动和串口桥
-Sources/JoyHarness/Resources/   控制台图片、logo 与 macOS app icon
-firmware/rp2040/                RP2040 Codex Micro 固件与 USB 描述符
-bin/joy-harness-send            本地 Unix socket CLI
-scripts/install.sh              release 构建、安装、旧配置清理和 LaunchAgent 注册
+Sources/JoyHarness/             macOS app, dashboard, controller, mouse, haptics, and serial bridge
+Sources/JoyHarness/Resources/   dashboard images, logo, and macOS app icon
+firmware/rp2040/                RP2040 Codex Micro firmware and USB descriptors
+bin/joy-harness-send            local Unix socket CLI
+scripts/install.sh              release build, install, migration cleanup, and LaunchAgent setup
 scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
-scripts/package_dmg.sh           构建版本化 macOS DMG 与 SHA-256 校验文件
-scripts/build_and_run.sh        前台 `.app` 构建与调试入口
-tests/                          Swift 和 Python 测试
-docs/research/                  手柄音频、无线方案与 agent 接入可行性研究
-Taskfile.yml                    常用任务入口
+scripts/package_dmg.sh          versioned macOS DMG and SHA-256 checksum
+scripts/build_and_run.sh        foreground `.app` build and debugging entry point
+tests/                          Swift and Python tests
+docs/research/                  controller audio, wireless, and agent integration research
+Taskfile.yml                    common task entry points
 ```
 
-研究记录：
+Research notes:
 
-- [DualSense 蓝牙麦克风可行性](docs/research/dualsense-wireless-microphone.md)
-- [DualSense 无线 USB / USB-over-IP 方案](docs/research/dualsense-wireless-usb-options.md)
-- [Xbox 手柄 3.5 mm 耳麦在 macOS 上的可用性](docs/research/xbox-controller-headset-macos.md)
-- [Cursor Agent 与 Pi Agent 接入可行性](docs/research/cursor-pi-agent-integration.md)
+- [DualSense Bluetooth microphone feasibility](docs/research/dualsense-wireless-microphone.md)
+- [DualSense wireless USB and USB-over-IP options](docs/research/dualsense-wireless-usb-options.md)
+- [Xbox controller 3.5 mm headset support on macOS](docs/research/xbox-controller-headset-macos.md)
+- [Cursor Agent and Pi Agent integration feasibility](docs/research/cursor-pi-agent-integration.md)
 
-## 当前边界
+## Current Limitations
 
-- 项目依赖 macOS 专有的 GameController、Core Haptics、SwiftUI 和 CoreGraphics，不支持
-  Windows 或 Linux。
-- 手柄灯光没有 macOS 公共控制 API，因此操作反馈只使用震动。
-- Joy Harness 不使用 Codex Hooks 或 `notify`；审批、拒绝和任务槽操作均由 Codex
-  Micro 直接处理。
-- Joy Harness 只读取任务 ID、显示名称和未命名任务的首条消息摘要，不持有完整 Codex
-  会话数据；六个槽位的任务顺序仍由 Codex app-server 管理。
-- 没有手柄时 daemon 仍会运行并更新 `status.json`；震动请求会在日志中标记为 skipped。
-- 按住说话完全由 Codex Desktop 管理，Joy Harness 本身不录音。
+- Joy Harness depends on macOS-only GameController, Core Haptics, SwiftUI, and CoreGraphics APIs. Windows and Linux are not supported.
+- macOS provides no public controller-lighting API, so feedback uses haptics only.
+- Joy Harness does not use Codex Hooks or `notify`; approvals and task-slot actions are handled directly by Codex Micro.
+- Joy Harness reads task IDs, display names, and first-message summaries for unnamed tasks, but does not retain full Codex conversation data. Slot ordering remains managed by Codex app-server.
+- The daemon continues running and updating `status.json` without a controller; haptic requests are logged as skipped.
+- Push-to-talk is entirely managed by Codex Desktop. Joy Harness does not record audio.
