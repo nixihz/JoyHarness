@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-UF2="${ROOT}/firmware/rp2040/build/agentdeck_rp2040.uf2"
+UF2="${ROOT}/firmware/rp2040/build/joy_harness_rp2040.uf2"
 VOLUME="/Volumes/RPI-RP2"
 
 if [[ ! -f "${UF2}" ]]; then

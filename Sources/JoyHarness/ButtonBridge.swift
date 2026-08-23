@@ -38,7 +38,7 @@ final class ButtonBridge {
     private(set) var selectedSlot = 0
     var keyHandler: ((String, Int) -> Bool)?
     var joystickHandler: ((Float, Float) -> Bool)?
-    var mouseStickHandler: ((Float, Float) -> Void)?
+    var leftStickHandler: ((Float, Float, Bool) -> Void)?
     var mouseButtonHandler: ((MouseButton, Bool) -> Void)?
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
     var mouseSpeedBoostHandler: ((Bool) -> Void)?
@@ -96,14 +96,14 @@ final class ButtonBridge {
     }
 
     private func handle(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
-        mouseStickHandler?(
-            gamepad.leftThumbstick.xAxis.value,
-            gamepad.leftThumbstick.yAxis.value
-        )
-
         if changedElement === gamepad.leftTrigger {
             functionPressed = gamepad.leftTrigger.value >= 0.55
         }
+        leftStickHandler?(
+            gamepad.leftThumbstick.xAxis.value,
+            gamepad.leftThumbstick.yAxis.value,
+            functionPressed
+        )
         updateModifiedSlotSelection(gamepad)
         updateJoystick(gamepad)
         if changedElement === gamepad.leftTrigger { return }
@@ -311,6 +311,6 @@ final class ButtonBridge {
         functionPressed = false
         lastJoystick = nil
         mouseSpeedBoostPressed = false
-        mouseStickHandler?(0, 0)
+        leftStickHandler?(0, 0, false)
     }
 }

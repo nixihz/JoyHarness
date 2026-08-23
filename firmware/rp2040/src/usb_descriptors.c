@@ -103,7 +103,7 @@ static char const *string_desc_arr[] = {
     "Work Louder",
     "Codex Micro",
     "CODEXPAD-RP2040-01",
-    "AgentDeck Bridge",
+    "Joy Harness Bridge",
     "Codex Micro Control",
 };
 

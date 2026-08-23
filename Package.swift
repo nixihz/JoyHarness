@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "AgentDeck",
+    name: "JoyHarness",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "AgentDeck",
-            path: "Sources/AgentDeck",
+            name: "JoyHarness",
+            path: "Sources/JoyHarness",
             exclude: ["Info.plist"],
             resources: [
                 .process("Resources"),
@@ -19,14 +19,14 @@ let package = Package(
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/AgentDeck/Info.plist",
+                    "-Xlinker", "Sources/JoyHarness/Info.plist",
                 ]),
             ]
         ),
         .testTarget(
-            name: "AgentDeckTests",
-            dependencies: ["AgentDeck"],
-            path: "Tests/AgentDeckTests"
+            name: "JoyHarnessTests",
+            dependencies: ["JoyHarness"],
+            path: "Tests/JoyHarnessTests"
         ),
     ]
 )

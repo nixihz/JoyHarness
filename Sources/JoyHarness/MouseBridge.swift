@@ -8,6 +8,7 @@ final class MouseBridge: NSObject {
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
     private var stickInput = CGPoint.zero
+    private var scrolling = false
     private var speedBoostActive = false
     private var lastTickTime: TimeInterval?
     private var movementTimer: Timer?
@@ -40,7 +41,11 @@ final class MouseBridge: NSObject {
         movementTimer = timer
     }
 
-    func updateStick(x: Float, y: Float) {
+    func updateStick(x: Float, y: Float, scrolling: Bool = false) {
+        if scrolling != self.scrolling {
+            resetMotion()
+            self.scrolling = scrolling
+        }
         stickInput = CGPoint(x: CGFloat(x), y: CGFloat(y))
         updateTargetVelocity()
     }
@@ -107,8 +112,24 @@ final class MouseBridge: NSObject {
         speedMultiplier: CGFloat = 1
     ) -> CGPoint {
         let deadZone: CGFloat = 0.15
-        let minimumSpeed: CGFloat = 24
+        let precisionSpeed: CGFloat = 90
         let maximumSpeed: CGFloat = 1_250
+        let magnitude = min(hypot(x, y), 1)
+        guard magnitude > deadZone else { return .zero }
+
+        let normalizedMagnitude = (magnitude - deadZone) / (1 - deadZone)
+        let speed = precisionSpeed * normalizedMagnitude
+            + (maximumSpeed - precisionSpeed) * pow(normalizedMagnitude, 2.4)
+        return CGPoint(
+            x: x / magnitude * speed * speedMultiplier,
+            y: -y / magnitude * speed * speedMultiplier
+        )
+    }
+
+    nonisolated static func scrollVelocity(x: CGFloat, y: CGFloat) -> CGPoint {
+        let deadZone: CGFloat = 0.15
+        let minimumSpeed: CGFloat = 32
+        let maximumSpeed: CGFloat = 1_400
         let magnitude = min(hypot(x, y), 1)
         guard magnitude > deadZone else { return .zero }
 
@@ -116,8 +137,8 @@ final class MouseBridge: NSObject {
         let speed = minimumSpeed * normalizedMagnitude
             + (maximumSpeed - minimumSpeed) * pow(normalizedMagnitude, 1.65)
         return CGPoint(
-            x: x / magnitude * speed * speedMultiplier,
-            y: -y / magnitude * speed * speedMultiplier
+            x: x / magnitude * speed,
+            y: y / magnitude * speed
         )
     }
 
@@ -172,9 +193,14 @@ final class MouseBridge: NSObject {
             x: accumulatedDelta.x - wholeDelta.x,
             y: accumulatedDelta.y - wholeDelta.y
         )
-        guard wholeDelta != .zero,
-              let location = CGEvent(source: nil)?.location
-        else { return }
+        guard wholeDelta != .zero else { return }
+
+        if scrolling {
+            postScroll(delta: wholeDelta)
+            return
+        }
+
+        guard let location = CGEvent(source: nil)?.location else { return }
 
         let nextLocation = CGPoint(
             x: location.x + wholeDelta.x,
@@ -195,6 +221,18 @@ final class MouseBridge: NSObject {
             mouseType: drag.0,
             mouseCursorPosition: nextLocation,
             mouseButton: drag.1
+        ) else { return }
+        event.post(tap: .cghidEventTap)
+    }
+
+    private func postScroll(delta: CGPoint) {
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: Int32(delta.y),
+            wheel2: Int32(delta.x),
+            wheel3: 0
         ) else { return }
         event.post(tap: .cghidEventTap)
     }
@@ -248,11 +286,15 @@ final class MouseBridge: NSObject {
     }
 
     private func updateTargetVelocity() {
-        targetVelocity = Self.pointerVelocity(
-            x: stickInput.x,
-            y: stickInput.y,
-            speedMultiplier: speedBoostActive ? 1.8 : 1
-        )
+        if scrolling {
+            targetVelocity = Self.scrollVelocity(x: stickInput.x, y: stickInput.y)
+        } else {
+            targetVelocity = Self.pointerVelocity(
+                x: stickInput.x,
+                y: stickInput.y,
+                speedMultiplier: speedBoostActive ? 1.8 : 1
+            )
+        }
     }
 
     private func requestAccessibilityPermission() {

@@ -1,8 +1,8 @@
 import Foundation
 import Testing
-@testable import AgentDeck
+@testable import JoyHarness
 
-struct AgentDeckTests {
+struct JoyHarnessTests {
     @Test
     func rp2040HandshakeAcceptsCurrentAndLegacyFirmware() {
         #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040 0.1.0"))
@@ -104,6 +104,19 @@ struct AgentDeckTests {
     }
 
     @Test
+    func mouseStickKeepsEnoughTravelForPrecisionAdjustments() {
+        let quarter = MouseBridge.pointerVelocity(x: 0.25, y: 0).x
+        let precisionEdge = MouseBridge.pointerVelocity(x: 0.35, y: 0).x
+        let fast = MouseBridge.pointerVelocity(x: 0.75, y: 0).x
+        let maximum = MouseBridge.pointerVelocity(x: 1, y: 0).x
+
+        #expect(quarter > 0 && quarter <= 20)
+        #expect(precisionEdge > quarter && precisionEdge <= 65)
+        #expect(fast >= 500)
+        #expect(abs(maximum - 1_250) < 0.000_001)
+    }
+
+    @Test
     func mouseStickConvertsControllerUpToScreenUp() {
         let velocity = MouseBridge.pointerVelocity(x: 0, y: 1)
         #expect(velocity.x == 0)
@@ -136,5 +149,21 @@ struct AgentDeckTests {
 
         #expect(abs(boosted.x - normal.x * 1.8) < 0.000_001)
         #expect(abs(boosted.y - normal.y * 1.8) < 0.000_001)
+    }
+
+    @Test
+    func scrollStickUsesDeadZoneAndPreservesBothAxes() {
+        #expect(MouseBridge.scrollVelocity(x: 0.1, y: 0.1) == .zero)
+
+        let vertical = MouseBridge.scrollVelocity(x: 0, y: 0.6)
+        let horizontal = MouseBridge.scrollVelocity(x: -0.6, y: 0)
+        let diagonal = MouseBridge.scrollVelocity(x: 0.5, y: -0.5)
+
+        #expect(vertical.x == 0)
+        #expect(vertical.y > 0)
+        #expect(horizontal.x < 0)
+        #expect(horizontal.y == 0)
+        #expect(diagonal.x > 0)
+        #expect(diagonal.y < 0)
     }
 }

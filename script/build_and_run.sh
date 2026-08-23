@@ -1,29 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="AgentDeck"
-BUNDLE_ID="tech.agentdeck.daemon"
+APP_NAME="JoyHarness"
+DISPLAY_NAME="Joy Harness"
+BUNDLE_ID="tech.joyharness.daemon"
 MIN_SYSTEM_VERSION="13.0"
 MODE="${1:-run}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_BUNDLE="${PROJECT_ROOT}/dist/${APP_NAME}.app"
+APP_BUNDLE="${PROJECT_ROOT}/dist/${DISPLAY_NAME}.app"
 APP_CONTENTS="${APP_BUNDLE}/Contents"
 APP_BINARY="${APP_CONTENTS}/MacOS/${APP_NAME}"
 
+for service in tech.joyharness.daemon tech.agentdeck.daemon tech.codexpad.daemon; do
+  launchctl bootout "gui/$(id -u)/${service}" 2>/dev/null || true
+done
 pkill -x "${APP_NAME}" 2>/dev/null || true
+pkill -x "AgentDeck" 2>/dev/null || true
 cd "${PROJECT_ROOT}"
 swift build -c debug --product "${APP_NAME}"
 BUILT_DIR="$(swift build -c debug --show-bin-path)"
 BUILT_BINARY="${BUILT_DIR}/${APP_NAME}"
-RESOURCE_BUNDLE="${BUILT_DIR}/AgentDeck_AgentDeck.bundle"
+RESOURCE_BUNDLE="${BUILT_DIR}/JoyHarness_JoyHarness.bundle"
 
+rm -rf "${APP_BUNDLE}"
 mkdir -p "${APP_CONTENTS}/MacOS"
 cp "${BUILT_BINARY}" "${APP_BINARY}"
 chmod +x "${APP_BINARY}"
-RESOURCE_BUNDLE="$(swift build -c debug --show-bin-path)/AgentDeck_AgentDeck.bundle"
+RESOURCE_BUNDLE="$(swift build -c debug --show-bin-path)/JoyHarness_JoyHarness.bundle"
 mkdir -p "${APP_CONTENTS}/Resources"
 /usr/bin/ditto "${RESOURCE_BUNDLE}/" "${APP_CONTENTS}/Resources/"
-/usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/AgentDeck_AgentDeck.bundle"
+/usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/JoyHarness_JoyHarness.bundle"
 
 cat > "${APP_CONTENTS}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -37,15 +43,15 @@ cat > "${APP_CONTENTS}/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key>
   <string>${BUNDLE_ID}</string>
   <key>CFBundleName</key>
-  <string>${APP_NAME}</string>
+  <string>${DISPLAY_NAME}</string>
   <key>CFBundleDisplayName</key>
-  <string>${APP_NAME}</string>
+  <string>${DISPLAY_NAME}</string>
   <key>LSMinimumSystemVersion</key>
   <string>${MIN_SYSTEM_VERSION}</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>AgentDeck records while the controller Menu button is held and sends the audio to the selected Codex task.</string>
+  <string>Joy Harness records while the controller Menu button is held and sends the audio to the selected Codex task.</string>
 </dict>
 </plist>
 PLIST

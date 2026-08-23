@@ -41,4 +41,4 @@ cmake -S "${ROOT}/firmware/rp2040" -B "${BUILD_DIR}" -G Ninja \
   -DPICO_BOARD="${PICO_BOARD:-pico}"
 cmake --build "${BUILD_DIR}" --parallel
 
-echo "firmware: ${BUILD_DIR}/agentdeck_rp2040.uf2"
+echo "firmware: ${BUILD_DIR}/joy_harness_rp2040.uf2"

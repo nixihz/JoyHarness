@@ -3,11 +3,11 @@ import Foundation
 import SwiftUI
 
 @main
-struct AgentDeckApp: App {
-    @NSApplicationDelegateAdaptor(AgentDeckAppDelegate.self) private var appDelegate
+struct JoyHarnessApp: App {
+    @NSApplicationDelegateAdaptor(JoyHarnessAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("AgentDeck", id: "main") {
+        WindowGroup("Joy Harness", id: "main") {
             DashboardView(store: appDelegate.runtime.dashboard)
                 .frame(minWidth: 980, minHeight: 680)
         }
@@ -30,8 +30,8 @@ struct AgentDeckApp: App {
 }
 
 @MainActor
-final class AgentDeckAppDelegate: NSObject, NSApplicationDelegate {
-    let runtime = AgentDeckRuntime()
+final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
+    let runtime = JoyHarnessRuntime()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -45,7 +45,7 @@ final class AgentDeckAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @MainActor
-final class AgentDeckRuntime {
+final class JoyHarnessRuntime {
     let dashboard: DashboardStore
 
     private let home: String
@@ -88,7 +88,7 @@ final class AgentDeckRuntime {
         dashboard.startMonitoring()
 
         print("[agent-deck] physical Codex Micro mode; app-server disabled")
-        print("[agent-deck] ready - A/B=clicks, X=backspace, Y=escape, LT+face=Codex actions")
+        print("[agent-deck] ready - left stick=pointer, LT+left stick=scroll, LT+face=Codex actions")
     }
 
     @discardableResult
@@ -124,8 +124,8 @@ final class AgentDeckRuntime {
         buttons.joystickHandler = { [weak self] angle, distance in
             self?.rp2040.sendJoystick(angle: angle, distance: distance) ?? false
         }
-        buttons.mouseStickHandler = { [weak self] x, y in
-            self?.mouse.updateStick(x: x, y: y)
+        buttons.leftStickHandler = { [weak self] x, y, scrolling in
+            self?.mouse.updateStick(x: x, y: y, scrolling: scrolling)
         }
         buttons.mouseButtonHandler = { [weak self] button, pressed in
             self?.mouse.setMouseButton(button, pressed: pressed)

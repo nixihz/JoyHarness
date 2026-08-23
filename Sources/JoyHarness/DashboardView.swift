@@ -25,7 +25,7 @@ struct DashboardView: View {
             ActivityBar(status: store.status, message: store.actionMessage)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle("AgentDeck")
+        .navigationTitle("Joy Harness")
         .toolbar {
             ToolbarItemGroup {
                 Button {
@@ -248,6 +248,7 @@ private struct ControllerMap: View {
                     MappingLabel(key: "LB / RB", title: "前 / 后槽位")
                     MappingLabel(key: "Menu", title: "按住说话")
                     MappingLabel(key: "D-Pad", title: "径向输入")
+                    MappingLabel(key: "LT + 左摇杆", title: "二维滚动")
                     MappingLabel(key: "L3", title: "鼠标加速")
                 }
                 .frame(width: 176, alignment: .leading)
@@ -277,7 +278,7 @@ private struct ControllerMap: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Text("左摇杆移动鼠标，按住 L3 加速；A/B 点击，X 退格，Y 返回")
+            Text("左摇杆移动鼠标，按住 LT 切换纵向 / 横向滚动；A/B 点击，X 退格，Y 返回")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

@@ -1,35 +1,37 @@
 #!/usr/bin/env bash
-# Install AgentDeck: build daemon, wire ~/.codex hooks and notify fan-out.
+# Install Joy Harness: build daemon, wire ~/.codex hooks and notify fan-out.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="${HOME}/.agent-deck/bin"
-APP_DIR="${HOME}/.agent-deck/AgentDeck.app"
+APP_DIR="${HOME}/.agent-deck/Joy Harness.app"
+LEGACY_APP_DIR="${HOME}/.agent-deck/AgentDeck.app"
 APP_CONTENTS="${APP_DIR}/Contents"
-APP_EXE="${APP_CONTENTS}/MacOS/AgentDeck"
+APP_EXE="${APP_CONTENTS}/MacOS/JoyHarness"
 mkdir -p "${HOME}/.agent-deck"
-STAGE_ROOT="$(mktemp -d "${HOME}/.agent-deck/.AgentDeck-stage.XXXXXX")"
-STAGED_APP_DIR="${STAGE_ROOT}/AgentDeck.app"
+STAGE_ROOT="$(mktemp -d "${HOME}/.agent-deck/.JoyHarness-stage.XXXXXX")"
+STAGED_APP_DIR="${STAGE_ROOT}/Joy Harness.app"
 STAGED_CONTENTS="${STAGED_APP_DIR}/Contents"
-STAGED_APP_EXE="${STAGED_CONTENTS}/MacOS/AgentDeck"
+STAGED_APP_EXE="${STAGED_CONTENTS}/MacOS/JoyHarness"
 trap 'rm -rf "${STAGE_ROOT}"' EXIT
 LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
-PLIST="${LAUNCH_AGENTS}/tech.agentdeck.daemon.plist"
-LEGACY_PLIST="${LAUNCH_AGENTS}/tech.codexpad.daemon.plist"
+PLIST="${LAUNCH_AGENTS}/tech.joyharness.daemon.plist"
+LEGACY_AGENTDECK_PLIST="${LAUNCH_AGENTS}/tech.agentdeck.daemon.plist"
+LEGACY_CODEXPAD_PLIST="${LAUNCH_AGENTS}/tech.codexpad.daemon.plist"
 HOOKS_DST="${HOME}/.codex/hooks.json"
-SEND="${ROOT}/bin/agent-deck-send"
+SEND="${ROOT}/bin/joy-harness-send"
 BRIDGE="${BIN_DIR}/hook_bridge.py"
 FANOUT="${BIN_DIR}/notify_fanout.py"
 
 mkdir -p "${HOME}/.agent-deck" "${BIN_DIR}" "${HOME}/.codex" "${LAUNCH_AGENTS}"
 mkdir -p "${STAGED_CONTENTS}/MacOS" "${STAGED_CONTENTS}/Resources"
 
-echo "==> Building AgentDeck"
+echo "==> Building Joy Harness"
 cd "${ROOT}"
 swift build -c release
 BUILT_DIR="$(swift build -c release --show-bin-path)"
-BUILT="${BUILT_DIR}/AgentDeck"
-RESOURCE_BUNDLE="${BUILT_DIR}/AgentDeck_AgentDeck.bundle"
+BUILT="${BUILT_DIR}/JoyHarness"
+RESOURCE_BUNDLE="${BUILT_DIR}/JoyHarness_JoyHarness.bundle"
 install -m 755 "${BUILT}" "${STAGED_APP_EXE}"
 /usr/bin/ditto "${RESOURCE_BUNDLE}/" "${STAGED_CONTENTS}/Resources/"
 cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
@@ -38,11 +40,11 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>AgentDeck</string>
+  <string>JoyHarness</string>
   <key>CFBundleIdentifier</key>
-  <string>tech.agentdeck.daemon</string>
+  <string>tech.joyharness.daemon</string>
   <key>CFBundleName</key>
-  <string>AgentDeck</string>
+  <string>Joy Harness</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -53,27 +55,38 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<'EOF'
 </plist>
 EOF
 codesign --force --deep --sign - \
-  --identifier tech.agentdeck.daemon \
-  --requirements '=designated => identifier "tech.agentdeck.daemon"' \
+  --identifier tech.joyharness.daemon \
+  --requirements '=designated => identifier "tech.joyharness.daemon"' \
   "${STAGED_APP_DIR}"
+launchctl bootout "gui/$(id -u)/tech.joyharness.daemon" 2>/dev/null || true
 launchctl bootout "gui/$(id -u)/tech.codexpad.daemon" 2>/dev/null || true
 launchctl bootout "gui/$(id -u)/tech.agentdeck.daemon" 2>/dev/null || true
-if [[ -f "${LEGACY_PLIST}" ]]; then
-  unlink "${LEGACY_PLIST}"
-fi
-rm -rf "${APP_DIR}"
+pkill -x "JoyHarness" 2>/dev/null || true
+pkill -x "AgentDeck" 2>/dev/null || true
+for legacy_plist in "${LEGACY_AGENTDECK_PLIST}" "${LEGACY_CODEXPAD_PLIST}"; do
+  if [[ -f "${legacy_plist}" ]]; then
+    unlink "${legacy_plist}"
+  fi
+done
+rm -rf "${APP_DIR}" "${LEGACY_APP_DIR}"
 mv "${STAGED_APP_DIR}" "${APP_DIR}"
+if [[ -e "${BIN_DIR}/JoyHarness" && ! -L "${BIN_DIR}/JoyHarness" ]]; then
+  mv "${BIN_DIR}/JoyHarness" "${BIN_DIR}/JoyHarness.legacy"
+elif [[ -L "${BIN_DIR}/JoyHarness" ]]; then
+  unlink "${BIN_DIR}/JoyHarness"
+fi
+ln -s "${APP_EXE}" "${BIN_DIR}/JoyHarness"
 if [[ -e "${BIN_DIR}/AgentDeck" && ! -L "${BIN_DIR}/AgentDeck" ]]; then
   mv "${BIN_DIR}/AgentDeck" "${BIN_DIR}/AgentDeck.legacy"
-elif [[ -L "${BIN_DIR}/AgentDeck" ]]; then
-  unlink "${BIN_DIR}/AgentDeck"
 fi
-ln -s "${APP_EXE}" "${BIN_DIR}/AgentDeck"
-install -m 755 "${SEND}" "${BIN_DIR}/agent-deck-send"
+ln -sfn "${APP_EXE}" "${BIN_DIR}/AgentDeck"
+install -m 755 "${SEND}" "${BIN_DIR}/joy-harness-send"
+ln -sfn "${BIN_DIR}/joy-harness-send" "${BIN_DIR}/agent-deck-send"
 install -m 755 "${ROOT}/codex-hooks/hook_bridge.py" "${BRIDGE}"
 install -m 755 "${ROOT}/codex-hooks/notify_fanout.py" "${FANOUT}"
 mkdir -p "${HOME}/.local/bin"
-ln -sfn "${BIN_DIR}/agent-deck-send" "${HOME}/.local/bin/agent-deck-send" 2>/dev/null || true
+ln -sfn "${BIN_DIR}/joy-harness-send" "${HOME}/.local/bin/joy-harness-send" 2>/dev/null || true
+ln -sfn "${BIN_DIR}/joy-harness-send" "${HOME}/.local/bin/agent-deck-send" 2>/dev/null || true
 
 # hooks.json
 python3 - <<'PY' "${ROOT}" "${HOOKS_DST}" "${BRIDGE}"
@@ -200,7 +213,7 @@ cat > "${PLIST}" <<EOF
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>tech.agentdeck.daemon</string>
+  <string>tech.joyharness.daemon</string>
   <key>ProgramArguments</key>
   <array>
     <string>${APP_EXE}</string>
@@ -222,20 +235,20 @@ for attempt in 1 2 3 4 5; do
     break
   fi
   if [[ "${attempt}" == "5" ]]; then
-    echo "failed to bootstrap AgentDeck LaunchAgent after ${attempt} attempts" >&2
+    echo "failed to bootstrap Joy Harness LaunchAgent after ${attempt} attempts" >&2
     exit 1
   fi
   echo "LaunchAgent still stopping; retrying bootstrap (${attempt}/5)" >&2
   sleep 1
 done
-launchctl enable "gui/$(id -u)/tech.agentdeck.daemon" 2>/dev/null || true
-launchctl kickstart -k "gui/$(id -u)/tech.agentdeck.daemon"
+launchctl enable "gui/$(id -u)/tech.joyharness.daemon" 2>/dev/null || true
+launchctl kickstart -k "gui/$(id -u)/tech.joyharness.daemon"
 
 echo
 echo "Installed."
 echo "  app:     ${APP_DIR}"
 echo "  daemon:  ${APP_EXE}"
-echo "  send:    ${BIN_DIR}/agent-deck-send"
+echo "  send:    ${BIN_DIR}/joy-harness-send"
 echo "  hooks:   ${HOOKS_DST}"
 echo "  status:  ~/.agent-deck/status.json"
 echo
@@ -244,4 +257,4 @@ echo "  1. Connect Xbox controller (Bluetooth or USB)"
 echo "  2. Flash and connect the RP2040: task firmware && task flash"
 echo "  3. Restart Codex Desktop so it detects the Codex Micro HID"
 echo "  4. Grant Input Monitoring to Codex Desktop when prompted"
-echo "  5. Test haptics: ${BIN_DIR}/agent-deck-send waiting"
+echo "  5. Test haptics: ${BIN_DIR}/joy-harness-send waiting"

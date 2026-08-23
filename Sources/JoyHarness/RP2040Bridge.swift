@@ -103,7 +103,7 @@ final class RP2040Bridge {
                       self.descriptor == fd,
                       !self.isConnected else { return }
                 self.rejectedUntil[path] = Date().addingTimeInterval(5)
-                print("[agent-deck] ignored non-AgentDeck serial device at \(path)")
+                print("[agent-deck] ignored non-Joy Harness serial device at \(path)")
                 self.disconnect()
             }
             return

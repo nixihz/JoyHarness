@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex notify fan-out: keep prior notify targets, also drive AgentDeck."""
+"""Codex notify fan-out: keep prior notify targets, also drive Joy Harness."""
 
 from __future__ import annotations
 

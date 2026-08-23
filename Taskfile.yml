@@ -2,12 +2,12 @@ version: "3"
 
 tasks:
   build:
-    desc: Build AgentDeck release binary
+    desc: Build Joy Harness release binary
     cmds:
       - swift build -c release
 
   firmware:
-    desc: Build the AgentDeck RP2040 UF2 firmware
+    desc: Build the Joy Harness RP2040 UF2 firmware
     cmds:
       - bash scripts/build_rp2040_firmware.sh
 
@@ -25,12 +25,12 @@ tasks:
   run:
     desc: Run daemon in foreground
     cmds:
-      - swift run AgentDeck
+      - swift run JoyHarness
 
   send:
     desc: "Send a state: task send -- waiting"
     cmds:
-      - python3 bin/agent-deck-send {{.CLI_ARGS}}
+      - python3 bin/joy-harness-send {{.CLI_ARGS}}
 
   install:
     desc: Build, install LaunchAgent, wire Codex hooks/notify
@@ -40,15 +40,15 @@ tasks:
   demo:
     desc: Cycle through haptic states (daemon must be running)
     cmds:
-      - python3 bin/agent-deck-send busy --note demo
+      - python3 bin/joy-harness-send busy --note demo
       - sleep 2
-      - python3 bin/agent-deck-send waiting --note demo
+      - python3 bin/joy-harness-send waiting --note demo
       - sleep 2
-      - python3 bin/agent-deck-send done --note demo
+      - python3 bin/joy-harness-send done --note demo
       - sleep 1
-      - python3 bin/agent-deck-send error --note demo
+      - python3 bin/joy-harness-send error --note demo
       - sleep 1
-      - python3 bin/agent-deck-send idle --note demo
+      - python3 bin/joy-harness-send idle --note demo
 
   status:
     desc: Show ~/.agent-deck/status.json

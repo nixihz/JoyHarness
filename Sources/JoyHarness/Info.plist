@@ -3,8 +3,10 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>tech.agentdeck.daemon</string>
+  <string>tech.joyharness.daemon</string>
   <key>CFBundleName</key>
-  <string>AgentDeck</string>
+  <string>Joy Harness</string>
+  <key>CFBundleDisplayName</key>
+  <string>Joy Harness</string>
 </dict>
 </plist>

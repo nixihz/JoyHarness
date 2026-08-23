@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send an AgentDeck state over the local unix socket."""
+"""Send a Joy Harness state over the local Unix socket."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ VALID = ("idle", "busy", "waiting", "done", "error")
 
 def send(payload: dict, sock_path: Path, timeout: float = 0.8) -> int:
     if not sock_path.exists():
-        print(f"[agent-deck-send] daemon not running ({sock_path})", file=sys.stderr)
+        print(f"[joy-harness-send] daemon not running ({sock_path})", file=sys.stderr)
         return 2
     data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
     try:
@@ -33,13 +33,13 @@ def send(payload: dict, sock_path: Path, timeout: float = 0.8) -> int:
             except OSError:
                 pass
     except OSError as exc:
-        print(f"[agent-deck-send] send failed: {exc}", file=sys.stderr)
+        print(f"[joy-harness-send] send failed: {exc}", file=sys.stderr)
         return 1
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Drive AgentDeck haptic states")
+    parser = argparse.ArgumentParser(description="Drive Joy Harness haptic states")
     parser.add_argument(
         "state",
         nargs="?",
