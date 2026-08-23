@@ -4,6 +4,7 @@ import CoreHaptics
 
 final class HapticEngine {
     private var engine: CHHapticEngine?
+    private var rightTriggerEngine: CHHapticEngine?
     private var activePlayers: [UUID: CHHapticPatternPlayer] = [:]
     private var pulseTimer: Timer?
     private var feedbackTimer: Timer?
@@ -49,6 +50,7 @@ final class HapticEngine {
             try created.start()
             engine = created
             print("[agent-deck] haptics ready on \(controllerName)")
+            attachXboxRightTriggerEngine(haptics, controller: controller)
             onConnectionChange?()
         } catch {
             print("[agent-deck] failed to start haptics: \(error)")
@@ -60,6 +62,8 @@ final class HapticEngine {
     private func detach() {
         let wasConnected = controllerName != "none"
         stopAll()
+        rightTriggerEngine?.stop(completionHandler: nil)
+        rightTriggerEngine = nil
         engine?.stop(completionHandler: nil)
         engine = nil
         controllerName = "none"
@@ -105,7 +109,7 @@ final class HapticEngine {
         }
     }
 
-    func playAdaptiveTriggerFeedback(_ event: AdaptiveTriggerFeedbackEvent) {
+    func playAdaptiveTriggerFeedback(_ event: RightTriggerFeedbackEvent) {
         switch event {
         case .lightTouch:
             playOneShot(intensity: 0.22, sharpness: 0.75, duration: 0.025)
@@ -117,6 +121,27 @@ final class HapticEngine {
         }
     }
 
+    func playXboxTriggerFeedback(_ event: RightTriggerFeedbackEvent) {
+        let targetEngine = rightTriggerEngine ?? engine
+        let usesDedicatedTrigger = rightTriggerEngine != nil
+        switch event {
+        case .lightTouch:
+            playOneShot(
+                on: targetEngine,
+                intensity: usesDedicatedTrigger ? 0.18 : 0.10,
+                sharpness: 0.72,
+                duration: 0.018
+            )
+        case .confirmation:
+            playOneShot(
+                on: targetEngine,
+                intensity: usesDedicatedTrigger ? 0.42 : 0.20,
+                sharpness: 0.88,
+                duration: 0.035
+            )
+        }
+    }
+
     private func startPulse(interval: TimeInterval, intensity: Float, sharpness: Float, duration: TimeInterval) {
         playOneShot(intensity: intensity, sharpness: sharpness, duration: duration)
         pulseTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -125,7 +150,16 @@ final class HapticEngine {
     }
 
     private func playOneShot(intensity: Float, sharpness: Float, duration: TimeInterval) {
-        guard let engine else {
+        playOneShot(on: engine, intensity: intensity, sharpness: sharpness, duration: duration)
+    }
+
+    private func playOneShot(
+        on targetEngine: CHHapticEngine?,
+        intensity: Float,
+        sharpness: Float,
+        duration: TimeInterval
+    ) {
+        guard let targetEngine else {
             print("[agent-deck] rumble skipped (no haptic engine) intensity=\(intensity)")
             return
         }
@@ -139,7 +173,7 @@ final class HapticEngine {
                 duration: duration
             )
             let pattern = try CHHapticPattern(events: [event], parameters: [])
-            let player = try engine.makePlayer(with: pattern)
+            let player = try targetEngine.makePlayer(with: pattern)
             retain(player, for: duration)
             try player.start(atTime: 0)
         } catch {
@@ -179,6 +213,34 @@ final class HapticEngine {
         activePlayers[id] = player
         DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { [weak self] in
             self?.activePlayers[id] = nil
+        }
+    }
+
+    private func attachXboxRightTriggerEngine(
+        _ haptics: GCDeviceHaptics,
+        controller: GCController
+    ) {
+        guard ControllerFamily.detect(controller: controller) == .xbox else { return }
+        guard haptics.supportedLocalities.contains(.rightTrigger),
+              let triggerEngine = haptics.createEngine(withLocality: .rightTrigger) else {
+            print("[agent-deck] Xbox RT haptics using all-locality fallback")
+            return
+        }
+        do {
+            triggerEngine.playsHapticsOnly = true
+            triggerEngine.isAutoShutdownEnabled = true
+            triggerEngine.stoppedHandler = { reason in
+                print("[agent-deck] Xbox RT haptic engine stopped: \(reason.rawValue)")
+            }
+            triggerEngine.resetHandler = { [weak self] in
+                try? self?.rightTriggerEngine?.start()
+            }
+            try triggerEngine.start()
+            rightTriggerEngine = triggerEngine
+            print("[agent-deck] Xbox RT impulse haptics ready")
+        } catch {
+            print("[agent-deck] Xbox RT haptics unavailable, using all-locality fallback: \(error)")
+            rightTriggerEngine = nil
         }
     }
 

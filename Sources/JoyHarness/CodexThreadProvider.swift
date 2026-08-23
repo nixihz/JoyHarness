@@ -60,7 +60,7 @@ final class CodexThreadProvider {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let title = [name, preview]
                 .compactMap { $0 }
-                .first(where: { !$0.isEmpty }) ?? "未命名任务"
+                .first(where: { !$0.isEmpty }) ?? L10n.text("未命名任务", "Untitled Task")
             let status = (thread["status"] as? [String: Any])?["type"] as? String ?? "notLoaded"
             return CodexThreadSummary(id: id, title: title, status: status)
         }

@@ -1,12 +1,12 @@
 import AppKit
 import GameController
 
-enum AdaptiveTriggerFeedbackEvent: Equatable {
+enum RightTriggerFeedbackEvent: Equatable {
     case lightTouch
     case confirmation
 }
 
-struct AdaptiveTriggerPressState {
+struct RightTriggerPressState {
     static let lightTouchPoint: Float = 0.08
     static let resistanceStart: Float = 0.35
     static let releasePoint: Float = 0.72
@@ -16,7 +16,7 @@ struct AdaptiveTriggerPressState {
     private(set) var hasTouched = false
     private(set) var hasConfirmed = false
 
-    mutating func update(value: Float) -> AdaptiveTriggerFeedbackEvent? {
+    mutating func update(value: Float) -> RightTriggerFeedbackEvent? {
         if value <= Self.resetPoint, hasTouched {
             hasTouched = false
             hasConfirmed = false
@@ -37,12 +37,12 @@ struct AdaptiveTriggerPressState {
 
 final class AdaptiveTriggerFeedback {
     private weak var trigger: GCDualSenseAdaptiveTrigger?
-    private var pressState = AdaptiveTriggerPressState()
+    private var pressState = RightTriggerPressState()
     private let hidOutput = DualSenseHIDOutput()
     private var backgroundEffectApplied = false
     private var observers: [NSObjectProtocol] = []
 
-    var onFeedback: ((AdaptiveTriggerFeedbackEvent) -> Void)?
+    var onFeedback: ((RightTriggerFeedbackEvent) -> Void)?
 
     var isAvailable: Bool { trigger != nil }
 
@@ -70,7 +70,7 @@ final class AdaptiveTriggerFeedback {
         hidOutput.disconnect()
         trigger?.setModeOff()
         trigger = nil
-        pressState = AdaptiveTriggerPressState()
+        pressState = RightTriggerPressState()
 
         guard let dualSense = controller?.extendedGamepad as? GCDualSenseGamepad else { return }
         let rightTrigger = dualSense.rightTrigger
@@ -92,9 +92,9 @@ final class AdaptiveTriggerFeedback {
         guard let trigger else { return }
         backgroundEffectApplied = false
         trigger.setModeWeaponWithStartPosition(
-            AdaptiveTriggerPressState.resistanceStart,
-            endPosition: AdaptiveTriggerPressState.releasePoint,
-            resistiveStrength: AdaptiveTriggerPressState.resistanceStrength
+            RightTriggerPressState.resistanceStart,
+            endPosition: RightTriggerPressState.releasePoint,
+            resistiveStrength: RightTriggerPressState.resistanceStrength
         )
     }
 

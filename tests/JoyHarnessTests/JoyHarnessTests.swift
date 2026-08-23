@@ -1,9 +1,59 @@
 import CoreAudio
+import CoreGraphics
 import Foundation
 import Testing
 @testable import JoyHarness
 
 struct JoyHarnessTests {
+    @Test
+    func rightCommandEventDescriptorKeepsItsDeviceSide() {
+        let descriptor = SystemKey.rightCommand.eventDescriptor(pressed: true)
+
+        #expect(descriptor.keyCode == 0x36)
+        #expect(descriptor.flags.contains(.maskCommand))
+        #expect(descriptor.flags.rawValue & 0x10 != 0)
+        #expect(descriptor.flags.rawValue & 0x08 == 0)
+        #expect(SystemKey.rightCommand.eventDescriptor(pressed: false).flags.isEmpty)
+    }
+
+    @Test
+    func languagePreferenceFollowsChineseSystemsAndDefaultsToEnglishOtherwise() {
+        #expect(
+            AppLanguagePreference.system.resolved(preferredLanguages: ["zh-Hans-CN"]) ==
+                .simplifiedChinese
+        )
+        #expect(
+            AppLanguagePreference.system.resolved(preferredLanguages: ["zh-Hant-TW"]) ==
+                .simplifiedChinese
+        )
+        #expect(
+            AppLanguagePreference.system.resolved(preferredLanguages: ["en-US"]) == .english
+        )
+        #expect(
+            AppLanguagePreference.system.resolved(preferredLanguages: ["fr-FR"]) == .english
+        )
+    }
+
+    @Test
+    func explicitLanguagePreferencePersists() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppLanguageSettings(userDefaults: defaults, updatesLocalizer: false)
+        #expect(settings.preference == .system)
+
+        settings.preference = .simplifiedChinese
+
+        let reloaded = AppLanguageSettings(userDefaults: defaults, updatesLocalizer: false)
+        #expect(reloaded.preference == .simplifiedChinese)
+        #expect(reloaded.locale.identifier == "zh-Hans")
+
+        settings.preference = .english
+        #expect(settings.preference.resolved() == .english)
+        #expect(L10n.text("中文", "English", language: .english) == "English")
+    }
+
     @Test
     func singleInstanceLockRejectsASecondOwner() throws {
         let lockPath = FileManager.default.temporaryDirectory
@@ -60,7 +110,7 @@ struct JoyHarnessTests {
         let status = try JSONDecoder().decode(DashboardStatus.self, from: Data(json.utf8))
         #expect(status.slots.count == 6)
         #expect(status.selectedSlot == 3)
-        #expect(status.selected?.displayTitle == "Micro 槽位")
+        #expect(status.selected?.displayTitle == L10n.text("Micro 槽位", "Micro Slot"))
         #expect(status.padState == .waiting)
         #expect(status.rp2040)
         #expect(status.controllerBatteryLevel == 0.73)
@@ -163,6 +213,7 @@ struct JoyHarnessTests {
         #expect(store.action(for: .buttonA).controllerAction == .mouseButton(.left))
         #expect(store.action(for: .buttonB).controllerAction == .mouseButton(.right))
         #expect(store.action(for: .leftTrigger) == .functionModifier)
+        #expect(store.action(for: .dpadUp).controllerAction == .systemKey(.rightCommand))
         #expect(store.action(for: .functionButtonX).controllerAction == .textInput("no"))
         #expect(store.action(for: .functionButtonY).controllerAction == .textInput("yes"))
         #expect(store.action(for: .functionDpadUp).controllerAction == .selectSlot(0))
@@ -249,6 +300,49 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func rightCommandIsAvailableForCustomMappings() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setAction(.rightCommand, for: .buttonA)
+
+        #expect(store.action(for: .buttonA).controllerAction == .systemKey(.rightCommand))
+        #expect(ControllerInput.buttonA.availableActions.contains(.rightCommand))
+    }
+
+    @Test
+    func oldDefaultDPadUpMappingMigratesToRightCommand() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [ControllerInput.dpadUp.rawValue: ControllerMappedAction.radialInput.rawValue],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .dpadUp) == .rightCommand)
+    }
+
+    @Test
+    func dPadUpMigrationPreservesCustomMappings() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [ControllerInput.dpadUp.rawValue: ControllerMappedAction.escape.rawValue],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .dpadUp) == .escape)
+    }
+
+    @Test
     func playStationLabelsAndTouchpadMappingAreAvailable() {
         #expect(ControllerInput.buttonA.displayName(for: .dualSense) == "×")
         #expect(ControllerInput.buttonB.displayName(for: .dualSense) == "○")
@@ -273,12 +367,15 @@ struct JoyHarnessTests {
         #expect(!ControllerAudioSupport.matchesDualSenseAudioDevice("Mac Studio Microphone"))
         #expect(!ControllerAudioSupport.matchesDualSenseAudioDevice("Yamaha AG06MK2"))
         #expect(ControllerAudioSupport.transportDescription(kAudioDeviceTransportTypeUSB) == "USB")
-        #expect(ControllerAudioSupport.transportDescription(kAudioDeviceTransportTypeBluetooth) == "蓝牙")
+        #expect(
+            ControllerAudioSupport.transportDescription(kAudioDeviceTransportTypeBluetooth) ==
+                L10n.text("蓝牙", "Bluetooth")
+        )
     }
 
     @Test
     func adaptiveTriggerConfirmsOncePerFullPressAndResetsAfterRelease() {
-        var state = AdaptiveTriggerPressState()
+        var state = RightTriggerPressState()
 
         let initialPosition = state.update(value: 0.02)
         let lightPress = state.update(value: 0.08)
@@ -301,17 +398,17 @@ struct JoyHarnessTests {
 
     @Test
     func adaptiveTriggerUsesAStrongButReachableResistanceWall() {
-        #expect(AdaptiveTriggerPressState.resistanceStart == 0.35)
-        #expect(AdaptiveTriggerPressState.releasePoint == 0.72)
-        #expect(AdaptiveTriggerPressState.resistanceStrength == 0.90)
-        #expect(AdaptiveTriggerPressState.resetPoint < AdaptiveTriggerPressState.resistanceStart)
+        #expect(RightTriggerPressState.resistanceStart == 0.35)
+        #expect(RightTriggerPressState.releasePoint == 0.72)
+        #expect(RightTriggerPressState.resistanceStrength == 0.90)
+        #expect(RightTriggerPressState.resetPoint < RightTriggerPressState.resistanceStart)
     }
 
     @Test
     func rightTriggerActionRequiresCrossingTheResistanceWall() {
         var state = AnalogButtonPressState(
-            pressPoint: AdaptiveTriggerPressState.releasePoint,
-            resetPoint: AdaptiveTriggerPressState.resetPoint
+            pressPoint: RightTriggerPressState.releasePoint,
+            resetPoint: RightTriggerPressState.resetPoint
         )
 
         #expect(state.update(value: 0.20) == nil)
@@ -352,7 +449,7 @@ struct JoyHarnessTests {
 
     @Test
     func fastAdaptiveTriggerPressSkipsTheLightPulse() {
-        var state = AdaptiveTriggerPressState()
+        var state = RightTriggerPressState()
         let feedback = state.update(value: 0.90)
         #expect(feedback == .confirmation)
     }

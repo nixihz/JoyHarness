@@ -13,7 +13,7 @@ enum ControllerFamily: String {
         case .dualSense: "PS5 DualSense"
         case .dualShock: "PlayStation DualShock"
         case .xbox: "Xbox"
-        case .generic: "通用手柄"
+        case .generic: L10n.text("通用手柄", "Generic Controller")
         }
     }
 
@@ -115,10 +115,10 @@ enum ControllerAudioSupport {
     static func transportDescription(_ transport: UInt32) -> String {
         switch transport {
         case kAudioDeviceTransportTypeUSB: "USB"
-        case kAudioDeviceTransportTypeBluetooth: "蓝牙"
-        case kAudioDeviceTransportTypeBuiltIn: "内置"
-        case kAudioDeviceTransportTypeVirtual: "虚拟"
-        default: "其他"
+        case kAudioDeviceTransportTypeBluetooth: L10n.text("蓝牙", "Bluetooth")
+        case kAudioDeviceTransportTypeBuiltIn: L10n.text("内置", "Built-in")
+        case kAudioDeviceTransportTypeVirtual: L10n.text("虚拟", "Virtual")
+        default: L10n.text("其他", "Other")
         }
     }
 

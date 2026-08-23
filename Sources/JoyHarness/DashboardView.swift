@@ -4,6 +4,7 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var store: DashboardStore
     @ObservedObject var mappingStore: ControllerMappingStore
+    @EnvironmentObject private var languageSettings: AppLanguageSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,21 +28,22 @@ struct DashboardView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Joy Harness")
+        .id(languageSettings.preference)
         .toolbar {
             ToolbarItemGroup {
                 Button {
                     store.perform(.refresh)
                 } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
+                    Label(L10n.text("刷新", "Refresh"), systemImage: "arrow.clockwise")
                 }
-                .help("刷新任务和连接状态")
+                .help(L10n.text("刷新任务和连接状态", "Refresh tasks and connection status"))
 
                 Button {
                     store.perform(.openThread)
                 } label: {
-                    Label("打开任务", systemImage: "arrow.up.forward.app")
+                    Label(L10n.text("打开任务", "Open Task"), systemImage: "arrow.up.forward.app")
                 }
-                .help("在 Codex 中打开当前任务")
+                .help(L10n.text("在 Codex 中打开当前任务", "Open the current task in Codex"))
             }
 
             ToolbarItem {
@@ -56,7 +58,7 @@ private struct SlotSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("任务槽位")
+            Text(L10n.text("任务槽位", "Task Slots"))
                 .font(.headline)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -70,7 +72,9 @@ private struct SlotSidebar: View {
                     SlotRow(slot: slot, isSelected: slot.slot == store.status.selectedSlot)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("槽位 \(slot.slot)，\(slot.displayTitle)，\(slot.padState.displayName)")
+                .accessibilityLabel(
+                    "\(L10n.text("槽位", "Slot")) \(slot.slot), \(slot.displayTitle), \(slot.padState.displayName)"
+                )
             }
 
             Spacer(minLength: 12)
@@ -138,10 +142,10 @@ private struct TaskDetail: View {
 
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(slot?.displayTitle ?? "空槽位")
+                    Text(slot?.displayTitle ?? L10n.text("空槽位", "Empty Slot"))
                         .font(.system(size: 20, weight: .semibold))
                         .lineLimit(1)
-                    Text("任务槽位 \(status.selectedSlot)")
+                    Text("\(L10n.text("任务槽位", "Task Slot")) \(status.selectedSlot)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -192,35 +196,35 @@ private struct CommandButtons: View {
             Button {
                 store.perform(.approve)
             } label: {
-                Label("批准", systemImage: "checkmark")
+                Label(L10n.text("批准", "Approve"), systemImage: "checkmark")
             }
             .dashboardPrimaryButtonStyle()
             .tint(waiting ? .orange : .accentColor)
-            .help("批准当前待处理请求")
+            .help(L10n.text("批准当前待处理请求", "Approve the current pending request"))
 
             Button {
                 store.perform(.deny)
             } label: {
-                Label("拒绝", systemImage: "xmark")
+                Label(L10n.text("拒绝", "Deny"), systemImage: "xmark")
             }
             .dashboardSecondaryButtonStyle()
-            .help("拒绝当前待处理请求")
+            .help(L10n.text("拒绝当前待处理请求", "Deny the current pending request"))
 
             Button {
                 store.perform(.quickAction)
             } label: {
-                Label("快捷操作", systemImage: "bolt.fill")
+                Label(L10n.text("快捷操作", "Quick Action"), systemImage: "bolt.fill")
             }
             .dashboardSecondaryButtonStyle()
-            .help("触发 Codex Micro 快捷操作")
+            .help(L10n.text("触发 Codex Micro 快捷操作", "Trigger the Codex Micro quick action"))
 
             Button {
                 store.perform(.openThread)
             } label: {
-                Label("打开任务", systemImage: "arrow.up.forward.app")
+                Label(L10n.text("打开任务", "Open Task"), systemImage: "arrow.up.forward.app")
             }
             .dashboardSecondaryButtonStyle()
-            .help("在 Codex 中打开当前任务")
+            .help(L10n.text("在 Codex 中打开当前任务", "Open the current task in Codex"))
         }
         .controlSize(.large)
     }
@@ -233,7 +237,7 @@ private struct ControllerMap: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack {
-                Label("控制映射", systemImage: "gamecontroller.fill")
+                Label(L10n.text("控制映射", "Controller Mapping"), systemImage: "gamecontroller.fill")
                     .font(.headline)
                 Spacer()
                 if status.controllerConnected == true {
@@ -244,18 +248,18 @@ private struct ControllerMap: View {
                 }
                 if #available(macOS 14.0, *) {
                     SettingsLink {
-                        Label("自定义按键", systemImage: "gearshape")
+                        Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "gearshape")
                     }
                     .buttonStyle(.borderless)
-                    .help("打开按键映射设置")
+                    .help(L10n.text("打开按键映射设置", "Open controller mapping settings"))
                 } else {
                     Button {
                         NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
                     } label: {
-                        Label("自定义按键", systemImage: "gearshape")
+                        Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "gearshape")
                     }
                     .buttonStyle(.borderless)
-                    .help("打开按键映射设置")
+                    .help(L10n.text("打开按键映射设置", "Open controller mapping settings"))
                 }
 
                 Text("\(mappingStore.controllerFamily.displayName) / Codex Micro")
@@ -294,7 +298,10 @@ private struct ControllerMap: View {
                         .frame(minWidth: 220, maxWidth: .infinity, maxHeight: 270)
                         .accessibilityLabel(mappingStore.controllerFamily.displayName)
                 } else {
-                    Label("手柄资源加载失败", systemImage: "exclamationmark.triangle")
+                    Label(
+                        L10n.text("手柄资源加载失败", "Controller artwork failed to load"),
+                        systemImage: "exclamationmark.triangle"
+                    )
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 220, maxWidth: .infinity)
                 }
@@ -354,7 +361,9 @@ private struct ControllerMap: View {
             mappingStore.action(for: .dpadDown),
             mappingStore.action(for: .dpadRight),
         ]
-        return Set(actions).count == 1 ? actions[0].displayName : "自定义"
+        return Set(actions).count == 1
+            ? actions[0].displayName
+            : L10n.text("自定义", "Custom")
     }
 }
 
@@ -413,13 +422,13 @@ private struct ControllerBatteryIndicator: View {
     }
 
     private var accessibilityText: String {
-        guard let percentage else { return "手柄电量未知" }
+        guard let percentage else { return L10n.text("手柄电量未知", "Controller battery level unknown") }
         let stateDescription = switch state {
-        case ControllerBatteryState.charging.rawValue: "，正在充电"
-        case ControllerBatteryState.full.rawValue: "，已充满"
+        case ControllerBatteryState.charging.rawValue: L10n.text("，正在充电", ", charging")
+        case ControllerBatteryState.full.rawValue: L10n.text("，已充满", ", fully charged")
         default: ""
         }
-        return "手柄电量 \(percentage)%\(stateDescription)"
+        return "\(L10n.text("手柄电量", "Controller battery")) \(percentage)%\(stateDescription)"
     }
 }
 
@@ -448,7 +457,7 @@ private struct ConnectionInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("连接与诊断")
+            Text(L10n.text("连接与诊断", "Connections and Diagnostics"))
                 .font(.headline)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -456,17 +465,18 @@ private struct ConnectionInspector: View {
             Divider()
 
             InspectorSection(
-                title: "控制器",
+                title: L10n.text("控制器", "Controller"),
                 systemImage: "gamecontroller",
                 connected: status.controllerConnected ??
                     (status.controller != "none" && status.controller != "No controller"),
                 rows: [
-                    ("设备", status.controller),
-                    ("类型", controllerFamilyName),
-                    ("震动", status.haptics ? "可用" : "不可用"),
-                    ("触控板", status.controllerTouchpad == true ? "可映射" : "不可用"),
-                    ("R2 扳机", status.controllerFamily == ControllerFamily.dualSense.rawValue
-                        ? "自适应强反馈" : "标准输入"),
+                    (L10n.text("设备", "Device"), status.controller),
+                    (L10n.text("类型", "Type"), controllerFamilyName),
+                    (L10n.text("震动", "Haptics"), status.haptics
+                        ? L10n.text("可用", "Available") : L10n.text("不可用", "Unavailable")),
+                    (L10n.text("触控板", "Touchpad"), status.controllerTouchpad == true
+                        ? L10n.text("可映射", "Mappable") : L10n.text("不可用", "Unavailable")),
+                    (L10n.text("RT / R2 扳机", "RT / R2 Trigger"), rightTriggerDescription),
                 ]
             )
             Divider().padding(.leading, 16)
@@ -475,27 +485,36 @@ private struct ConnectionInspector: View {
                 systemImage: "memorychip",
                 connected: status.rp2040,
                 rows: [
-                    ("RP2040", status.rp2040 ? "已连接" : "未连接"),
-                    ("模式", status.mode == "legacy-app-server" ? "软件兼容" : "物理 Micro"),
+                    ("RP2040", status.rp2040
+                        ? L10n.text("已连接", "Connected") : L10n.text("未连接", "Disconnected")),
+                    (L10n.text("模式", "Mode"), status.mode == "legacy-app-server"
+                        ? L10n.text("软件兼容", "Software Compatibility")
+                        : L10n.text("物理 Micro", "Physical Micro")),
                 ]
             )
             Divider().padding(.leading, 16)
             InspectorSection(
-                title: "运行模式",
+                title: L10n.text("运行模式", "Runtime"),
                 systemImage: "lock.shield",
                 connected: status.mode == "physical-codex-micro",
                 rows: [
-                    ("辅助功能", status.accessibility ? "已授权" : "鼠标控制未授权"),
-                    ("输入监控", status.inputMonitoring == true ? "已授权" : "后台手柄未授权"),
-                    ("语音输入", voiceInputDescription),
-                    ("录音", "由 Codex Desktop 管理"),
+                    (L10n.text("辅助功能", "Accessibility"), status.accessibility
+                        ? L10n.text("已授权", "Authorized")
+                        : L10n.text("鼠标控制未授权", "Pointer control unauthorized")),
+                    (L10n.text("输入监控", "Input Monitoring"), status.inputMonitoring == true
+                        ? L10n.text("已授权", "Authorized")
+                        : L10n.text("后台手柄未授权", "Background controller unauthorized")),
+                    (L10n.text("语音输入", "Voice Input"), voiceInputDescription),
+                    (L10n.text("录音", "Recording"), L10n.text(
+                        "由 Codex Desktop 管理", "Managed by Codex Desktop"
+                    )),
                 ]
             )
             if status.controllerFamily == ControllerFamily.dualSense.rawValue {
                 Button {
                     openSoundInputSettings()
                 } label: {
-                    Label("打开声音输入设置", systemImage: "mic")
+                    Label(L10n.text("打开声音输入设置", "Open Sound Input Settings"), systemImage: "mic")
                 }
                 .buttonStyle(.link)
                 .padding(.horizontal, 16)
@@ -506,7 +525,7 @@ private struct ConnectionInspector: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("震动测试")
+                Text(L10n.text("震动测试", "Haptic Test"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 7) {
@@ -519,7 +538,7 @@ private struct ConnectionInspector: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(state.color)
-                        .help("测试\(state.displayName)震动")
+                        .help(L10n.text("测试\(state.displayName)震动", "Test \(state.displayName) haptics"))
                     }
                 }
             }
@@ -530,23 +549,45 @@ private struct ConnectionInspector: View {
 
     private var controllerFamilyName: String {
         guard let raw = status.controllerFamily,
-              let family = ControllerFamily(rawValue: raw) else { return "通用手柄" }
+              let family = ControllerFamily(rawValue: raw) else {
+            return L10n.text("通用手柄", "Generic Controller")
+        }
         return family.displayName
+    }
+
+    private var rightTriggerDescription: String {
+        switch status.controllerFamily.flatMap(ControllerFamily.init(rawValue:)) {
+        case .dualSense:
+            L10n.text("自适应强反馈", "Strong Adaptive Feedback")
+        case .xbox where status.haptics:
+            L10n.text("Impulse Trigger 细微反馈", "Subtle Impulse Trigger Feedback")
+        default:
+            L10n.text("标准输入", "Standard Input")
+        }
     }
 
     private var voiceInputDescription: String {
         guard status.microphone, let name = status.voiceInput, !name.isEmpty else {
             guard let defaultInput = status.defaultVoiceInput, !defaultInput.isEmpty else {
                 return status.controllerFamily == ControllerFamily.dualSense.rawValue
-                    ? "手柄未提供；系统也无可用输入" : "系统无可用输入"
+                    ? L10n.text(
+                        "手柄未提供；系统也无可用输入",
+                        "Controller input unavailable; no system input available"
+                    )
+                    : L10n.text("系统无可用输入", "No system input available")
             }
             return status.controllerFamily == ControllerFamily.dualSense.rawValue
-                ? "手柄未提供；当前用 \(defaultInput)" : "当前用 \(defaultInput)"
+                ? L10n.text(
+                    "手柄未提供；当前用 \(defaultInput)",
+                    "Controller input unavailable; using \(defaultInput)"
+                )
+                : L10n.text("当前用 \(defaultInput)", "Using \(defaultInput)")
         }
-        let transport = status.voiceInputTransport.flatMap { $0.isEmpty ? nil : $0 } ?? "未知连接"
+        let transport = status.voiceInputTransport.flatMap { $0.isEmpty ? nil : $0 }
+            ?? L10n.text("未知连接", "Unknown connection")
         return status.voiceInputDefault == true
-            ? "\(name)（\(transport)，默认）"
-            : "\(name)（\(transport)，未选中）"
+            ? L10n.text("\(name)（\(transport)，默认）", "\(name) (\(transport), default)")
+            : L10n.text("\(name)（\(transport)，未选中）", "\(name) (\(transport), not selected)")
     }
 
     private func openSoundInputSettings() {
@@ -574,7 +615,9 @@ private struct InspectorSection: View {
                 Circle()
                     .fill(connected ? Color.green : Color.secondary.opacity(0.45))
                     .frame(width: 8, height: 8)
-                Text(connected ? "已连接" : "未连接")
+                Text(connected
+                    ? L10n.text("已连接", "Connected")
+                    : L10n.text("未连接", "Disconnected"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -603,7 +646,9 @@ private struct HealthIndicator: View {
             Circle()
                 .fill(status.rp2040 && status.haptics ? Color.green : Color.orange)
                 .frame(width: 8, height: 8)
-            Text(status.rp2040 && status.haptics ? "链路正常" : "检查连接")
+            Text(status.rp2040 && status.haptics
+                ? L10n.text("链路正常", "Connections Ready")
+                : L10n.text("检查连接", "Check Connections"))
                 .font(.caption)
         }
     }
@@ -615,7 +660,7 @@ private struct ActivityBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Label("活动", systemImage: "waveform.path.ecg")
+            Label(L10n.text("活动", "Activity"), systemImage: "waveform.path.ecg")
                 .font(.caption.weight(.semibold))
             Divider().frame(height: 16)
             Text(message.isEmpty ? activityText : message)
@@ -633,7 +678,7 @@ private struct ActivityBar: View {
     }
 
     private var activityText: String {
-        status.note.isEmpty ? "等待事件" : status.note
+        status.note.isEmpty ? L10n.text("等待事件", "Waiting for events") : status.note
     }
 
     private var formattedTimestamp: String {
@@ -714,21 +759,21 @@ private struct DashboardSecondaryButtonStyle: ViewModifier {
 extension PadState {
     var displayName: String {
         switch self {
-        case .idle: return "就绪"
-        case .busy: return "执行中"
-        case .waiting: return "等待批准"
-        case .done: return "已完成"
-        case .error: return "发生错误"
+        case .idle: return L10n.text("就绪", "Ready")
+        case .busy: return L10n.text("执行中", "Running")
+        case .waiting: return L10n.text("等待批准", "Waiting for Approval")
+        case .done: return L10n.text("已完成", "Completed")
+        case .error: return L10n.text("发生错误", "Error")
         }
     }
 
     var shortDescription: String {
         switch self {
-        case .idle: return "等待下一项操作"
-        case .busy: return "任务正在处理"
-        case .waiting: return "需要你的决定"
-        case .done: return "任务已结束"
-        case .error: return "请检查活动记录"
+        case .idle: return L10n.text("等待下一项操作", "Waiting for the next action")
+        case .busy: return L10n.text("任务正在处理", "Task in progress")
+        case .waiting: return L10n.text("需要你的决定", "Your decision is required")
+        case .done: return L10n.text("任务已结束", "Task finished")
+        case .error: return L10n.text("请检查活动记录", "Check the activity log")
         }
     }
 

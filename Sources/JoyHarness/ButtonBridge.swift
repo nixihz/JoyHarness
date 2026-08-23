@@ -10,6 +10,7 @@ enum MouseButton: Hashable {
 enum SystemKey: Hashable {
     case backspace
     case escape
+    case rightCommand
 }
 
 enum FaceButton {
@@ -65,8 +66,8 @@ final class ButtonBridge {
     private var mouseSpeedBoostPressed = false
     private var controllerFamily: ControllerFamily = .generic
     private var rightTriggerPressState = AnalogButtonPressState(
-        pressPoint: AdaptiveTriggerPressState.releasePoint,
-        resetPoint: AdaptiveTriggerPressState.resetPoint
+        pressPoint: RightTriggerPressState.releasePoint,
+        resetPoint: RightTriggerPressState.resetPoint
     )
 
     private(set) var selectedSlot = 0
@@ -450,8 +451,8 @@ final class ButtonBridge {
         lastJoystick = nil
         mouseSpeedBoostPressed = false
         rightTriggerPressState = AnalogButtonPressState(
-            pressPoint: AdaptiveTriggerPressState.releasePoint,
-            resetPoint: AdaptiveTriggerPressState.resetPoint
+            pressPoint: RightTriggerPressState.releasePoint,
+            resetPoint: RightTriggerPressState.resetPoint
         )
         leftStickHandler?(0, 0, false)
     }

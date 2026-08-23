@@ -74,9 +74,9 @@ final class DualSenseHIDOutput {
 
     func applyWeaponEffect() -> Bool {
         let report = DualSenseUSBOutputReport.weapon(
-            startPosition: AdaptiveTriggerPressState.resistanceStart,
-            endPosition: AdaptiveTriggerPressState.releasePoint,
-            strength: AdaptiveTriggerPressState.resistanceStrength
+            startPosition: RightTriggerPressState.resistanceStart,
+            endPosition: RightTriggerPressState.releasePoint,
+            strength: RightTriggerPressState.resistanceStrength
         )
         let succeeded = send(report)
         if succeeded {

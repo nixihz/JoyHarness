@@ -7,6 +7,14 @@ enum ControllerInputGroup: String, CaseIterable, Identifiable {
     case functionLayer = "LT 功能层"
 
     var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .primary: L10n.text("基础按键", "Primary Buttons")
+        case .dpad: L10n.text("十字键", "D-Pad")
+        case .functionLayer: L10n.text("LT 功能层", "LT Function Layer")
+        }
+    }
 }
 
 enum ControllerInput: String, CaseIterable, Codable, Identifiable {
@@ -57,21 +65,29 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         case .rightTrigger: playStation ? "R2" : "RT"
         case .leftThumbstickButton: "L3"
         case .rightThumbstickButton: "R3"
-        case .touchpadButton: "触控板按键"
-        case .dpadUp: "十字键 上"
-        case .dpadLeft: "十字键 左"
-        case .dpadDown: "十字键 下"
-        case .dpadRight: "十字键 右"
+        case .touchpadButton: L10n.text("触控板按键", "Touchpad Button")
+        case .dpadUp: L10n.text("十字键 上", "D-Pad Up")
+        case .dpadLeft: L10n.text("十字键 左", "D-Pad Left")
+        case .dpadDown: L10n.text("十字键 下", "D-Pad Down")
+        case .dpadRight: L10n.text("十字键 右", "D-Pad Right")
         case .functionButtonA: playStation ? "L2 + ×" : "LT + A"
         case .functionButtonB: playStation ? "L2 + ○" : "LT + B"
         case .functionButtonX: playStation ? "L2 + □" : "LT + X"
         case .functionButtonY: playStation ? "L2 + △" : "LT + Y"
         case .functionLeftShoulder: playStation ? "L2 + L1" : "LT + LB"
         case .functionRightShoulder: playStation ? "L2 + R1" : "LT + RB"
-        case .functionDpadUp: playStation ? "L2 + 十字键 上" : "LT + 十字键 上"
-        case .functionDpadLeft: playStation ? "L2 + 十字键 左" : "LT + 十字键 左"
-        case .functionDpadDown: playStation ? "L2 + 十字键 下" : "LT + 十字键 下"
-        case .functionDpadRight: playStation ? "L2 + 十字键 右" : "LT + 十字键 右"
+        case .functionDpadUp: playStation
+            ? L10n.text("L2 + 十字键 上", "L2 + D-Pad Up")
+            : L10n.text("LT + 十字键 上", "LT + D-Pad Up")
+        case .functionDpadLeft: playStation
+            ? L10n.text("L2 + 十字键 左", "L2 + D-Pad Left")
+            : L10n.text("LT + 十字键 左", "LT + D-Pad Left")
+        case .functionDpadDown: playStation
+            ? L10n.text("L2 + 十字键 下", "L2 + D-Pad Down")
+            : L10n.text("LT + 十字键 下", "LT + D-Pad Down")
+        case .functionDpadRight: playStation
+            ? L10n.text("L2 + 十字键 右", "L2 + D-Pad Right")
+            : L10n.text("LT + 十字键 右", "LT + D-Pad Right")
         }
     }
 
@@ -106,6 +122,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case mouseMiddle
     case backspace
     case escape
+    case rightCommand
     case answerYes
     case answerNo
     case approve
@@ -128,31 +145,32 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .disabled: "不执行操作"
-        case .radialInput: "Codex 径向输入"
-        case .functionModifier: "LT 功能层与滚动"
-        case .mouseLeft: "鼠标左键"
-        case .mouseRight: "鼠标右键"
-        case .mouseMiddle: "鼠标中键"
-        case .backspace: "退格"
+        case .disabled: L10n.text("不执行操作", "No Action")
+        case .radialInput: L10n.text("Codex 径向输入", "Codex Radial Input")
+        case .functionModifier: L10n.text("LT 功能层与滚动", "LT Function Layer and Scroll")
+        case .mouseLeft: L10n.text("鼠标左键", "Left Mouse Button")
+        case .mouseRight: L10n.text("鼠标右键", "Right Mouse Button")
+        case .mouseMiddle: L10n.text("鼠标中键", "Middle Mouse Button")
+        case .backspace: L10n.text("退格", "Backspace")
         case .escape: "Esc"
-        case .answerYes: "输入 yes"
-        case .answerNo: "输入 no"
-        case .approve: "批准"
-        case .deny: "拒绝"
-        case .quickAction: "快捷操作"
-        case .splitThread: "拆分任务"
-        case .pushToTalk: "按住说话"
-        case .focusCodex: "聚焦 Codex"
-        case .previousSlot: "上一个槽位"
-        case .nextSlot: "下一个槽位"
-        case .slot1: "选择槽位 1"
-        case .slot2: "选择槽位 2"
-        case .slot3: "选择槽位 3"
-        case .slot4: "选择槽位 4"
-        case .slot5: "选择槽位 5"
-        case .slot6: "选择槽位 6"
-        case .mouseSpeedBoost: "按住加速鼠标"
+        case .rightCommand: L10n.text("右侧 Command", "Right Command")
+        case .answerYes: L10n.text("输入 yes", "Type yes")
+        case .answerNo: L10n.text("输入 no", "Type no")
+        case .approve: L10n.text("批准", "Approve")
+        case .deny: L10n.text("拒绝", "Deny")
+        case .quickAction: L10n.text("快捷操作", "Quick Action")
+        case .splitThread: L10n.text("拆分任务", "Split Task")
+        case .pushToTalk: L10n.text("按住说话", "Push to Talk")
+        case .focusCodex: L10n.text("聚焦 Codex", "Focus Codex")
+        case .previousSlot: L10n.text("上一个槽位", "Previous Slot")
+        case .nextSlot: L10n.text("下一个槽位", "Next Slot")
+        case .slot1: L10n.text("选择槽位 1", "Select Slot 1")
+        case .slot2: L10n.text("选择槽位 2", "Select Slot 2")
+        case .slot3: L10n.text("选择槽位 3", "Select Slot 3")
+        case .slot4: L10n.text("选择槽位 4", "Select Slot 4")
+        case .slot5: L10n.text("选择槽位 5", "Select Slot 5")
+        case .slot6: L10n.text("选择槽位 6", "Select Slot 6")
+        case .mouseSpeedBoost: L10n.text("按住加速鼠标", "Hold for Faster Pointer")
         }
     }
 
@@ -164,6 +182,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseMiddle: .mouseButton(.middle)
         case .backspace: .systemKey(.backspace)
         case .escape: .systemKey(.escape)
+        case .rightCommand: .systemKey(.rightCommand)
         case .answerYes: .textInput("yes")
         case .answerNo: .textInput("no")
         case .approve: .microKey("ACT07")
@@ -201,7 +220,7 @@ final class ControllerMappingStore: ObservableObject {
         .leftThumbstickButton: .mouseSpeedBoost,
         .rightThumbstickButton: .mouseMiddle,
         .touchpadButton: .pushToTalk,
-        .dpadUp: .radialInput,
+        .dpadUp: .rightCommand,
         .dpadLeft: .radialInput,
         .dpadDown: .radialInput,
         .dpadRight: .radialInput,
@@ -245,6 +264,7 @@ final class ControllerMappingStore: ObservableObject {
         )
         migrateYesNoFaceButtonsIfNeeded()
         migrateUnifiedFaceButtonLayoutIfNeeded()
+        migrateDPadUpToRightCommandIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
@@ -326,6 +346,16 @@ final class ControllerMappingStore: ObservableObject {
             ] {
                 mappings[input] = Self.baseDefaultMappings[input]
             }
+            persist()
+        }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
+    private func migrateDPadUpToRightCommandIfNeeded() {
+        let migrationKey = "\(storageKey).dpadUpRightCommandMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        if mappings[.dpadUp] == .radialInput {
+            mappings[.dpadUp] = .rightCommand
             persist()
         }
         userDefaults.set(true, forKey: migrationKey)

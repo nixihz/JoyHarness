@@ -2,6 +2,27 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 
+struct SystemKeyEventDescriptor {
+    let keyCode: CGKeyCode
+    let flags: CGEventFlags
+}
+
+extension SystemKey {
+    func eventDescriptor(pressed: Bool) -> SystemKeyEventDescriptor {
+        switch self {
+        case .backspace:
+            return SystemKeyEventDescriptor(keyCode: 51, flags: [])
+        case .escape:
+            return SystemKeyEventDescriptor(keyCode: 53, flags: [])
+        case .rightCommand:
+            // IOLLEvent.h defines 0x10 as NX_DEVICERCMDKEYMASK (0x08 is left Command).
+            let rightCommandDeviceFlag = CGEventFlags(rawValue: 0x10)
+            let flags: CGEventFlags = pressed ? [.maskCommand, rightCommandDeviceFlag] : []
+            return SystemKeyEventDescriptor(keyCode: 0x36, flags: flags)
+        }
+    }
+}
+
 @MainActor
 final class MouseBridge: NSObject {
     private var targetVelocity = CGPoint.zero
@@ -270,15 +291,14 @@ final class MouseBridge: NSObject {
     }
 
     private func postSystemKey(_ key: SystemKey, pressed: Bool, isRepeat: Bool = false) {
-        let keyCode: CGKeyCode = switch key {
-        case .backspace: 51
-        case .escape: 53
-        }
+        let descriptor = key.eventDescriptor(pressed: pressed)
+        let eventSource = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: keyCode,
+            keyboardEventSource: eventSource,
+            virtualKey: descriptor.keyCode,
             keyDown: pressed
         ) else { return }
+        event.flags = descriptor.flags
         if isRepeat {
             event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
         }

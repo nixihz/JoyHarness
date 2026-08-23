@@ -24,8 +24,10 @@ struct DashboardSlot: Decodable, Identifiable, Equatable {
 
     var displayTitle: String {
         if !title.isEmpty { return title }
-        if !threadID.isEmpty { return "任务 \(threadID.suffix(8))" }
-        return "Micro 槽位"
+        if !threadID.isEmpty {
+            return "\(L10n.text("任务", "Task")) \(threadID.suffix(8))"
+        }
+        return L10n.text("Micro 槽位", "Micro Slot")
     }
 
     enum CodingKeys: String, CodingKey {
@@ -104,7 +106,7 @@ struct DashboardStatus: Decodable, Equatable {
         defaultVoiceInput: nil,
         rp2040: false,
         mode: "physical-codex-micro",
-        note: "正在读取状态",
+        note: L10n.text("正在读取状态", "Reading status"),
         timestamp: ""
     )
 }
@@ -142,7 +144,9 @@ final class DashboardStore: ObservableObject {
 
     func perform(_ action: DashboardAction) {
         let succeeded = onAction?(action) == true
-        actionMessage = succeeded ? successMessage(for: action) : "操作未执行，请检查连接状态"
+        actionMessage = succeeded
+            ? successMessage(for: action)
+            : L10n.text("操作未执行，请检查连接状态", "Action failed. Check the connection.")
         reload()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
@@ -152,13 +156,15 @@ final class DashboardStore: ObservableObject {
 
     private func successMessage(for action: DashboardAction) -> String {
         switch action {
-        case .refresh: return "状态已刷新"
-        case .selectSlot(let index): return "已切换到槽位 \(index + 1)"
-        case .approve: return "已发送批准"
-        case .deny: return "已发送拒绝"
-        case .quickAction: return "已发送快捷操作"
-        case .openThread: return "正在打开任务"
-        case .testState(let state): return "已测试 \(state.displayName) 反馈"
+        case .refresh: return L10n.text("状态已刷新", "Status refreshed")
+        case .selectSlot(let index):
+            return "\(L10n.text("已切换到槽位", "Switched to slot")) \(index + 1)"
+        case .approve: return L10n.text("已发送批准", "Approval sent")
+        case .deny: return L10n.text("已发送拒绝", "Denial sent")
+        case .quickAction: return L10n.text("已发送快捷操作", "Quick action sent")
+        case .openThread: return L10n.text("正在打开任务", "Opening task")
+        case .testState(let state):
+            return L10n.text("已测试 \(state.displayName) 反馈", "Tested \(state.displayName) feedback")
         }
     }
 }

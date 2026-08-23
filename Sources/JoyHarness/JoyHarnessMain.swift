@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct JoyHarnessApp: App {
     @NSApplicationDelegateAdaptor(JoyHarnessAppDelegate.self) private var appDelegate
+    @StateObject private var languageSettings = AppLanguageSettings()
 
     var body: some Scene {
         WindowGroup("Joy Harness", id: "main") {
@@ -12,6 +13,8 @@ struct JoyHarnessApp: App {
                 store: appDelegate.runtime.dashboard,
                 mappingStore: appDelegate.runtime.mappings
             )
+                .environmentObject(languageSettings)
+                .environment(\.locale, languageSettings.locale)
                 .frame(
                     minWidth: 980,
                     idealWidth: 1240,
@@ -25,12 +28,12 @@ struct JoyHarnessApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("刷新状态") {
+                Button(L10n.text("刷新状态", "Refresh Status")) {
                     appDelegate.runtime.dashboard.perform(.refresh)
                 }
                 .keyboardShortcut("r", modifiers: .command)
 
-                Button("打开当前任务") {
+                Button(L10n.text("打开当前任务", "Open Current Task")) {
                     appDelegate.runtime.dashboard.perform(.openThread)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -38,7 +41,11 @@ struct JoyHarnessApp: App {
         }
 
         Settings {
-            ControllerMappingSettingsView(store: appDelegate.runtime.mappings)
+            ControllerMappingSettingsView(
+                store: appDelegate.runtime.mappings,
+                languageSettings: languageSettings
+            )
+            .environment(\.locale, languageSettings.locale)
         }
     }
 }
@@ -68,6 +75,7 @@ final class JoyHarnessRuntime {
     private let socketPath: String
     private let haptics = HapticEngine()
     private let adaptiveTrigger = AdaptiveTriggerFeedback()
+    private var xboxTriggerPressState = RightTriggerPressState()
     private let threads = CodexThreadProvider()
     private let buttons: ButtonBridge
     private let mouse = MouseBridge()
@@ -179,7 +187,14 @@ final class JoyHarnessRuntime {
             self?.mouse.setSpeedBoostActive(active)
         }
         buttons.rightTriggerFeedbackHandler = { [weak self] value in
-            self?.adaptiveTrigger.update(value: value)
+            guard let self else { return }
+            if self.controllerFamily == .xbox {
+                if let event = self.xboxTriggerPressState.update(value: value) {
+                    self.haptics.playXboxTriggerFeedback(event)
+                }
+            } else {
+                self.adaptiveTrigger.update(value: value)
+            }
         }
         adaptiveTrigger.onFeedback = { [weak self] event in
             self?.haptics.playAdaptiveTriggerFeedback(event)
@@ -194,6 +209,7 @@ final class JoyHarnessRuntime {
             guard let self else { return }
             self.lastBatterySnapshot = nil
             self.controllerFamily = family
+            self.xboxTriggerPressState = RightTriggerPressState()
             self.mappings.setControllerFamily(family)
             self.haptics.attach(controller)
             self.adaptiveTrigger.attach(controller)

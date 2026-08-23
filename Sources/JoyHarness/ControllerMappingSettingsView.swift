@@ -2,13 +2,33 @@ import SwiftUI
 
 struct ControllerMappingSettingsView: View {
     @ObservedObject var store: ControllerMappingStore
+    @ObservedObject var languageSettings: AppLanguageSettings
     @State private var isResetConfirmationPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
+                Section(L10n.text("语言", "Language")) {
+                    Picker(
+                        L10n.text("应用语言", "App Language"),
+                        selection: $languageSettings.preference
+                    ) {
+                        ForEach(AppLanguagePreference.allCases) { preference in
+                            Text(preference.displayName).tag(preference)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(L10n.text(
+                        "跟随系统时，中文系统使用简体中文，其他语言使用 English。",
+                        "System Default uses Simplified Chinese for Chinese systems and English otherwise."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
                 ForEach(ControllerInputGroup.allCases) { group in
-                    Section(group.rawValue) {
+                    Section(group.displayName) {
                         ForEach(inputs(in: group)) { input in
                             Picker(store.displayName(for: input), selection: binding(for: input)) {
                                 ForEach(input.availableActions) { action in
@@ -29,21 +49,24 @@ struct ControllerMappingSettingsView: View {
                 Button {
                     isResetConfirmationPresented = true
                 } label: {
-                    Label("恢复默认映射", systemImage: "arrow.counterclockwise")
+                    Label(L10n.text("恢复默认映射", "Restore Default Mappings"), systemImage: "arrow.counterclockwise")
                 }
             }
             .padding(16)
             .background(.bar)
         }
         .frame(width: 560, height: 640)
-        .navigationTitle("按键映射")
-        .alert("恢复默认映射？", isPresented: $isResetConfirmationPresented) {
-            Button("取消", role: .cancel) {}
-            Button("恢复默认", role: .destructive) {
+        .navigationTitle(L10n.text("设置", "Settings"))
+        .alert(L10n.text("恢复默认映射？", "Restore Default Mappings?"), isPresented: $isResetConfirmationPresented) {
+            Button(L10n.text("取消", "Cancel"), role: .cancel) {}
+            Button(L10n.text("恢复默认", "Restore Defaults"), role: .destructive) {
                 store.resetDefaults()
             }
         } message: {
-            Text("当前的所有自定义按键设置将被替换。")
+            Text(L10n.text(
+                "当前的所有自定义按键设置将被替换。",
+                "All custom button mappings will be replaced."
+            ))
         }
     }
 
