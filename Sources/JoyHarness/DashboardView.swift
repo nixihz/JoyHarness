@@ -7,22 +7,60 @@ struct DashboardView: View {
     @EnvironmentObject private var languageSettings: AppLanguageSettings
 
     var body: some View {
-        HStack(spacing: 0) {
-            SlotSidebar(store: store)
-                .frame(width: 224)
+        VStack(spacing: 0) {
+            DashboardTopBar()
 
-            Divider()
+            HStack(spacing: 0) {
+                SlotSidebar(store: store)
+                    .frame(width: 224)
 
-            TaskDetail(store: store, mappingStore: mappingStore)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
 
-            Divider()
+                TaskDetail(store: store, mappingStore: mappingStore)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            ConnectionInspector(status: store.status, store: store)
-                .frame(width: 252)
+                Divider()
+
+                ConnectionInspector(status: store.status, store: store)
+                    .frame(width: 252)
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .id(languageSettings.preference)
+    }
+}
+
+private struct DashboardTopBar: View {
+    @EnvironmentObject private var settingsCoordinator: SettingsCoordinator
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Joy Harness")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            if #available(macOS 14.0, *) {
+                OpenSettingsButton(tab: .general) {
+                    Label(L10n.text("设置", "Settings"), systemImage: "gearshape")
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.text("打开设置", "Open Settings"))
+            } else {
+                Button {
+                    settingsCoordinator.select(.general)
+                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                } label: {
+                    Label(L10n.text("设置", "Settings"), systemImage: "gearshape")
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.text("打开设置", "Open Settings"))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 }
 
@@ -161,6 +199,7 @@ private struct StateBanner: View {
 private struct ControllerMap: View {
     let status: DashboardStatus
     @ObservedObject var mappingStore: ControllerMappingStore
+    @EnvironmentObject private var settingsCoordinator: SettingsCoordinator
 
     var body: some View {
         VStack(spacing: 16) {
@@ -175,16 +214,17 @@ private struct ControllerMap: View {
                     )
                 }
                 if #available(macOS 14.0, *) {
-                    SettingsLink {
-                        Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "gearshape")
+                    OpenSettingsButton(tab: .controllerMapping) {
+                        Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "slider.horizontal.3")
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.text("打开按键映射设置", "Open controller mapping settings"))
                 } else {
                     Button {
+                        settingsCoordinator.select(.controllerMapping)
                         NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
                     } label: {
-                        Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "gearshape")
+                        Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "slider.horizontal.3")
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.text("打开按键映射设置", "Open controller mapping settings"))
@@ -390,6 +430,7 @@ private struct MappingLabel: View {
 private struct ConnectionInspector: View {
     let status: DashboardStatus
     @ObservedObject var store: DashboardStore
+    @EnvironmentObject private var settingsCoordinator: SettingsCoordinator
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -487,7 +528,23 @@ private struct ConnectionInspector: View {
             .padding(16)
 
             HStack {
+                if #available(macOS 14.0, *) {
+                    OpenSettingsLink(
+                        tab: .general,
+                        title: L10n.text("设置…", "Settings…")
+                    )
+                } else {
+                    Button {
+                        settingsCoordinator.select(.general)
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    } label: {
+                        Label(L10n.text("设置…", "Settings…"), systemImage: "gearshape")
+                    }
+                    .buttonStyle(.link)
+                }
+
                 Spacer()
+
                 Text(AppVersion.displayName)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)

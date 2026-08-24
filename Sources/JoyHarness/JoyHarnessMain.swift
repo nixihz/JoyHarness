@@ -6,6 +6,8 @@ import SwiftUI
 struct JoyHarnessApp: App {
     @NSApplicationDelegateAdaptor(JoyHarnessAppDelegate.self) private var appDelegate
     @StateObject private var languageSettings = AppLanguageSettings()
+    @StateObject private var settingsCoordinator = SettingsCoordinator()
+    @StateObject private var launchAtLogin = LaunchAtLoginManager()
 
     var body: some Scene {
         WindowGroup("Joy Harness", id: "main") {
@@ -14,6 +16,7 @@ struct JoyHarnessApp: App {
                 mappingStore: appDelegate.runtime.mappings
             )
                 .environmentObject(languageSettings)
+                .environmentObject(settingsCoordinator)
                 .environment(\.locale, languageSettings.locale)
                 .frame(
                     minWidth: 980,
@@ -29,6 +32,8 @@ struct JoyHarnessApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(UnifiedWindowToolbarStyle(showsTitle: false))
         .commands {
+            CommandGroup(replacing: .appSettings) {}
+
             CommandGroup(after: .newItem) {
                 Button(L10n.text("刷新状态", "Refresh Status")) {
                     appDelegate.runtime.dashboard.perform(.refresh)
@@ -43,9 +48,11 @@ struct JoyHarnessApp: App {
         }
 
         Settings {
-            ControllerMappingSettingsView(
-                store: appDelegate.runtime.mappings,
-                languageSettings: languageSettings
+            AppSettingsView(
+                mappingStore: appDelegate.runtime.mappings,
+                languageSettings: languageSettings,
+                launchAtLogin: launchAtLogin,
+                settingsCoordinator: settingsCoordinator
             )
             .environment(\.locale, languageSettings.locale)
         }

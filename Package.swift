@@ -17,6 +17,7 @@ let package = Package(
                 .linkedFramework("CoreHaptics"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("IOKit"),
+                .linkedFramework("ServiceManagement"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
