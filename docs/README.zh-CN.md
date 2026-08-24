@@ -25,20 +25,25 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 ## 下载
 
-当前版本为 **v0.2.0**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
+当前版本为 **v0.2.1**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
 
-- [下载 Joy-Harness-v0.2.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.0/Joy-Harness-v0.2.0-macOS-arm64.dmg)
-- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.2.0/Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256)
-- [查看 v0.2.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.0)
+- [下载 Joy-Harness-v0.2.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.1/Joy-Harness-v0.2.1-macOS-arm64.dmg)
+- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.2.1/Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256)
+- [查看 v0.2.1 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.1)
 
 DMG 只包含可手动启动的 `Joy Harness.app`。如需登录时自动启动、本地 CLI，或需要构建和
-刷写 RP2040 固件，请使用下方的[源码安装](#从零安装)。当前 v0.2.0 Release 使用 ad-hoc
+刷写 RP2040 固件，请使用下方的[源码安装](#从零安装)。当前 v0.2.1 Release 使用 ad-hoc
 签名且未经 Apple 公证，首次打开可能需要右键选择“打开”，或在“系统设置 → 隐私与安全性”
 中允许。校验下载文件：
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256
 ```
+
+## v0.2.1 更新
+
+- 修复从 GitHub 下载的 Release 版本启动时，因为已经从应用资源读取版本号后仍立即加载
+  SwiftPM 资源 bundle 而导致的崩溃。
 
 ## v0.2.0 更新
 
@@ -383,7 +388,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.2.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
+| `task dmg -- 0.2.1` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
 | `task install` | 编译、安装应用并注册 LaunchAgent |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -431,15 +436,15 @@ Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可
 构建适用于当前 Mac 架构的发布镜像：
 
 ```bash
-task dmg -- 0.2.0
-# 或：bash scripts/package_dmg.sh 0.2.0
+task dmg -- 0.2.1
+# 或：bash scripts/package_dmg.sh 0.2.1
 ```
 
 产物会写入 `dist/`：
 
 ```text
-Joy-Harness-v0.2.0-macOS-arm64.dmg
-Joy-Harness-v0.2.0-macOS-arm64.dmg.sha256
+Joy-Harness-v0.2.1-macOS-arm64.dmg
+Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256
 ```
 
 DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、

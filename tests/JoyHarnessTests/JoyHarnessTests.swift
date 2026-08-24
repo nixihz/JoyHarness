@@ -7,8 +7,25 @@ import Testing
 struct JoyHarnessTests {
     @Test
     func appVersionLoadsFromTheBundledVersionResource() {
-        #expect(AppVersion.current == "0.2.0")
-        #expect(AppVersion.displayName == "Joy Harness v0.2.0")
+        #expect(AppVersion.current == "0.2.1")
+        #expect(AppVersion.displayName == "Joy Harness v0.2.1")
+    }
+
+    @Test
+    func appVersionDoesNotLoadFallbackWhenMainBundleHasVersion() throws {
+        let versionFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try "0.2.0\n".write(to: versionFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: versionFile) }
+        var didLoadFallback = false
+
+        let version = AppVersion.load(primaryURL: versionFile) {
+            didLoadFallback = true
+            return nil
+        }
+
+        #expect(version == "0.2.0")
+        #expect(!didLoadFallback)
     }
 
     @Test
