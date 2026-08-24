@@ -52,6 +52,7 @@ struct JoyHarnessApp: App {
                 mappingStore: appDelegate.runtime.mappings,
                 languageSettings: languageSettings,
                 launchAtLogin: launchAtLogin,
+                scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
                 settingsCoordinator: settingsCoordinator
             )
             .environment(\.locale, languageSettings.locale)
@@ -78,6 +79,7 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
 final class JoyHarnessRuntime {
     let dashboard: DashboardStore
     let mappings: ControllerMappingStore
+    let scrollDirectionSettings: ScrollDirectionSettings
 
     private let home: String
     private let statusURL: URL
@@ -110,10 +112,16 @@ final class JoyHarnessRuntime {
             ?? "\(home)/.agent-deck/pad.sock"
         let mappings = ControllerMappingStore()
         self.mappings = mappings
+        let scrollDirectionSettings = ScrollDirectionSettings()
+        self.scrollDirectionSettings = scrollDirectionSettings
         self.buttons = ButtonBridge(mappingProvider: { mappings.action(for: $0) })
         self.dashboard = DashboardStore(statusURL: statusURL)
         self.dashboard.onAction = { [weak self] action in
             self?.perform(action) ?? false
+        }
+        self.mouse.setScrollDirection(scrollDirectionSettings.preference)
+        scrollDirectionSettings.onChange = { [weak self] preference in
+            self?.mouse.setScrollDirection(preference)
         }
     }
 
@@ -195,6 +203,12 @@ final class JoyHarnessRuntime {
         buttons.mouseSpeedBoostHandler = { [weak self] active in
             self?.mouse.setSpeedBoostActive(active)
         }
+        buttons.openApplicationTargetProvider = { [weak self] input in
+            self?.mappings.openApplicationTarget(for: input)
+        }
+        buttons.openApplicationHandler = { [weak self] bundleIdentifier in
+            self?.openApplication(bundleIdentifier: bundleIdentifier) ?? false
+        }
         buttons.rightTriggerFeedbackHandler = { [weak self] value in
             guard let self else { return }
             if self.controllerFamily == .xbox {
@@ -245,6 +259,19 @@ final class JoyHarnessRuntime {
         guard rp2040.sendKey(key, action: 1) else { return false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
             _ = self?.rp2040.sendKey(key, action: 0)
+        }
+        return true
+    }
+
+    private func openApplication(bundleIdentifier: String) -> Bool {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            print("[agent-deck] application not found: \(bundleIdentifier)")
+            return false
+        }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            if let error {
+                print("[agent-deck] failed to open \(bundleIdentifier): \(error.localizedDescription)")
+            }
         }
         return true
     }

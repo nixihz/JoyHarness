@@ -25,20 +25,30 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 ## 下载
 
-当前版本为 **v0.2.1**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
+当前版本为 **v0.2.3**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
 
-- [下载 Joy-Harness-v0.2.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.1/Joy-Harness-v0.2.1-macOS-arm64.dmg)
-- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.2.1/Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256)
-- [查看 v0.2.1 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.1)
+- [下载 Joy-Harness-v0.2.3-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.3/Joy-Harness-v0.2.3-macOS-arm64.dmg)
+- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.2.3/Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256)
+- [查看 v0.2.3 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.3)
 
 DMG 只包含可手动启动的 `Joy Harness.app`。如需登录时自动启动、本地 CLI，或需要构建和
-刷写 RP2040 固件，请使用下方的[源码安装](#从零安装)。当前 v0.2.1 Release 使用 ad-hoc
+刷写 RP2040 固件，请使用下方的[源码安装](#从零安装)。当前 v0.2.3 Release 使用 ad-hoc
 签名且未经 Apple 公证，首次打开可能需要右键选择“打开”，或在“系统设置 → 隐私与安全性”
 中允许。校验下载文件：
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
 ```
+
+## v0.2.3 更新
+
+- `LT / L2 +` 右摇杆四向可自定义；默认左/右为网页上一页/下一页（`Command-[` / `Command-]`）。
+- 新增“打开应用…”映射，可为按键选择具体 App。
+- 设置中可为 `LT / L2 +` 左摇杆滚动选择自然滚动或传统滚动。
+
+## v0.2.2 更新
+
+- 设置入口更清晰，通用设置支持登录时启动。
 
 ## v0.2.1 更新
 
@@ -318,7 +328,7 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | 按键 | 实际效果 | 是否需要辅助功能权限 |
 |---|---|---|
 | 左摇杆 | 以 120Hz 平滑移动 macOS 鼠标，带死区和渐进加速 | 是 |
-| LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度 | 是 |
+| LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度；可在设置中选择自然滚动或传统滚动 | 是 |
 | L3 按住 | 鼠标速度临时提升到 `1.8x`，松开恢复精细速度 | 是 |
 | A 按下 / 松开 | 鼠标左键按下 / 松开，可单击、长按或拖动 | 是 |
 | B 按下 / 松开 | 鼠标右键按下 / 松开，可右击或拖动 | 是 |
@@ -328,11 +338,14 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | Xbox：LT + RT；PlayStation：L2 + R2 | 普通回车（Enter） | 是 |
 | LT + L3 | 复制（`Command-C`） | 是 |
 | LT + R3 | 粘贴（`Command-V`） | 是 |
+| LT + 右摇杆 左 / 右 | 网页上一页 / 下一页（`Command-[` / `Command-]`） | 是 |
+| LT + 右摇杆 上 / 下 | 默认空白；可在设置中自定义为打开指定应用或其他操作 | 取决于所选操作 |
 | Xbox：Options / View；PlayStation：Create | 飞书截图（`Command-Shift-A`） | 是 |
 | 十字键上按下 / 松开 | 右侧 Command 按下 / 松开；默认用于唤起按住说话类语音输入工具 | 是 |
 
 这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
-改为滚动，L3/R3 执行复制/粘贴。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
+改为滚动，L3/R3 执行复制/粘贴，LT + 右摇杆左/右执行网页上一页/下一页。按住 LT 时，
+右摇杆不再发送 Codex 径向输入。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
 默认单按触发飞书截图；如果手柄驱动未向 macOS 暴露该键，可在设置中把“飞书截图”改配到
 其他按键。该功能要求飞书正在运行，并将截图快捷键设置为 `Command-Shift-A`。
 
@@ -388,7 +401,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.2.1` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
+| `task dmg -- 0.2.3` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
 | `task install` | 编译、安装应用并注册 LaunchAgent |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -436,15 +449,15 @@ Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可
 构建适用于当前 Mac 架构的发布镜像：
 
 ```bash
-task dmg -- 0.2.1
-# 或：bash scripts/package_dmg.sh 0.2.1
+task dmg -- 0.2.3
+# 或：bash scripts/package_dmg.sh 0.2.3
 ```
 
 产物会写入 `dist/`：
 
 ```text
-Joy-Harness-v0.2.1-macOS-arm64.dmg
-Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256
+Joy-Harness-v0.2.3-macOS-arm64.dmg
+Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
 ```
 
 DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、

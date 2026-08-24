@@ -15,6 +15,8 @@ enum SystemKey: Hashable {
     case copy
     case paste
     case screenshotTool
+    case browserBack
+    case browserForward
 }
 
 enum FaceButton {
@@ -39,6 +41,14 @@ enum ControllerAction: Hashable {
     case slotOffset(Int)
     case selectSlot(Int)
     case mouseSpeedBoost
+    case openApplication(String)
+}
+
+enum StickDirection: Hashable {
+    case up
+    case left
+    case down
+    case right
 }
 
 struct AnalogButtonPressState {
@@ -73,6 +83,9 @@ final class ButtonBridge {
         pressPoint: RightTriggerPressState.releasePoint,
         resetPoint: RightTriggerPressState.resetPoint
     )
+    private var activeFunctionRightStickDirection: ControllerInput?
+    private var pressedDirectionInputs: Set<ControllerInput> = []
+    private var activeDirectionActions: [ControllerInput: ControllerAction] = [:]
 
     private(set) var selectedSlot = 0
     var keyHandler: ((String, Int) -> Bool)?
@@ -82,6 +95,8 @@ final class ButtonBridge {
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
     var textInputHandler: ((String) -> Bool)?
     var mouseSpeedBoostHandler: ((Bool) -> Void)?
+    var openApplicationHandler: ((String) -> Bool)?
+    var openApplicationTargetProvider: ((ControllerInput) -> String?)?
     var rightTriggerFeedbackHandler: ((Float) -> Void)?
     var onSlotSelected: ((Int) -> Void)?
     var onControllerChange: ((GCController?, ControllerFamily) -> Void)?
@@ -184,6 +199,7 @@ final class ButtonBridge {
         )
         updateJoystick(gamepad)
         updateDPadButtons(gamepad)
+        updateFunctionRightStick(gamepad)
         if changedElement === gamepad.leftTrigger { return }
 
         let faceButtons: [(GCControllerButtonInput, ControllerInput, ControllerInput)] = [
@@ -259,10 +275,23 @@ final class ButtonBridge {
             release(button)
             return
         }
-        guard let action = mappingProvider(input).controllerAction else {
+        guard let action = resolvedAction(for: input) else {
             return
         }
         handleControllerAction(button, action: action, isPressed: true)
+    }
+
+    private func resolvedAction(for input: ControllerInput) -> ControllerAction? {
+        let mapped = mappingProvider(input)
+        if mapped == .openApplication {
+            guard let bundleIdentifier = openApplicationTargetProvider?(input)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !bundleIdentifier.isEmpty else {
+                return nil
+            }
+            return .openApplication(bundleIdentifier)
+        }
+        return mapped.controllerAction
     }
 
     static func faceAction(for button: FaceButton, functionPressed: Bool) -> ControllerAction {
@@ -337,6 +366,8 @@ final class ButtonBridge {
             mouseSpeedBoostPressed = true
             mouseSpeedBoostHandler?(true)
             succeeded = true
+        case .openApplication(let bundleIdentifier):
+            succeeded = openApplicationHandler?(bundleIdentifier) == true
         }
         if succeeded { activeActionCounts[action] = 1 }
         return succeeded
@@ -361,7 +392,7 @@ final class ButtonBridge {
             mouseButtonHandler?(button, false)
         case .systemKey(let key):
             systemKeyHandler?(key, false)
-        case .textInput:
+        case .textInput, .openApplication:
             break
         case .microKey(let key):
             _ = keyHandler?(key, 0)
@@ -433,10 +464,12 @@ final class ButtonBridge {
         } else {
             0
         }
+        let rightX = functionPressed ? 0 : gamepad.rightThumbstick.xAxis.value
+        let rightY = functionPressed ? 0 : gamepad.rightThumbstick.yAxis.value
         let x = !functionPressed && abs(dpadX) > 0.1
-            ? dpadX : gamepad.rightThumbstick.xAxis.value
+            ? dpadX : rightX
         let y = !functionPressed && abs(dpadY) > 0.1
-            ? dpadY : gamepad.rightThumbstick.yAxis.value
+            ? dpadY : rightY
         let distance = min(sqrt(x * x + y * y), 1)
         let angle = distance < 0.08 ? 0 : Self.radialAngle(x: x, y: y)
         let changed = lastJoystick == nil ||
@@ -447,6 +480,111 @@ final class ButtonBridge {
         lastJoystick = (angle, distance)
     }
 
+    private func updateFunctionRightStick(_ gamepad: GCExtendedGamepad) {
+        let nextInput: ControllerInput?
+        if functionPressed {
+            nextInput = Self.functionRightStickInput(
+                x: gamepad.rightThumbstick.xAxis.value,
+                y: gamepad.rightThumbstick.yAxis.value,
+                current: activeFunctionRightStickDirection
+            )
+        } else {
+            nextInput = nil
+        }
+
+        if activeFunctionRightStickDirection != nextInput {
+            if let activeFunctionRightStickDirection {
+                handleMappedDirection(activeFunctionRightStickDirection, isPressed: false)
+            }
+            if let nextInput {
+                handleMappedDirection(nextInput, isPressed: true)
+            }
+            activeFunctionRightStickDirection = nextInput
+        }
+    }
+
+    private func handleMappedDirection(_ input: ControllerInput, isPressed: Bool) {
+        if !isPressed {
+            pressedDirectionInputs.remove(input)
+            if let action = activeDirectionActions.removeValue(forKey: input) {
+                end(action)
+            }
+            return
+        }
+        guard pressedDirectionInputs.insert(input).inserted else { return }
+        guard let action = resolvedAction(for: input) else {
+            pressedDirectionInputs.remove(input)
+            return
+        }
+        guard begin(action) else {
+            pressedDirectionInputs.remove(input)
+            return
+        }
+        activeDirectionActions[input] = action
+    }
+
+    static func dominantStickDirection(
+        x: Float,
+        y: Float,
+        pressThreshold: Float = 0.55
+    ) -> StickDirection? {
+        let absX = abs(x)
+        let absY = abs(y)
+        guard max(absX, absY) >= pressThreshold else { return nil }
+        if absX > absY {
+            return x > 0 ? .right : .left
+        }
+        return y > 0 ? .up : .down
+    }
+
+    static func functionRightStickInput(
+        x: Float,
+        y: Float,
+        current: ControllerInput?,
+        pressThreshold: Float = 0.55,
+        releaseThreshold: Float = 0.35
+    ) -> ControllerInput? {
+        let inputForDirection: (StickDirection) -> ControllerInput = { direction in
+            switch direction {
+            case .up: .functionRightStickUp
+            case .left: .functionRightStickLeft
+            case .down: .functionRightStickDown
+            case .right: .functionRightStickRight
+            }
+        }
+
+        if let current,
+           let currentDirection = stickDirection(for: current) {
+            let currentValue = axisValue(for: currentDirection, x: x, y: y)
+            if currentValue >= releaseThreshold,
+               dominantStickDirection(x: x, y: y, pressThreshold: releaseThreshold) == currentDirection {
+                return current
+            }
+        }
+
+        return dominantStickDirection(x: x, y: y, pressThreshold: pressThreshold)
+            .map(inputForDirection)
+    }
+
+    private static func stickDirection(for input: ControllerInput) -> StickDirection? {
+        switch input {
+        case .functionRightStickUp: .up
+        case .functionRightStickLeft: .left
+        case .functionRightStickDown: .down
+        case .functionRightStickRight: .right
+        default: nil
+        }
+    }
+
+    private static func axisValue(for direction: StickDirection, x: Float, y: Float) -> Float {
+        switch direction {
+        case .up: y
+        case .down: -y
+        case .right: x
+        case .left: -x
+        }
+    }
+
     static func radialAngle(x: Float, y: Float) -> Float {
         let turns = atan2(-y, x) / (2 * Float.pi)
         return turns >= 0 ? turns : turns + 1
@@ -454,13 +592,17 @@ final class ButtonBridge {
 
     private func resetInputState() {
         for action in activeControllerActions.values { end(action) }
+        for action in activeDirectionActions.values { end(action) }
         if mouseSpeedBoostPressed { mouseSpeedBoostHandler?(false) }
         pressedButtons.removeAll()
         activeControllerActions.removeAll()
+        pressedDirectionInputs.removeAll()
+        activeDirectionActions.removeAll()
         activeActionCounts.removeAll()
         functionPressed = false
         lastJoystick = nil
         mouseSpeedBoostPressed = false
+        activeFunctionRightStickDirection = nil
         rightTriggerPressState = AnalogButtonPressState(
             pressPoint: RightTriggerPressState.releasePoint,
             resetPoint: RightTriggerPressState.resetPoint

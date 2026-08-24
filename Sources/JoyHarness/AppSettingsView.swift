@@ -4,6 +4,7 @@ struct AppSettingsView: View {
     @ObservedObject var mappingStore: ControllerMappingStore
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
+    @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
 
     var body: some View {
@@ -18,7 +19,8 @@ struct AppSettingsView: View {
             case .general:
                 GeneralSettingsView(
                     languageSettings: languageSettings,
-                    launchAtLogin: launchAtLogin
+                    launchAtLogin: launchAtLogin,
+                    scrollDirectionSettings: scrollDirectionSettings
                 )
             case .controllerMapping:
                 ControllerMappingSettingsPane(store: mappingStore)
@@ -32,6 +34,7 @@ struct AppSettingsView: View {
 private struct GeneralSettingsView: View {
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
+    @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
 
     var body: some View {
         Form {
@@ -79,6 +82,31 @@ private struct GeneralSettingsView: View {
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker(
+                    L10n.text("滚动方向", "Scroll Direction"),
+                    selection: $scrollDirectionSettings.preference
+                ) {
+                    ForEach(ScrollDirectionPreference.allCases) { preference in
+                        Text(preference.displayName).tag(preference)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text(scrollDirectionSettings.preference.detailText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(L10n.text(
+                    "用于 LT / L2 + 左摇杆滚动网页或文档。可随时切换。",
+                    "Applies to LT / L2 + left stick scrolling in browsers and documents. You can change it anytime."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.text("滚动", "Scrolling"))
             }
 
             Section(L10n.text("语言", "Language")) {

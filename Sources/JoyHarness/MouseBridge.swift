@@ -27,6 +27,10 @@ extension SystemKey {
             return SystemKeyEventDescriptor(keyCode: 0x09, flags: .maskCommand)
         case .screenshotTool:
             return SystemKeyEventDescriptor(keyCode: 0x00, flags: [.maskCommand, .maskShift])
+        case .browserBack:
+            return SystemKeyEventDescriptor(keyCode: 0x21, flags: .maskCommand)
+        case .browserForward:
+            return SystemKeyEventDescriptor(keyCode: 0x1E, flags: .maskCommand)
         }
     }
 }
@@ -39,6 +43,7 @@ final class MouseBridge: NSObject {
     private var stickInput = CGPoint.zero
     private var scrolling = false
     private var speedBoostActive = false
+    private var scrollDirection: ScrollDirectionPreference = .traditional
     private var lastTickTime: TimeInterval?
     private var movementTimer: Timer?
     private var pressedMouseButtons: Set<MouseButton> = []
@@ -86,6 +91,12 @@ final class MouseBridge: NSObject {
     func setSpeedBoostActive(_ active: Bool) {
         guard active != speedBoostActive else { return }
         speedBoostActive = active
+        updateTargetVelocity()
+    }
+
+    func setScrollDirection(_ direction: ScrollDirectionPreference) {
+        guard direction != scrollDirection else { return }
+        scrollDirection = direction
         updateTargetVelocity()
     }
 
@@ -187,7 +198,11 @@ final class MouseBridge: NSObject {
         )
     }
 
-    nonisolated static func scrollVelocity(x: CGFloat, y: CGFloat) -> CGPoint {
+    nonisolated static func scrollVelocity(
+        x: CGFloat,
+        y: CGFloat,
+        direction: ScrollDirectionPreference = .traditional
+    ) -> CGPoint {
         let deadZone: CGFloat = 0.15
         let minimumSpeed: CGFloat = 32
         let maximumSpeed: CGFloat = 1_400
@@ -197,9 +212,10 @@ final class MouseBridge: NSObject {
         let normalizedMagnitude = (magnitude - deadZone) / (1 - deadZone)
         let speed = minimumSpeed * normalizedMagnitude
             + (maximumSpeed - minimumSpeed) * pow(normalizedMagnitude, 1.65)
+        let polarity: CGFloat = direction == .natural ? -1 : 1
         return CGPoint(
-            x: x / magnitude * speed,
-            y: y / magnitude * speed
+            x: x / magnitude * speed * polarity,
+            y: y / magnitude * speed * polarity
         )
     }
 
@@ -347,7 +363,11 @@ final class MouseBridge: NSObject {
 
     private func updateTargetVelocity() {
         if scrolling {
-            targetVelocity = Self.scrollVelocity(x: stickInput.x, y: stickInput.y)
+            targetVelocity = Self.scrollVelocity(
+                x: stickInput.x,
+                y: stickInput.y,
+                direction: scrollDirection
+            )
         } else {
             targetVelocity = Self.pointerVelocity(
                 x: stickInput.x,

@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -49,6 +50,10 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
     case functionDpadLeft
     case functionDpadDown
     case functionDpadRight
+    case functionRightStickUp
+    case functionRightStickLeft
+    case functionRightStickDown
+    case functionRightStickRight
 
     var id: Self { self }
 
@@ -94,6 +99,18 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         case .functionDpadRight: playStation
             ? L10n.text("L2 + 十字键 右", "L2 + D-Pad Right")
             : L10n.text("LT + 十字键 右", "LT + D-Pad Right")
+        case .functionRightStickUp: playStation
+            ? L10n.text("L2 + 右摇杆 上", "L2 + Right Stick Up")
+            : L10n.text("LT + 右摇杆 上", "LT + Right Stick Up")
+        case .functionRightStickLeft: playStation
+            ? L10n.text("L2 + 右摇杆 左", "L2 + Right Stick Left")
+            : L10n.text("LT + 右摇杆 左", "LT + Right Stick Left")
+        case .functionRightStickDown: playStation
+            ? L10n.text("L2 + 右摇杆 下", "L2 + Right Stick Down")
+            : L10n.text("LT + 右摇杆 下", "LT + Right Stick Down")
+        case .functionRightStickRight: playStation
+            ? L10n.text("L2 + 右摇杆 右", "L2 + Right Stick Right")
+            : L10n.text("LT + 右摇杆 右", "LT + Right Stick Right")
         }
     }
 
@@ -105,7 +122,9 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
              .functionLeftShoulder, .functionRightShoulder,
              .functionRightTrigger,
              .functionLeftThumbstickButton, .functionRightThumbstickButton,
-             .functionDpadUp, .functionDpadLeft, .functionDpadDown, .functionDpadRight:
+             .functionDpadUp, .functionDpadLeft, .functionDpadDown, .functionDpadRight,
+             .functionRightStickUp, .functionRightStickLeft,
+             .functionRightStickDown, .functionRightStickRight:
             .functionLayer
         default:
             .primary
@@ -152,6 +171,9 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case slot5
     case slot6
     case mouseSpeedBoost
+    case browserBack
+    case browserForward
+    case openApplication
 
     var id: Self { self }
 
@@ -187,12 +209,15 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .slot5: L10n.text("选择槽位 5", "Select Slot 5")
         case .slot6: L10n.text("选择槽位 6", "Select Slot 6")
         case .mouseSpeedBoost: L10n.text("按住加速鼠标", "Hold for Faster Pointer")
+        case .browserBack: L10n.text("网页上一页", "Browser Back")
+        case .browserForward: L10n.text("网页下一页", "Browser Forward")
+        case .openApplication: L10n.text("打开应用…", "Open Application…")
         }
     }
 
     var controllerAction: ControllerAction? {
         switch self {
-        case .disabled, .radialInput, .functionModifier: nil
+        case .disabled, .radialInput, .functionModifier, .openApplication: nil
         case .mouseLeft: .mouseButton(.left)
         case .mouseRight: .mouseButton(.right)
         case .mouseMiddle: .mouseButton(.middle)
@@ -203,6 +228,8 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .copy: .systemKey(.copy)
         case .paste: .systemKey(.paste)
         case .screenshotTool: .systemKey(.screenshotTool)
+        case .browserBack: .systemKey(.browserBack)
+        case .browserForward: .systemKey(.browserForward)
         case .answerYes: .textInput("yes")
         case .answerNo: .textInput("no")
         case .approve: .microKey("ACT07")
@@ -257,6 +284,10 @@ final class ControllerMappingStore: ObservableObject {
         .functionDpadLeft: .slot2,
         .functionDpadDown: .slot3,
         .functionDpadRight: .slot4,
+        .functionRightStickUp: .disabled,
+        .functionRightStickLeft: .browserBack,
+        .functionRightStickDown: .disabled,
+        .functionRightStickRight: .browserForward,
     ]
 
     static let defaultMappings = defaultMappings(for: .xbox)
@@ -267,9 +298,11 @@ final class ControllerMappingStore: ObservableObject {
 
     @Published private(set) var mappings: [ControllerInput: ControllerMappedAction]
     @Published private(set) var controllerFamily: ControllerFamily
+    @Published private(set) var openApplicationTargets: [ControllerInput: String]
 
     private let userDefaults: UserDefaults
     private let storageKey: String
+    private var openApplicationStorageKey: String { "\(storageKey).openApplications" }
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -285,11 +318,16 @@ final class ControllerMappingStore: ObservableObject {
             key: storageKey,
             defaults: Self.defaultMappings(for: storedFamily)
         )
+        self.openApplicationTargets = Self.loadOpenApplicationTargets(
+            from: userDefaults,
+            key: "\(storageKey).openApplications"
+        )
         migrateYesNoFaceButtonsIfNeeded()
         migrateUnifiedFaceButtonLayoutIfNeeded()
         migrateDPadUpToRightCommandIfNeeded()
         migrateClipboardAndScreenshotDefaultsIfNeeded()
         migrateClipboardToThumbsticksIfNeeded()
+        migrateFunctionRightStickBrowserDefaultsIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
@@ -298,6 +336,31 @@ final class ControllerMappingStore: ObservableObject {
 
     func displayName(for input: ControllerInput) -> String {
         input.displayName(for: controllerFamily)
+    }
+
+    func openApplicationTarget(for input: ControllerInput) -> String? {
+        openApplicationTargets[input]
+    }
+
+    func openApplicationDisplayName(for input: ControllerInput) -> String? {
+        guard let bundleIdentifier = openApplicationTargets[input] else { return nil }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            let name = FileManager.default.displayName(atPath: url.path)
+            if !name.isEmpty {
+                return name.replacingOccurrences(of: ".app", with: "")
+            }
+        }
+        return bundleIdentifier
+    }
+
+    func setOpenApplicationTarget(_ bundleIdentifier: String?, for input: ControllerInput) {
+        let trimmed = bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            openApplicationTargets[input] = trimmed
+        } else {
+            openApplicationTargets.removeValue(forKey: input)
+        }
+        persistOpenApplicationTargets()
     }
 
     func setControllerFamily(_ family: ControllerFamily) {
@@ -326,6 +389,13 @@ final class ControllerMappingStore: ObservableObject {
     private func persist() {
         let encoded = Dictionary(uniqueKeysWithValues: mappings.map { ($0.key.rawValue, $0.value.rawValue) })
         userDefaults.set(encoded, forKey: storageKey)
+    }
+
+    private func persistOpenApplicationTargets() {
+        let encoded = Dictionary(
+            uniqueKeysWithValues: openApplicationTargets.map { ($0.key.rawValue, $0.value) }
+        )
+        userDefaults.set(encoded, forKey: openApplicationStorageKey)
     }
 
     private func migrateYesNoFaceButtonsIfNeeded() {
@@ -412,6 +482,23 @@ final class ControllerMappingStore: ObservableObject {
         userDefaults.set(true, forKey: migrationKey)
     }
 
+    private func migrateFunctionRightStickBrowserDefaultsIfNeeded() {
+        let migrationKey = "\(storageKey).functionRightStickBrowserDefaultsMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        var changed = false
+        if mappings[.functionRightStickLeft] == .disabled {
+            mappings[.functionRightStickLeft] = .browserBack
+            changed = true
+        }
+        if mappings[.functionRightStickRight] == .disabled {
+            mappings[.functionRightStickRight] = .browserForward
+            changed = true
+        }
+        if changed { persist() }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
     private static func loadMappings(
         from userDefaults: UserDefaults,
         key: String,
@@ -426,6 +513,23 @@ final class ControllerMappingStore: ObservableObject {
                   let action = ControllerMappedAction(rawValue: actionValue),
                   input.availableActions.contains(action) else { continue }
             result[input] = action
+        }
+        return result
+    }
+
+    private static func loadOpenApplicationTargets(
+        from userDefaults: UserDefaults,
+        key: String
+    ) -> [ControllerInput: String] {
+        guard let stored = userDefaults.dictionary(forKey: key) as? [String: String] else {
+            return [:]
+        }
+        var result: [ControllerInput: String] = [:]
+        for (inputValue, bundleIdentifier) in stored {
+            guard let input = ControllerInput(rawValue: inputValue) else { continue }
+            let trimmed = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            result[input] = trimmed
         }
         return result
     }

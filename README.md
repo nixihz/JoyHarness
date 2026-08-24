@@ -23,19 +23,29 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.2.1** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.2.3** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.2.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.1/Joy-Harness-v0.2.1-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.2.1/Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256)
-- [View the v0.2.1 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.1)
+- [Download Joy-Harness-v0.2.3-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.2.3/Joy-Harness-v0.2.3-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.2.3/Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256)
+- [View the v0.2.3 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.3)
 
-The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need launch-at-login, the local CLI, or RP2040 firmware build and flashing tools. The v0.2.1 release is ad-hoc signed and not notarized by Apple, so the first launch may require right-clicking the app and choosing **Open**, or allowing it under **System Settings > Privacy & Security**.
+The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need launch-at-login, the local CLI, or RP2040 firmware build and flashing tools. The v0.2.3 release is ad-hoc signed and not notarized by Apple, so the first launch may require right-clicking the app and choosing **Open**, or allowing it under **System Settings > Privacy & Security**.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
 ```
+
+## What's New in v0.2.3
+
+- Made `LT / L2 +` right stick directions customizable; left/right default to browser back/forward (`Command-[` / `Command-]`).
+- Added an Open Application mapping action with a per-input app picker.
+- Added Natural vs Traditional scroll direction for `LT / L2 +` left stick scrolling in Settings.
+
+## What's New in v0.2.2
+
+- Added clearer Settings entry points and a General pane with launch-at-login.
 
 ## What's New in v0.2.1
 
@@ -62,7 +72,7 @@ shasum -a 256 -c Joy-Harness-v0.2.1-macOS-arm64.dmg.sha256
 - **Control macOS:** move and scroll with the left stick; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
 - **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
-- **Customize mappings:** assign base buttons, the D-pad, and the LT layer to mouse, system, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
+- **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
 - **Run in the background:** a LaunchAgent starts Joy Harness at login, and disconnected controllers or RP2040 boards are detected again when reconnected.
 
 ### Capabilities by Hardware
@@ -251,7 +261,7 @@ Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in t
 | Input | Action | Accessibility required |
 |---|---|---|
 | Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
-| LT + left stick | Vertical and horizontal scrolling with speed based on stick travel | Yes |
+| LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings | Yes |
 | Hold L3 | Temporarily increase pointer speed to `1.8x` | Yes |
 | A press/release | Left mouse button, including hold and drag | Yes |
 | B press/release | Right mouse button, including hold and drag | Yes |
@@ -261,10 +271,12 @@ Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in t
 | Xbox: LT + RT; PlayStation: L2 + R2 | Enter | Yes |
 | LT + L3 | Copy (`Command-C`) | Yes |
 | LT + R3 | Paste (`Command-V`) | Yes |
+| LT + right stick Left / Right | Browser back / forward (`Command-[` / `Command-]`) | Yes |
+| LT + right stick Up / Down | Disabled by default; assign open app or any other mapped action in Settings | Depends on action |
 | Xbox: Options/View; PlayStation: Create | Lark screenshot (`Command-Shift-A`) | Yes |
 | D-pad Up press/release | Right Command press/release, useful for voice-input tools | Yes |
 
-These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling and L3/R3 to copy/paste. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
+These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. While LT is held, the right stick no longer sends Codex radial input. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
 
 ### Codex Micro Controls
 
@@ -310,7 +322,7 @@ Dashboard task commands require a connected RP2040. Task names come from Codex a
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.2.1` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.2.3` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Run Joy Harness in the foreground with SwiftPM |
 | `task install` | Build and install the app and LaunchAgent |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -352,8 +364,8 @@ The script first stops installed Joy Harness/AgentDeck processes and LaunchAgent
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.2.1
-# Or: bash scripts/package_dmg.sh 0.2.1
+task dmg -- 0.2.3
+# Or: bash scripts/package_dmg.sh 0.2.3
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.

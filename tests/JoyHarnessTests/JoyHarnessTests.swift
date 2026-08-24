@@ -7,8 +7,8 @@ import Testing
 struct JoyHarnessTests {
     @Test
     func appVersionLoadsFromTheBundledVersionResource() {
-        #expect(AppVersion.current == "0.2.1")
-        #expect(AppVersion.displayName == "Joy Harness v0.2.1")
+        #expect(AppVersion.current == "0.2.3")
+        #expect(AppVersion.displayName == "Joy Harness v0.2.3")
     }
 
     @Test
@@ -271,6 +271,10 @@ struct JoyHarnessTests {
         #expect(store.action(for: .functionDpadLeft).controllerAction == .selectSlot(1))
         #expect(store.action(for: .functionDpadDown).controllerAction == .selectSlot(2))
         #expect(store.action(for: .functionDpadRight).controllerAction == .selectSlot(3))
+        #expect(store.action(for: .functionRightStickUp) == .disabled)
+        #expect(store.action(for: .functionRightStickLeft) == .browserBack)
+        #expect(store.action(for: .functionRightStickDown) == .disabled)
+        #expect(store.action(for: .functionRightStickRight) == .browserForward)
     }
 
     @Test
@@ -452,7 +456,102 @@ struct JoyHarnessTests {
         #expect(ControllerInput.functionRightThumbstickButton.displayName(for: .dualSense) == "L2 + R3")
         #expect(ControllerInput.functionRightTrigger.displayName(for: .xbox) == "LT + RT")
         #expect(ControllerInput.functionRightTrigger.displayName(for: .dualSense) == "L2 + R2")
+        let previousLanguage = L10n.language
+        L10n.language = .simplifiedChinese
+        #expect(ControllerInput.functionRightStickUp.displayName(for: .dualSense) == "L2 + 右摇杆 上")
+        #expect(ControllerInput.functionRightStickLeft.displayName(for: .xbox) == "LT + 右摇杆 左")
+        L10n.language = previousLanguage
         #expect(ControllerMappingStore.defaultMappings[.touchpadButton] == .pushToTalk)
+    }
+
+    @Test
+    func functionRightStickBrowserDefaultsMigrateFromDisabled() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [
+                ControllerInput.functionRightStickLeft.rawValue: ControllerMappedAction.disabled.rawValue,
+                ControllerInput.functionRightStickRight.rawValue: ControllerMappedAction.disabled.rawValue,
+                ControllerInput.functionRightStickUp.rawValue: ControllerMappedAction.openApplication.rawValue,
+            ],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .functionRightStickLeft) == .browserBack)
+        #expect(store.action(for: .functionRightStickRight) == .browserForward)
+        #expect(store.action(for: .functionRightStickUp) == .openApplication)
+    }
+
+    @Test
+    func functionRightStickBrowserMigrationPreservesCustomMappings() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [
+                ControllerInput.functionRightStickLeft.rawValue: ControllerMappedAction.copy.rawValue,
+                ControllerInput.functionRightStickRight.rawValue: ControllerMappedAction.disabled.rawValue,
+            ],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .functionRightStickLeft) == .copy)
+        #expect(store.action(for: .functionRightStickRight) == .browserForward)
+    }
+
+    @Test
+    func browserNavigationAndOpenApplicationMappingsAreAvailable() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setAction(.browserBack, for: .functionRightStickLeft)
+        store.setAction(.browserForward, for: .functionRightStickRight)
+        store.setAction(.openApplication, for: .functionRightStickUp)
+        store.setOpenApplicationTarget("com.apple.Safari", for: .functionRightStickUp)
+
+        #expect(store.action(for: .functionRightStickLeft).controllerAction == .systemKey(.browserBack))
+        #expect(store.action(for: .functionRightStickRight).controllerAction == .systemKey(.browserForward))
+        #expect(store.action(for: .functionRightStickUp) == .openApplication)
+        #expect(store.openApplicationTarget(for: .functionRightStickUp) == "com.apple.Safari")
+
+        let reloaded = ControllerMappingStore(userDefaults: defaults)
+        #expect(reloaded.action(for: .functionRightStickLeft) == .browserBack)
+        #expect(reloaded.openApplicationTarget(for: .functionRightStickUp) == "com.apple.Safari")
+        #expect(SystemKey.browserBack.eventDescriptor(pressed: true).keyCode == 0x21)
+        #expect(SystemKey.browserForward.eventDescriptor(pressed: true).keyCode == 0x1E)
+    }
+
+    @Test
+    func functionRightStickUsesDominantDirectionWithHysteresis() {
+        #expect(ButtonBridge.dominantStickDirection(x: 0.8, y: 0.1) == .right)
+        #expect(ButtonBridge.dominantStickDirection(x: -0.2, y: 0.9) == .up)
+        #expect(ButtonBridge.dominantStickDirection(x: 0.2, y: -0.2) == nil)
+
+        #expect(
+            ButtonBridge.functionRightStickInput(x: 0.8, y: 0.1, current: nil)
+                == .functionRightStickRight
+        )
+        #expect(
+            ButtonBridge.functionRightStickInput(
+                x: 0.4,
+                y: 0.05,
+                current: .functionRightStickRight
+            ) == .functionRightStickRight
+        )
+        #expect(
+            ButtonBridge.functionRightStickInput(
+                x: 0.2,
+                y: 0.05,
+                current: .functionRightStickRight
+            ) == nil
+        )
     }
 
     @Test
@@ -642,5 +741,36 @@ struct JoyHarnessTests {
         #expect(horizontal.y == 0)
         #expect(diagonal.x > 0)
         #expect(diagonal.y < 0)
+    }
+
+    @Test
+    func naturalScrollDirectionInvertsTraditionalAxes() {
+        let traditional = MouseBridge.scrollVelocity(
+            x: 0.5,
+            y: -0.6,
+            direction: .traditional
+        )
+        let natural = MouseBridge.scrollVelocity(
+            x: 0.5,
+            y: -0.6,
+            direction: .natural
+        )
+
+        #expect(abs(natural.x + traditional.x) < 0.000_001)
+        #expect(abs(natural.y + traditional.y) < 0.000_001)
+    }
+
+    @Test
+    func scrollDirectionPreferencePersists() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = ScrollDirectionSettings(userDefaults: defaults)
+        #expect(settings.preference == .traditional)
+
+        settings.preference = .natural
+        let reloaded = ScrollDirectionSettings(userDefaults: defaults)
+        #expect(reloaded.preference == .natural)
     }
 }
