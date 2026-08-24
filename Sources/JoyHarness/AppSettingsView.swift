@@ -8,13 +8,20 @@ struct AppSettingsView: View {
     @ObservedObject var settingsCoordinator: SettingsCoordinator
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             List(SettingsCoordinator.Tab.allCases, selection: $settingsCoordinator.selectedTab) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
-        } detail: {
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .tint(.gray)
+            .accentColor(.gray)
+            .frame(width: 170)
+            .background(.ultraThinMaterial)
+
+            Divider()
+
             switch settingsCoordinator.selectedTab {
             case .general:
                 GeneralSettingsView(
@@ -27,7 +34,6 @@ struct AppSettingsView: View {
             }
         }
         .frame(width: 620, height: 640)
-        .navigationTitle(L10n.text("设置", "Settings"))
     }
 }
 
@@ -129,7 +135,6 @@ private struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(L10n.text("通用", "General"))
         .onAppear {
             launchAtLogin.refresh()
         }

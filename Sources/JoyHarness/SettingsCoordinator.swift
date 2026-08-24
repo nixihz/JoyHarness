@@ -14,7 +14,7 @@ final class SettingsCoordinator: ObservableObject {
             case .general:
                 L10n.text("通用", "General")
             case .controllerMapping:
-                L10n.text("按键映射", "Controller Mapping")
+                L10n.text("按键映射", "Key Mapping")
             }
         }
 

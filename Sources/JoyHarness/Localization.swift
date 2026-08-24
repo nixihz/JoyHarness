@@ -68,6 +68,10 @@ final class AppLanguageSettings: ObservableObject {
 enum L10n {
     static var language = AppLanguagePreference.system.resolved()
 
+    static func settingsTitle(language: SupportedLanguage = language) -> String {
+        text("设置", "Settings", language: language)
+    }
+
     static func text(
         _ simplifiedChinese: String,
         _ english: String,

@@ -29,8 +29,6 @@ struct JoyHarnessApp: App {
         }
         .defaultSize(width: 1240, height: 820)
         .windowResizability(.contentSize)
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(UnifiedWindowToolbarStyle(showsTitle: false))
         .commands {
             CommandGroup(replacing: .appSettings) {}
 

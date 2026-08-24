@@ -7,60 +7,22 @@ struct DashboardView: View {
     @EnvironmentObject private var languageSettings: AppLanguageSettings
 
     var body: some View {
-        VStack(spacing: 0) {
-            DashboardTopBar()
+        HStack(spacing: 0) {
+            SlotSidebar(store: store)
+                .frame(width: 224)
 
-            HStack(spacing: 0) {
-                SlotSidebar(store: store)
-                    .frame(width: 224)
+            Divider()
 
-                Divider()
+            TaskDetail(store: store, mappingStore: mappingStore)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                TaskDetail(store: store, mappingStore: mappingStore)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
 
-                Divider()
-
-                ConnectionInspector(status: store.status, store: store)
-                    .frame(width: 252)
-            }
+            ConnectionInspector(status: store.status, store: store)
+                .frame(width: 252)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .id(languageSettings.preference)
-    }
-}
-
-private struct DashboardTopBar: View {
-    @EnvironmentObject private var settingsCoordinator: SettingsCoordinator
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("Joy Harness")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            if #available(macOS 14.0, *) {
-                OpenSettingsButton(tab: .general) {
-                    Label(L10n.text("设置", "Settings"), systemImage: "gearshape")
-                }
-                .buttonStyle(.borderless)
-                .help(L10n.text("打开设置", "Open Settings"))
-            } else {
-                Button {
-                    settingsCoordinator.select(.general)
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                } label: {
-                    Label(L10n.text("设置", "Settings"), systemImage: "gearshape")
-                }
-                .buttonStyle(.borderless)
-                .help(L10n.text("打开设置", "Open Settings"))
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
     }
 }
 
@@ -83,6 +45,7 @@ private struct SlotSidebar: View {
                     SlotRow(slot: slot, isSelected: slot.slot == store.status.selectedSlot)
                 }
                 .buttonStyle(.plain)
+                .taskSlotFocusEffectDisabled()
                 .accessibilityLabel(
                     "\(L10n.text("槽位", "Slot")) \(slot.slot), \(slot.displayTitle), \(slot.padState.displayName)"
                 )
@@ -91,6 +54,17 @@ private struct SlotSidebar: View {
             Spacer(minLength: 12)
         }
         .background(.regularMaterial)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func taskSlotFocusEffectDisabled() -> some View {
+        if #available(macOS 14.0, *) {
+            focusEffectDisabled()
+        } else {
+            focusable(false)
+        }
     }
 }
 
@@ -204,7 +178,7 @@ private struct ControllerMap: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack {
-                Label(L10n.text("控制映射", "Controller Mapping"), systemImage: "gamecontroller.fill")
+                Label(L10n.text("控制映射", "Key Mapping"), systemImage: "gamecontroller.fill")
                     .font(.headline)
                 Spacer()
                 if status.controllerConnected == true {
@@ -218,7 +192,7 @@ private struct ControllerMap: View {
                         Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "slider.horizontal.3")
                     }
                     .buttonStyle(.borderless)
-                    .help(L10n.text("打开按键映射设置", "Open controller mapping settings"))
+                    .help(L10n.text("打开按键映射设置", "Open key mapping settings"))
                 } else {
                     Button {
                         settingsCoordinator.select(.controllerMapping)
@@ -227,7 +201,7 @@ private struct ControllerMap: View {
                         Label(L10n.text("自定义按键", "Customize Buttons"), systemImage: "slider.horizontal.3")
                     }
                     .buttonStyle(.borderless)
-                    .help(L10n.text("打开按键映射设置", "Open controller mapping settings"))
+                    .help(L10n.text("打开按键映射设置", "Open key mapping settings"))
                 }
 
                 Text("\(mappingStore.controllerFamily.displayName) / Codex Micro")
@@ -531,14 +505,14 @@ private struct ConnectionInspector: View {
                 if #available(macOS 14.0, *) {
                     OpenSettingsLink(
                         tab: .general,
-                        title: L10n.text("设置…", "Settings…")
+                        title: L10n.settingsTitle()
                     )
                 } else {
                     Button {
                         settingsCoordinator.select(.general)
                         NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
                     } label: {
-                        Label(L10n.text("设置…", "Settings…"), systemImage: "gearshape")
+                        Label(L10n.settingsTitle(), systemImage: "gearshape")
                     }
                     .buttonStyle(.link)
                 }

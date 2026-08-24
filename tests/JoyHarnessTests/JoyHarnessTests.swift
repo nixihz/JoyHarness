@@ -101,6 +101,12 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func settingsTitleDoesNotUseAnEllipsis() {
+        #expect(L10n.settingsTitle(language: .simplifiedChinese) == "设置")
+        #expect(L10n.settingsTitle(language: .english) == "Settings")
+    }
+
+    @Test
     func singleInstanceLockRejectsASecondOwner() throws {
         let lockPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("JoyHarnessTests.\(UUID().uuidString).lock")

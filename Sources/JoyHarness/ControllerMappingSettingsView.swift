@@ -40,10 +40,10 @@ struct ControllerMappingSettingsPane: View {
                     Label(L10n.text("恢复默认映射", "Restore Default Mappings"), systemImage: "arrow.counterclockwise")
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .frame(height: 54)
             .background(.bar)
         }
-        .navigationTitle(L10n.text("按键映射", "Controller Mapping"))
         .alert(L10n.text("恢复默认映射？", "Restore Default Mappings?"), isPresented: $isResetConfirmationPresented) {
             Button(L10n.text("取消", "Cancel"), role: .cancel) {}
             Button(L10n.text("恢复默认", "Restore Defaults"), role: .destructive) {
