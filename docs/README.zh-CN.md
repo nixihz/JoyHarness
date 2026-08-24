@@ -31,8 +31,8 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 - [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.2.3/Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256)
 - [查看 v0.2.3 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.3)
 
-DMG 只包含可手动启动的 `Joy Harness.app`。如需登录时自动启动、本地 CLI，或需要构建和
-刷写 RP2040 固件，请使用下方的[源码安装](#从零安装)。当前 v0.2.3 Release 使用 ad-hoc
+DMG 只包含可手动启动的 `Joy Harness.app`。如需本地 CLI，或需要构建和刷写 RP2040 固件，
+请使用下方的[源码安装](#从零安装)。当前 v0.2.3 Release 使用 ad-hoc
 签名且未经 Apple 公证，首次打开可能需要右键选择“打开”，或在“系统设置 → 隐私与安全性”
 中允许。校验下载文件：
 
@@ -45,6 +45,8 @@ shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
 - `LT / L2 +` 右摇杆四向可自定义；默认左/右为网页上一页/下一页（`Command-[` / `Command-]`）。
 - 新增“打开应用…”映射，可为按键选择具体 App。
 - 设置中可为 `LT / L2 +` 左摇杆滚动选择自然滚动或传统滚动。
+- 按住 `L3` 临时加速鼠标到 `1.8x`。
+- DualSense / DualShock 触控板滑动可慢速移动指针，无需按住修饰键。
 
 ## v0.2.2 更新
 
@@ -79,7 +81,7 @@ shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
   默认输入；Joy Harness 不抢占录音设备，也不改动全局声音设置。
 - **DualSense R2 强反馈**：R2 轻触时给一次轻震，中段形成明显阻力墙，完全按下越过触发点
   时释放阻力并补一次短促强震，形成分级的操作确认。
-- **用手柄控制 macOS**：左摇杆移动鼠标，LT + 左摇杆滚动，A/B 负责左右键，R3 负责
+- **用手柄控制 macOS**：左摇杆移动鼠标，LT + 左摇杆滚动，L3 加速；DualSense/DualShock 触控板滑动可精细瞄准；A/B 负责左右键，R3 负责
   中键，X/Y 负责 Backspace 和 Esc；LT 功能层还提供回车、复制和粘贴。
 - **管理六个任务槽**：LB/RB 顺序切换，或用 LT 组合键直接跳到 1–6 号槽位；切换后以
   对应次数的短震确认当前槽号。
@@ -89,8 +91,8 @@ shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
 - **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
   也可在应用“设置”中手动固定为简体中文或 English，选择会自动保存。
-- **后台常驻**：安装后由 LaunchAgent 登录即启动；手柄或 RP2040 中途断开、重新连接时
-  会自动重新检测。
+- **后台运行**：可在设置中启用登录时启动；应用运行期间，手柄或 RP2040 中途断开、
+  重新连接时会自动重新检测。
 
 ### 不同硬件组合的能力
 
@@ -227,6 +229,22 @@ task --version
 
 ### 1. 构建并刷入 RP2040
 
+最简单的方式是把这个仓库链接复制到 Codex：
+
+<https://github.com/nixihz/JoyHarness>
+
+然后告诉它：
+
+> 帮我把这个仓库里的 RP2040 固件刷入开发板。
+
+Codex 会自行决定如何读取仓库，参考其中的说明和脚本，并在需要操作实体设备时提示你。
+请使用支持数据传输的 USB 线连接 RP2040，然后按提示操作。
+
+本仓库只提供并支持自带的 RP2040 固件。使用其他微控制器时，可以让 Codex 参考这里的实现，
+但适配、构建和刷写工作需要自行开发完成。
+
+如需手动构建和刷写，请执行：
+
 ```bash
 task firmware
 # 不使用 task：bash scripts/build_rp2040_firmware.sh
@@ -266,8 +284,9 @@ task install
 # 不使用 task：bash scripts/install.sh
 ```
 
-安装脚本会编译 release 应用并注册后台 LaunchAgent。从旧版升级时，脚本还会移除
-Joy Harness 旧的 Codex hooks 和 `notify` fan-out，但会保留其他工具的 Hook 和通知配置。
+安装脚本会编译、安装并启动 release 应用。从旧版升级时，脚本还会移除 Joy Harness 旧的
+Codex hooks 和 `notify` fan-out，但会保留其他工具的 Hook 和通知配置。
+需要登录时启动时，可在应用的“通用”设置中开启；主动退出应用后不会自动重启。
 部署或开发启动前会按完整应用路径停止所有旧 Joy Harness / AgentDeck 实例，确认退出后再启动
 唯一的新实例，避免多个应用争抢手柄和 Unix socket。应用本身也持有跨副本的进程锁；即使
 从其他目录手动打开旧副本，后启动的实例也会立即退出。
@@ -328,8 +347,9 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | 按键 | 实际效果 | 是否需要辅助功能权限 |
 |---|---|---|
 | 左摇杆 | 以 120Hz 平滑移动 macOS 鼠标，带死区和渐进加速 | 是 |
+| DualSense / DualShock 触控板滑动 | 慢速相对移动指针，适合精细瞄准；无需按住任何修饰键。触控板按下仍走映射（默认按住说话） | 是 |
 | LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度；可在设置中选择自然滚动或传统滚动 | 是 |
-| L3 按住 | 鼠标速度临时提升到 `1.8x`，松开恢复精细速度 | 是 |
+| L3 按住 | 鼠标速度临时提升到 `1.8x`，松开恢复正常速度 | 是 |
 | A 按下 / 松开 | 鼠标左键按下 / 松开，可单击、长按或拖动 | 是 |
 | B 按下 / 松开 | 鼠标右键按下 / 松开，可右击或拖动 | 是 |
 | R3 按下 / 松开 | 鼠标中键按下 / 松开 | 是 |
@@ -344,8 +364,8 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | 十字键上按下 / 松开 | 右侧 Command 按下 / 松开；默认用于唤起按住说话类语音输入工具 | 是 |
 
 这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
-改为滚动，L3/R3 执行复制/粘贴，LT + 右摇杆左/右执行网页上一页/下一页。按住 LT 时，
-右摇杆不再发送 Codex 径向输入。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
+改为滚动，L3/R3 执行复制/粘贴，LT + 右摇杆左/右执行网页上一页/下一页。单独按住 L3
+可加速指针。按住 LT 时，右摇杆不再发送 Codex 径向输入。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
 默认单按触发飞书截图；如果手柄驱动未向 macOS 暴露该键，可在设置中把“飞书截图”改配到
 其他按键。该功能要求飞书正在运行，并将截图快捷键设置为 `Command-Shift-A`。
 
@@ -385,7 +405,8 @@ Joy Harness 不订阅 Codex 任务生命周期，也不会根据任务开始、�
 
 ## macOS 控制台
 
-Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，LaunchAgent 也会保持它运行。
+Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程；主动退出应用后进程会结束，且不会
+自动重启。
 控制台提供：
 
 - 六个槽位、当前槽位和完整手柄映射。
@@ -403,7 +424,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程，Launc
 | `task build` | 编译 release 版 macOS 可执行文件 |
 | `task dmg -- 0.2.3` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
-| `task install` | 编译、安装应用并注册 LaunchAgent |
+| `task install` | 编译、安装并启动应用 |
 | `task firmware` | 构建 RP2040 UF2 固件 |
 | `task flash` | 将固件复制到处于 BOOTSEL 模式的 RP2040 |
 | `task status` | 输出 `~/.agent-deck/status.json` |
@@ -424,7 +445,7 @@ python3 bin/joy-harness-send error --note manual-test
 
 ## 前台开发与调试
 
-不使用 LaunchAgent，构建 `.app` 后直接打开：
+构建 `.app` 后直接打开：
 
 ```bash
 ./scripts/build_and_run.sh
@@ -438,8 +459,9 @@ python3 bin/joy-harness-send error --note manual-test
 ./scripts/build_and_run.sh --debug
 ```
 
-注意：该脚本会先停止已安装的 Joy Harness / AgentDeck LaunchAgent 和进程，以避免多个实例
-争用同一个 Unix socket 或 RP2040 串口。调试结束后可再次运行 `task install` 恢复后台服务。
+注意：该脚本会先停止已安装的 Joy Harness / AgentDeck 进程，以避免多个实例争用同一个
+Unix socket 或 RP2040 串口。调试结束后可再次运行 `task install`
+恢复已安装应用。
 
 Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可以直接使用项目的
 **Run** 操作构建并打开控制台。
@@ -472,12 +494,10 @@ Developer ID 签名并通过 Apple 公证。
 | 路径 | 内容 |
 |---|---|
 | `~/.agent-deck/Joy Harness.app` | 临时签名的 Joy Harness 应用 |
-| `~/Library/LaunchAgents/tech.joyharness.daemon.plist` | 登录启动并保持运行的 LaunchAgent |
 | `~/.agent-deck/bin/` | 应用入口和 CLI |
 | `~/.local/bin/joy-harness-send` | 指向已安装 CLI 的符号链接 |
 | `~/.agent-deck/status.json` | 当前连接、权限、槽位和状态快照 |
 | `~/.agent-deck/pad.sock` | CLI 与应用通信的本地 Unix socket，权限为 `0600` |
-| `~/.agent-deck/daemon.log` | 后台运行日志 |
 
 从含 Hooks / `notify` 的旧版升级时，安装脚本会在移除 Joy Harness 旧配置前创建：
 
@@ -486,8 +506,7 @@ Developer ID 签名并通过 Apple 公证。
 
 新安装不会写入 `~/.codex/hooks.json` 或 Codex `notify` 配置。
 
-为兼容旧版，安装脚本保留 `agent-deck-send` 和 `AgentDeck` 入口别名，并迁移/移除旧的
-`tech.agentdeck.daemon`、`tech.codexpad.daemon` LaunchAgent。运行目录继续使用
+为兼容旧版，安装脚本保留 `agent-deck-send` 和 `AgentDeck` 入口别名。运行目录继续使用
 `~/.agent-deck`，避免升级时丢失已有配置。
 
 ## 常见问题
@@ -550,7 +569,7 @@ Sources/JoyHarness/             macOS 应用、控制台、手柄、鼠标、震
 Sources/JoyHarness/Resources/   控制台图片、logo 与 macOS app icon
 firmware/rp2040/                RP2040 Codex Micro 固件与 USB 描述符
 bin/joy-harness-send            本地 Unix socket CLI
-scripts/install.sh              release 构建、安装、旧配置清理和 LaunchAgent 注册
+scripts/install.sh              release 构建、安装、启动和旧配置清理
 scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
 scripts/package_dmg.sh           构建版本化 macOS DMG 与 SHA-256 校验文件

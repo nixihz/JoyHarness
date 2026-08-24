@@ -29,7 +29,7 @@ The current release is **v0.2.3** for Apple Silicon Macs (arm64) running macOS 1
 - [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.2.3/Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256)
 - [View the v0.2.3 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.2.3)
 
-The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need launch-at-login, the local CLI, or RP2040 firmware build and flashing tools. The v0.2.3 release is ad-hoc signed and not notarized by Apple, so the first launch may require right-clicking the app and choosing **Open**, or allowing it under **System Settings > Privacy & Security**.
+The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. The v0.2.3 release is ad-hoc signed and not notarized by Apple, so the first launch may require right-clicking the app and choosing **Open**, or allowing it under **System Settings > Privacy & Security**.
 
 Verify the download with:
 
@@ -42,6 +42,8 @@ shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
 - Made `LT / L2 +` right stick directions customizable; left/right default to browser back/forward (`Command-[` / `Command-]`).
 - Added an Open Application mapping action with a per-input app picker.
 - Added Natural vs Traditional scroll direction for `LT / L2 +` left stick scrolling in Settings.
+- Hold `L3` temporarily boosts pointer speed to `1.8x`.
+- DualSense / DualShock touchpad sliding moves the pointer slowly for fine aiming without holding a modifier.
 
 ## What's New in v0.2.2
 
@@ -69,11 +71,11 @@ shasum -a 256 -c Joy-Harness-v0.2.3-macOS-arm64.dmg.sha256
 - **Push-to-talk:** hold Menu/Options to send Codex Micro `ACT10`, then release to stop. DualSense controllers can also use the touchpad button. Recording remains native to Codex Desktop.
 - **DualSense audio diagnostics:** detect the controller microphone exposed over USB and report whether it is the default macOS input. Joy Harness does not claim the recording device or change global audio settings.
 - **Graduated trigger feedback:** DualSense R2 provides a light touch, a resistance wall, and a stronger confirmation after the trigger point. Xbox RT uses Impulse Trigger feedback where supported.
-- **Control macOS:** move and scroll with the left stick; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
+- **Control macOS:** move and scroll with the left stick; hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
 - **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
 - **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
-- **Run in the background:** a LaunchAgent starts Joy Harness at login, and disconnected controllers or RP2040 boards are detected again when reconnected.
+- **Run in the background:** launch at login can be enabled in Settings, and disconnected controllers or RP2040 boards are detected again while the app is running.
 
 ### Capabilities by Hardware
 
@@ -182,6 +184,20 @@ Run all commands from the repository root.
 
 ### 1. Build and Flash the RP2040
 
+The easiest option is to copy this repository URL into Codex:
+
+<https://github.com/nixihz/JoyHarness>
+
+Then ask:
+
+> Help me flash the RP2040 firmware from this repository onto my board.
+
+Codex can decide how to access the repository, inspect the included instructions and scripts, and guide you when physical action is required. Keep the RP2040 connected with a data-capable USB cable and follow its prompts.
+
+This repository only provides and supports the bundled RP2040 firmware. For a different microcontroller, you may ask Codex to use this implementation as a reference, but you will need to develop, build, and flash that adaptation yourself.
+
+To build and flash manually, run:
+
 ```bash
 task firmware
 # Without task: bash scripts/build_rp2040_firmware.sh
@@ -214,7 +230,7 @@ task install
 # Without task: bash scripts/install.sh
 ```
 
-The installer builds the release app and registers its LaunchAgent. Upgrades remove obsolete Joy Harness Codex hooks and `notify` fan-out while preserving unrelated tool configuration. Deployment stops older Joy Harness or AgentDeck instances before launching a single new instance, preventing multiple apps from competing for the controller, serial port, or Unix socket.
+The installer builds and launches the release app. Upgrades remove obsolete Joy Harness Codex hooks and `notify` fan-out while preserving unrelated tool configuration. Deployment stops older Joy Harness or AgentDeck instances before launching a single new instance, preventing multiple apps from competing for the controller, serial port, or Unix socket. Enable launch at login from the app's General settings when desired.
 
 ### 3. Connect and Restart
 
@@ -261,6 +277,7 @@ Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in t
 | Input | Action | Accessibility required |
 |---|---|---|
 | Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
+| DualSense / DualShock touchpad slide | Slow relative pointer movement for fine aiming; no modifier required. Touchpad click remains the mapped touchpad button action (default push-to-talk) | Yes |
 | LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings | Yes |
 | Hold L3 | Temporarily increase pointer speed to `1.8x` | Yes |
 | A press/release | Left mouse button, including hold and drag | Yes |
@@ -276,7 +293,7 @@ Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in t
 | Xbox: Options/View; PlayStation: Create | Lark screenshot (`Command-Shift-A`) | Yes |
 | D-pad Up press/release | Right Command press/release, useful for voice-input tools | Yes |
 
-These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. While LT is held, the right stick no longer sends Codex radial input. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
+These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. Hold L3 alone to boost pointer speed. While LT is held, the right stick no longer sends Codex radial input. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
 
 ### Codex Micro Controls
 
@@ -308,7 +325,7 @@ Joy Harness does not subscribe to the Codex task lifecycle and does not automati
 
 ## Dashboard
 
-Joy Harness is a background app with a window. Closing the window does not quit the process, and the LaunchAgent keeps it running. The dashboard shows:
+Joy Harness is a background app with a window. Closing the window does not quit the process; explicitly quitting the app stops it without an automatic restart. The dashboard shows:
 
 - Six task slots, the active slot, and the full controller mapping.
 - Controller name, haptic availability, RP2040 connection, and physical Codex Micro mode.
@@ -324,7 +341,7 @@ Dashboard task commands require a connected RP2040. Task names come from Codex a
 | `task build` | Build the release macOS executable |
 | `task dmg -- 0.2.3` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Run Joy Harness in the foreground with SwiftPM |
-| `task install` | Build and install the app and LaunchAgent |
+| `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
 | `task flash` | Copy firmware to an RP2040 in BOOTSEL mode |
 | `task status` | Print `~/.agent-deck/status.json` |
@@ -345,7 +362,7 @@ python3 bin/joy-harness-send error --note manual-test
 
 ## Development
 
-Build the `.app` and launch it without the LaunchAgent:
+Build the `.app` and launch it directly:
 
 ```bash
 ./scripts/build_and_run.sh
@@ -359,7 +376,7 @@ Additional modes:
 ./scripts/build_and_run.sh --debug
 ```
 
-The script first stops installed Joy Harness/AgentDeck processes and LaunchAgents to avoid contention for the Unix socket or RP2040 serial port. Run `task install` afterward to restore the background service.
+The script first stops installed Joy Harness/AgentDeck processes to avoid contention for the Unix socket or RP2040 serial port. Run `task install` afterward to restore the installed app.
 
 Create a release image for the current Mac architecture with:
 
@@ -377,12 +394,10 @@ Artifacts are written to `dist/`. The package script verifies the app signature,
 | Path | Content |
 |---|---|
 | `~/.agent-deck/Joy Harness.app` | Signed Joy Harness app |
-| `~/Library/LaunchAgents/tech.joyharness.daemon.plist` | Login LaunchAgent |
 | `~/.agent-deck/bin/` | App entry point and CLI |
 | `~/.local/bin/joy-harness-send` | Symlink to the installed CLI |
 | `~/.agent-deck/status.json` | Connection, permission, slot, and state snapshot |
 | `~/.agent-deck/pad.sock` | Local CLI/app Unix socket with `0600` permissions |
-| `~/.agent-deck/daemon.log` | Background log |
 
 When upgrading an older hooks/`notify` installation, the installer backs up the affected configuration before removing obsolete Joy Harness entries. New installations do not write to `~/.codex/hooks.json` or Codex `notify` configuration. Legacy `agent-deck-send`, `AgentDeck`, and `~/.agent-deck` names remain for upgrade compatibility.
 
@@ -440,7 +455,7 @@ Sources/JoyHarness/             macOS app, dashboard, controller, mouse, haptics
 Sources/JoyHarness/Resources/   dashboard images, logo, and macOS app icon
 firmware/rp2040/                RP2040 Codex Micro firmware and USB descriptors
 bin/joy-harness-send            local Unix socket CLI
-scripts/install.sh              release build, install, migration cleanup, and LaunchAgent setup
+scripts/install.sh              release build, install, launch, and migration cleanup
 scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
 scripts/package_dmg.sh          versioned macOS DMG and SHA-256 checksum
