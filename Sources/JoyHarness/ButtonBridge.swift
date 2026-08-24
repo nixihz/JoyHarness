@@ -41,6 +41,7 @@ enum ControllerAction: Hashable {
     case slotOffset(Int)
     case selectSlot(Int)
     case mouseSpeedBoost
+    case mousePrecision
     case openApplication(String)
 }
 
@@ -70,6 +71,39 @@ struct AnalogButtonPressState {
     }
 }
 
+/// Converts DualSense/DualShock absolute touchpad samples into relative pointer deltas.
+struct TouchpadPointerTracker {
+    /// Pixels per normalized touchpad unit. Sized for slow, precise aiming.
+    nonisolated static let sensitivity: CGFloat = 240
+    nonisolated static let liftEpsilon: Float = 0.002
+
+    private var lastSample: CGPoint?
+
+    mutating func update(x: Float, y: Float) -> CGPoint? {
+        let touching = abs(x) > Self.liftEpsilon || abs(y) > Self.liftEpsilon
+        guard touching else {
+            lastSample = nil
+            return nil
+        }
+
+        let sample = CGPoint(x: CGFloat(x), y: CGFloat(y))
+        defer { lastSample = sample }
+        guard let lastSample else { return nil }
+
+        let delta = CGPoint(
+            x: (sample.x - lastSample.x) * Self.sensitivity,
+            // Touchpad Y matches stick Y: positive is up, screen Y grows downward.
+            y: -(sample.y - lastSample.y) * Self.sensitivity
+        )
+        guard abs(delta.x) >= 0.01 || abs(delta.y) >= 0.01 else { return nil }
+        return delta
+    }
+
+    mutating func reset() {
+        lastSample = nil
+    }
+}
+
 final class ButtonBridge {
     private weak var controller: GCController?
     private var pressedButtons: Set<ObjectIdentifier> = []
@@ -78,6 +112,7 @@ final class ButtonBridge {
     private var functionPressed = false
     private var lastJoystick: (angle: Float, distance: Float)?
     private var mouseSpeedBoostPressed = false
+    private var mousePrecisionPressed = false
     private var controllerFamily: ControllerFamily = .generic
     private var rightTriggerPressState = AnalogButtonPressState(
         pressPoint: RightTriggerPressState.releasePoint,
@@ -86,15 +121,18 @@ final class ButtonBridge {
     private var activeFunctionRightStickDirection: ControllerInput?
     private var pressedDirectionInputs: Set<ControllerInput> = []
     private var activeDirectionActions: [ControllerInput: ControllerAction] = [:]
+    private var touchpadTracker = TouchpadPointerTracker()
 
     private(set) var selectedSlot = 0
     var keyHandler: ((String, Int) -> Bool)?
     var joystickHandler: ((Float, Float) -> Bool)?
     var leftStickHandler: ((Float, Float, Bool) -> Void)?
+    var touchpadPointerHandler: ((CGFloat, CGFloat) -> Void)?
     var mouseButtonHandler: ((MouseButton, Bool) -> Void)?
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
     var textInputHandler: ((String) -> Bool)?
     var mouseSpeedBoostHandler: ((Bool) -> Void)?
+    var mousePrecisionHandler: ((Bool) -> Void)?
     var openApplicationHandler: ((String) -> Bool)?
     var openApplicationTargetProvider: ((ControllerInput) -> String?)?
     var rightTriggerFeedbackHandler: ((Float) -> Void)?
@@ -183,6 +221,8 @@ final class ButtonBridge {
     }
 
     private func handle(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
+        sampleTouchpadPointer(from: gamepad)
+
         if changedElement === gamepad.leftTrigger {
             if mappingProvider(.leftTrigger) == .functionModifier {
                 functionPressed = gamepad.leftTrigger.value >= 0.55
@@ -260,6 +300,22 @@ final class ButtonBridge {
         if let dualSense = gamepad as? GCDualSenseGamepad { return dualSense.touchpadButton }
         if let dualShock = gamepad as? GCDualShockGamepad { return dualShock.touchpadButton }
         return nil
+    }
+
+    private static func touchpadPrimary(for gamepad: GCExtendedGamepad) -> GCControllerDirectionPad? {
+        if let dualSense = gamepad as? GCDualSenseGamepad { return dualSense.touchpadPrimary }
+        if let dualShock = gamepad as? GCDualShockGamepad { return dualShock.touchpadPrimary }
+        return nil
+    }
+
+    private func sampleTouchpadPointer(from gamepad: GCExtendedGamepad) {
+        guard let primary = Self.touchpadPrimary(for: gamepad) else { return }
+        if let delta = touchpadTracker.update(
+            x: primary.xAxis.value,
+            y: primary.yAxis.value
+        ) {
+            touchpadPointerHandler?(delta.x, delta.y)
+        }
     }
 
     private func handleMappedButton(_ button: GCControllerButtonInput, input: ControllerInput) {
@@ -366,6 +422,10 @@ final class ButtonBridge {
             mouseSpeedBoostPressed = true
             mouseSpeedBoostHandler?(true)
             succeeded = true
+        case .mousePrecision:
+            mousePrecisionPressed = true
+            mousePrecisionHandler?(true)
+            succeeded = true
         case .openApplication(let bundleIdentifier):
             succeeded = openApplicationHandler?(bundleIdentifier) == true
         }
@@ -401,6 +461,9 @@ final class ButtonBridge {
         case .mouseSpeedBoost:
             mouseSpeedBoostPressed = false
             mouseSpeedBoostHandler?(false)
+        case .mousePrecision:
+            mousePrecisionPressed = false
+            mousePrecisionHandler?(false)
         }
     }
 
@@ -594,6 +657,7 @@ final class ButtonBridge {
         for action in activeControllerActions.values { end(action) }
         for action in activeDirectionActions.values { end(action) }
         if mouseSpeedBoostPressed { mouseSpeedBoostHandler?(false) }
+        if mousePrecisionPressed { mousePrecisionHandler?(false) }
         pressedButtons.removeAll()
         activeControllerActions.removeAll()
         pressedDirectionInputs.removeAll()
@@ -602,7 +666,9 @@ final class ButtonBridge {
         functionPressed = false
         lastJoystick = nil
         mouseSpeedBoostPressed = false
+        mousePrecisionPressed = false
         activeFunctionRightStickDirection = nil
+        touchpadTracker.reset()
         rightTriggerPressState = AnalogButtonPressState(
             pressPoint: RightTriggerPressState.releasePoint,
             resetPoint: RightTriggerPressState.resetPoint

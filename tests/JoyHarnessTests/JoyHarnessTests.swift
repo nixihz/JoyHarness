@@ -275,6 +275,22 @@ struct JoyHarnessTests {
         #expect(store.action(for: .functionRightStickLeft) == .browserBack)
         #expect(store.action(for: .functionRightStickDown) == .disabled)
         #expect(store.action(for: .functionRightStickRight) == .browserForward)
+        #expect(store.action(for: .leftThumbstickButton) == .mouseSpeedBoost)
+    }
+
+    @Test
+    func leftThumbstickPrecisionDefaultMigratesBackToBoost() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(
+            [ControllerInput.leftThumbstickButton.rawValue: ControllerMappedAction.mousePrecision.rawValue],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        #expect(store.action(for: .leftThumbstickButton) == .mouseSpeedBoost)
     }
 
     @Test
@@ -687,8 +703,8 @@ struct JoyHarnessTests {
         let maximum = MouseBridge.pointerVelocity(x: 1, y: 0).x
 
         #expect(quarter > 0 && quarter <= 20)
-        #expect(precisionEdge > quarter && precisionEdge <= 65)
-        #expect(fast >= 500)
+        #expect(precisionEdge > quarter && precisionEdge <= 45)
+        #expect(fast >= 450)
         #expect(abs(maximum - 1_250) < 0.000_001)
     }
 
@@ -720,11 +736,52 @@ struct JoyHarnessTests {
         let boosted = MouseBridge.pointerVelocity(
             x: 0.6,
             y: -0.3,
-            speedMultiplier: 1.8
+            speedMultiplier: MouseBridge.boostSpeedMultiplier
         )
 
-        #expect(abs(boosted.x - normal.x * 1.8) < 0.000_001)
-        #expect(abs(boosted.y - normal.y * 1.8) < 0.000_001)
+        #expect(abs(boosted.x - normal.x * MouseBridge.boostSpeedMultiplier) < 0.000_001)
+        #expect(abs(boosted.y - normal.y * MouseBridge.boostSpeedMultiplier) < 0.000_001)
+    }
+
+    @Test
+    func mousePrecisionScalesVelocityDownForFineAiming() {
+        let normal = MouseBridge.pointerVelocity(x: 0.6, y: -0.3)
+        let precise = MouseBridge.pointerVelocity(
+            x: 0.6,
+            y: -0.3,
+            speedMultiplier: MouseBridge.precisionSpeedMultiplier
+        )
+
+        #expect(abs(precise.x - normal.x * MouseBridge.precisionSpeedMultiplier) < 0.000_001)
+        #expect(abs(precise.y - normal.y * MouseBridge.precisionSpeedMultiplier) < 0.000_001)
+        #expect(MouseBridge.pointerSpeedMultiplier(
+            precisionActive: true,
+            speedBoostActive: true
+        ) == MouseBridge.precisionSpeedMultiplier)
+        #expect(MouseBridge.pointerSpeedMultiplier(
+            precisionActive: false,
+            speedBoostActive: true
+        ) == MouseBridge.boostSpeedMultiplier)
+    }
+
+    @Test
+    func touchpadTrackerIgnoresTheFirstContactAndEmitsRelativeDeltas() {
+        var tracker = TouchpadPointerTracker()
+
+        #expect(tracker.update(x: 0.2, y: -0.1) == nil)
+
+        let delta = tracker.update(x: 0.3, y: -0.1)
+        #expect(delta != nil)
+        #expect(abs((delta?.x ?? 0) - 0.1 * TouchpadPointerTracker.sensitivity) < 0.000_01)
+        #expect(abs(delta?.y ?? 1) < 0.000_01)
+
+        let upward = tracker.update(x: 0.3, y: 0.0)
+        #expect(upward != nil)
+        #expect(abs(upward?.x ?? 1) < 0.000_01)
+        #expect((upward?.y ?? 0) < 0)
+
+        #expect(tracker.update(x: 0, y: 0) == nil)
+        #expect(tracker.update(x: 0.4, y: 0.2) == nil)
     }
 
     @Test

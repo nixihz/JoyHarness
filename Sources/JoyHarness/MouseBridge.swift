@@ -40,9 +40,11 @@ final class MouseBridge: NSObject {
     private var targetVelocity = CGPoint.zero
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
+    private var fractionalTouchDelta = CGPoint.zero
     private var stickInput = CGPoint.zero
     private var scrolling = false
     private var speedBoostActive = false
+    private var precisionActive = false
     private var scrollDirection: ScrollDirectionPreference = .traditional
     private var lastTickTime: TimeInterval?
     private var movementTimer: Timer?
@@ -51,6 +53,10 @@ final class MouseBridge: NSObject {
     private var keyRepeatDelayTimer: Timer?
     private var keyRepeatTimer: Timer?
     private var lastPermissionState = false
+
+    /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
+    nonisolated static let precisionSpeedMultiplier: CGFloat = 0.32
+    nonisolated static let boostSpeedMultiplier: CGFloat = 1.8
 
     var onPermissionChange: (() -> Void)?
 
@@ -92,6 +98,35 @@ final class MouseBridge: NSObject {
         guard active != speedBoostActive else { return }
         speedBoostActive = active
         updateTargetVelocity()
+    }
+
+    func setPrecisionActive(_ active: Bool) {
+        guard active != precisionActive else { return }
+        precisionActive = active
+        updateTargetVelocity()
+    }
+
+    /// Applies a one-shot relative pointer nudge (e.g. DualSense touchpad slide).
+    func applyPointerDelta(x: CGFloat, y: CGFloat) {
+        guard x != 0 || y != 0 else { return }
+        guard isAccessibilityGranted else {
+            requestAccessibilityPermission()
+            return
+        }
+        let accumulated = CGPoint(
+            x: fractionalTouchDelta.x + x,
+            y: fractionalTouchDelta.y + y
+        )
+        let whole = CGPoint(
+            x: accumulated.x.rounded(.towardZero),
+            y: accumulated.y.rounded(.towardZero)
+        )
+        fractionalTouchDelta = CGPoint(
+            x: accumulated.x - whole.x,
+            y: accumulated.y - whole.y
+        )
+        guard whole != .zero else { return }
+        postPointerMove(delta: whole)
     }
 
     func setScrollDirection(_ direction: ScrollDirectionPreference) {
@@ -184,18 +219,29 @@ final class MouseBridge: NSObject {
         speedMultiplier: CGFloat = 1
     ) -> CGPoint {
         let deadZone: CGFloat = 0.15
-        let precisionSpeed: CGFloat = 90
+        // Lower near-center speed keeps small stick travel usable for UI chrome.
+        let precisionSpeed: CGFloat = 55
         let maximumSpeed: CGFloat = 1_250
         let magnitude = min(hypot(x, y), 1)
         guard magnitude > deadZone else { return .zero }
 
         let normalizedMagnitude = (magnitude - deadZone) / (1 - deadZone)
+        // Steeper curve: more of the stick range stays in the fine-control band.
         let speed = precisionSpeed * normalizedMagnitude
-            + (maximumSpeed - precisionSpeed) * pow(normalizedMagnitude, 2.4)
+            + (maximumSpeed - precisionSpeed) * pow(normalizedMagnitude, 2.8)
         return CGPoint(
             x: x / magnitude * speed * speedMultiplier,
             y: -y / magnitude * speed * speedMultiplier
         )
+    }
+
+    nonisolated static func pointerSpeedMultiplier(
+        precisionActive: Bool,
+        speedBoostActive: Bool
+    ) -> CGFloat {
+        if precisionActive { return precisionSpeedMultiplier }
+        if speedBoostActive { return boostSpeedMultiplier }
+        return 1
     }
 
     nonisolated static func scrollVelocity(
@@ -277,11 +323,15 @@ final class MouseBridge: NSObject {
             return
         }
 
+        postPointerMove(delta: wholeDelta)
+    }
+
+    private func postPointerMove(delta: CGPoint) {
         guard let location = CGEvent(source: nil)?.location else { return }
 
         let nextLocation = CGPoint(
-            x: location.x + wholeDelta.x,
-            y: location.y + wholeDelta.y
+            x: location.x + delta.x,
+            y: location.y + delta.y
         )
         let drag: (CGEventType, CGMouseButton)
         if pressedMouseButtons.contains(.left) {
@@ -359,6 +409,7 @@ final class MouseBridge: NSObject {
     private func resetMotion() {
         smoothedVelocity = .zero
         fractionalDelta = .zero
+        fractionalTouchDelta = .zero
     }
 
     private func updateTargetVelocity() {
@@ -372,7 +423,10 @@ final class MouseBridge: NSObject {
             targetVelocity = Self.pointerVelocity(
                 x: stickInput.x,
                 y: stickInput.y,
-                speedMultiplier: speedBoostActive ? 1.8 : 1
+                speedMultiplier: Self.pointerSpeedMultiplier(
+                    precisionActive: precisionActive,
+                    speedBoostActive: speedBoostActive
+                )
             )
         }
     }

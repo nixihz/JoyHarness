@@ -151,7 +151,7 @@ final class JoyHarnessRuntime {
         dashboard.startMonitoring()
 
         print("[agent-deck] physical Codex Micro mode; task metadata enabled")
-        print("[agent-deck] ready - left stick=pointer, LT+left stick=scroll, LT+face=Codex actions")
+        print("[agent-deck] ready - left stick=pointer, L3=speed boost, touchpad=slow slide, LT+left stick=scroll, LT+face=Codex actions")
     }
 
     @discardableResult
@@ -202,6 +202,12 @@ final class JoyHarnessRuntime {
         }
         buttons.mouseSpeedBoostHandler = { [weak self] active in
             self?.mouse.setSpeedBoostActive(active)
+        }
+        buttons.mousePrecisionHandler = { [weak self] active in
+            self?.mouse.setPrecisionActive(active)
+        }
+        buttons.touchpadPointerHandler = { [weak self] x, y in
+            self?.mouse.applyPointerDelta(x: x, y: y)
         }
         buttons.openApplicationTargetProvider = { [weak self] input in
             self?.mappings.openApplicationTarget(for: input)

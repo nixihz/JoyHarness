@@ -171,6 +171,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case slot5
     case slot6
     case mouseSpeedBoost
+    case mousePrecision
     case browserBack
     case browserForward
     case openApplication
@@ -209,6 +210,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .slot5: L10n.text("选择槽位 5", "Select Slot 5")
         case .slot6: L10n.text("选择槽位 6", "Select Slot 6")
         case .mouseSpeedBoost: L10n.text("按住加速鼠标", "Hold for Faster Pointer")
+        case .mousePrecision: L10n.text("按住精细鼠标", "Hold for Precise Pointer")
         case .browserBack: L10n.text("网页上一页", "Browser Back")
         case .browserForward: L10n.text("网页下一页", "Browser Forward")
         case .openApplication: L10n.text("打开应用…", "Open Application…")
@@ -247,6 +249,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .slot5: .selectSlot(4)
         case .slot6: .selectSlot(5)
         case .mouseSpeedBoost: .mouseSpeedBoost
+        case .mousePrecision: .mousePrecision
         }
     }
 }
@@ -328,6 +331,7 @@ final class ControllerMappingStore: ObservableObject {
         migrateClipboardAndScreenshotDefaultsIfNeeded()
         migrateClipboardToThumbsticksIfNeeded()
         migrateFunctionRightStickBrowserDefaultsIfNeeded()
+        migrateLeftThumbstickBoostRestoredIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
@@ -496,6 +500,19 @@ final class ControllerMappingStore: ObservableObject {
             changed = true
         }
         if changed { persist() }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
+    private func migrateLeftThumbstickBoostRestoredIfNeeded() {
+        let migrationKey = "\(storageKey).leftThumbstickBoostRestoredMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        // Undo the brief L3→precision default; Xbox L3 stays speed boost.
+        // Slow aiming is DualSense/DualShock touchpad sliding only.
+        if mappings[.leftThumbstickButton] == .mousePrecision {
+            mappings[.leftThumbstickButton] = .mouseSpeedBoost
+            persist()
+        }
         userDefaults.set(true, forKey: migrationKey)
     }
 
