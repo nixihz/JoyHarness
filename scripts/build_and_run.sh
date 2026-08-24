@@ -3,10 +3,10 @@ set -euo pipefail
 
 APP_NAME="JoyHarness"
 DISPLAY_NAME="Joy Harness"
-BUNDLE_ID="tech.joyharness.daemon"
 MIN_SYSTEM_VERSION="13.0"
 MODE="${1:-run}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${PROJECT_ROOT}/Sources/JoyHarness/Info.plist")"
 VERSION="$(tr -d '[:space:]' < "${PROJECT_ROOT}/Sources/JoyHarness/Resources/VERSION")"
 APP_BUNDLE="${PROJECT_ROOT}/dist/${DISPLAY_NAME}.app"
 APP_CONTENTS="${APP_BUNDLE}/Contents"

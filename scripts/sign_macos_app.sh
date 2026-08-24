@@ -3,6 +3,13 @@ set -euo pipefail
 
 APP_BUNDLE="${1:?usage: sign_macos_app.sh <app-bundle> <bundle-id>}"
 BUNDLE_ID="${2:?usage: sign_macos_app.sh <app-bundle> <bundle-id>}"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [[ -z "${JOY_HARNESS_SIGNING_IDENTITY:-}" && -f "${PROJECT_ROOT}/.env.local" ]]; then
+  # shellcheck source=/dev/null
+  source "${PROJECT_ROOT}/.env.local"
+fi
+
 SIGNING_IDENTITY="${JOY_HARNESS_SIGNING_IDENTITY:-}"
 
 # Prefer the SHA-1 hash over the common name. Duplicate certificates can share a

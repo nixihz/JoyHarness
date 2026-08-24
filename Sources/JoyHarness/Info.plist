@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>tech.joyharness.daemon</string>
+  <string>tech.keli.joyharness</string>
   <key>CFBundleName</key>
   <string>Joy Harness</string>
   <key>CFBundleDisplayName</key>

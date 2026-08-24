@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "${ROOT}/Sources/JoyHarness/Resources/VERSION")"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${ROOT}/Sources/JoyHarness/Info.plist")"
 BIN_DIR="${HOME}/.agent-deck/bin"
 APP_DIR="${HOME}/.agent-deck/Joy Harness.app"
 LEGACY_APP_DIR="${HOME}/.agent-deck/AgentDeck.app"
@@ -15,13 +16,9 @@ STAGED_APP_DIR="${STAGE_ROOT}/Joy Harness.app"
 STAGED_CONTENTS="${STAGED_APP_DIR}/Contents"
 STAGED_APP_EXE="${STAGED_CONTENTS}/MacOS/JoyHarness"
 trap 'rm -rf "${STAGE_ROOT}"' EXIT
-LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
-PLIST="${LAUNCH_AGENTS}/tech.joyharness.daemon.plist"
-LEGACY_AGENTDECK_PLIST="${LAUNCH_AGENTS}/tech.agentdeck.daemon.plist"
-LEGACY_CODEXPAD_PLIST="${LAUNCH_AGENTS}/tech.codexpad.daemon.plist"
 SEND="${ROOT}/bin/joy-harness-send"
 
-mkdir -p "${HOME}/.agent-deck" "${BIN_DIR}" "${LAUNCH_AGENTS}"
+mkdir -p "${HOME}/.agent-deck" "${BIN_DIR}"
 mkdir -p "${STAGED_CONTENTS}/MacOS" "${STAGED_CONTENTS}/Resources"
 
 echo "==> Building Joy Harness"
@@ -40,7 +37,7 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
   <key>CFBundleExecutable</key>
   <string>JoyHarness</string>
   <key>CFBundleIdentifier</key>
-  <string>tech.joyharness.daemon</string>
+  <string>${BUNDLE_ID}</string>
   <key>CFBundleName</key>
   <string>Joy Harness</string>
   <key>CFBundleIconFile</key>
@@ -58,17 +55,12 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
-"${ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_DIR}" "tech.joyharness.daemon"
+"${ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_DIR}" "${BUNDLE_ID}"
 "${ROOT}/scripts/stop_joy_harness_instances.sh"
-for legacy_plist in "${LEGACY_AGENTDECK_PLIST}" "${LEGACY_CODEXPAD_PLIST}"; do
-  if [[ -f "${legacy_plist}" ]]; then
-    unlink "${legacy_plist}"
-  fi
-done
 rm -rf "${APP_DIR}" "${LEGACY_APP_DIR}"
 mv "${STAGED_APP_DIR}" "${APP_DIR}"
-# Drop download/quarantine markers so LaunchAgent startup is less likely to be
-# treated as an untrusted first-run payload by Gatekeeper/XProtect.
+# Drop download/quarantine markers so the local source build is not treated as
+# an untrusted first-run payload by Gatekeeper/XProtect.
 xattr -cr "${APP_DIR}" 2>/dev/null || true
 if [[ -e "${BIN_DIR}/JoyHarness" && ! -L "${BIN_DIR}/JoyHarness" ]]; then
   mv "${BIN_DIR}/JoyHarness" "${BIN_DIR}/JoyHarness.legacy"
@@ -254,48 +246,12 @@ for obsolete in "${BIN_DIR}/hook_bridge.py" "${BIN_DIR}/notify_fanout.py"; do
   fi
 done
 
-# LaunchAgent
-cat > "${PLIST}" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>tech.joyharness.daemon</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${APP_EXE}</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>${HOME}/.agent-deck/daemon.log</string>
-  <key>StandardErrorPath</key>
-  <string>${HOME}/.agent-deck/daemon.log</string>
-</dict>
-</plist>
-EOF
-
-for attempt in 1 2 3 4 5; do
-  if launchctl bootstrap "gui/$(id -u)" "${PLIST}" 2>/dev/null; then
-    break
-  fi
-  if [[ "${attempt}" == "5" ]]; then
-    echo "failed to bootstrap Joy Harness LaunchAgent after ${attempt} attempts" >&2
-    exit 1
-  fi
-  echo "LaunchAgent still stopping; retrying bootstrap (${attempt}/5)" >&2
-  sleep 1
-done
-launchctl enable "gui/$(id -u)/tech.joyharness.daemon" 2>/dev/null || true
-launchctl kickstart -k "gui/$(id -u)/tech.joyharness.daemon"
+/usr/bin/open -n "${APP_DIR}"
 
 echo
 echo "Installed."
 echo "  app:     ${APP_DIR}"
-echo "  daemon:  ${APP_EXE}"
+echo "  binary:  ${APP_EXE}"
 echo "  send:    ${BIN_DIR}/joy-harness-send"
 echo "  status:  ~/.agent-deck/status.json"
 echo
@@ -305,3 +261,4 @@ echo "  2. Flash and connect the RP2040: task firmware && task flash"
 echo "  3. Restart Codex Desktop so it detects the Codex Micro HID"
 echo "  4. Grant Input Monitoring to Codex Desktop when prompted"
 echo "  5. Test haptics: ${BIN_DIR}/joy-harness-send waiting"
+echo "  6. Enable launch at login from Joy Harness > Settings when desired"

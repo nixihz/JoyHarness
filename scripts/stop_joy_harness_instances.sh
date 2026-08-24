@@ -3,12 +3,6 @@ set -euo pipefail
 
 PROCESS_PATTERN="${JOY_HARNESS_PROCESS_PATTERN:-/(Joy Harness|AgentDeck)\.app/Contents/MacOS/(JoyHarness|AgentDeck)$}"
 
-if [[ "${JOY_HARNESS_SKIP_LAUNCH_AGENTS:-0}" != "1" ]]; then
-  for service in tech.joyharness.daemon tech.agentdeck.daemon tech.codexpad.daemon; do
-    launchctl bootout "gui/$(id -u)/${service}" 2>/dev/null || true
-  done
-fi
-
 matching_pids() {
   pgrep -f "${PROCESS_PATTERN}" 2>/dev/null || true
 }

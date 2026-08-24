@@ -10,20 +10,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class LaunchAgentMigrationTests(unittest.TestCase):
-    def test_install_migrates_agentdeck_service_to_joy_harness(self) -> None:
+class InstallationTests(unittest.TestCase):
+    def test_install_has_no_launch_agent_integration(self) -> None:
         script = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
         stop_script = (
             ROOT / "scripts" / "stop_joy_harness_instances.sh"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("tech.joyharness.daemon.plist", script)
-        self.assertIn("<string>tech.joyharness.daemon</string>", script)
         self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
+        self.assertIn('/usr/bin/open -n "${APP_DIR}"', script)
         self.assertNotIn("pkill -x", script)
-        self.assertIn("tech.joyharness.daemon", stop_script)
-        self.assertIn("tech.agentdeck.daemon", stop_script)
-        self.assertIn("tech.codexpad.daemon", stop_script)
+        self.assertNotIn("LaunchAgent", script)
+        self.assertNotIn("launchctl", script)
+        self.assertNotIn("launchctl", stop_script)
 
     def test_install_removes_obsolete_codex_integration(self) -> None:
         script = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -36,7 +35,7 @@ class LaunchAgentMigrationTests(unittest.TestCase):
         self.assertIn("removed_hooks_source", script)
         self.assertIn("source_prefix", script)
 
-    def test_development_run_unloads_installed_daemons(self) -> None:
+    def test_development_run_stops_installed_app(self) -> None:
         script = (ROOT / "scripts" / "build_and_run.sh").read_text(encoding="utf-8")
 
         self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
@@ -61,7 +60,6 @@ class LaunchAgentMigrationTests(unittest.TestCase):
             self.addCleanup(lambda: process.poll() is None and process.kill())
 
             environment = os.environ.copy()
-            environment["JOY_HARNESS_SKIP_LAUNCH_AGENTS"] = "1"
             environment["JOY_HARNESS_PROCESS_PATTERN"] = (
                 f"^{re.escape(str(executable))}$"
             )
@@ -91,6 +89,18 @@ class LaunchAgentMigrationTests(unittest.TestCase):
             self.assertIn("Sources/JoyHarness/Resources/VERSION", script)
             self.assertIn("CFBundleShortVersionString", script)
             self.assertIn("CFBundleVersion", script)
+
+    def test_all_app_builds_use_the_info_plist_bundle_identifier(self) -> None:
+        expected = 'PlistBuddy -c \'Print :CFBundleIdentifier\''
+
+        for relative_path in (
+            "scripts/build_and_run.sh",
+            "scripts/install.sh",
+            "scripts/package_dmg.sh",
+        ):
+            script = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertIn(expected, script)
+            self.assertNotIn('BUNDLE_ID="tech.keli.joyharness"', script)
 
     def test_signing_step_produces_a_valid_app_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

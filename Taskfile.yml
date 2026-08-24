@@ -38,7 +38,7 @@ tasks:
       - python3 bin/joy-harness-send {{.CLI_ARGS}}
 
   install:
-    desc: Build and install the Joy Harness LaunchAgent
+    desc: Build, install, and launch Joy Harness
     cmds:
       - bash scripts/install.sh
 
