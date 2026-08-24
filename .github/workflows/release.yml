@@ -49,6 +49,12 @@ jobs:
             exit 2
           fi
 
+          SOURCE_VERSION="$(tr -d '[:space:]' < Sources/JoyHarness/Resources/VERSION)"
+          if [[ "${VERSION}" != "${SOURCE_VERSION}" ]]; then
+            echo "Release version ${VERSION} does not match source version ${SOURCE_VERSION}." >&2
+            exit 1
+          fi
+
           TAG="v${VERSION}"
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "Tag already exists: ${TAG}" >&2

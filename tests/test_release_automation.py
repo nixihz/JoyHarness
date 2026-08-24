@@ -15,6 +15,8 @@ class ReleaseAutomationTests(unittest.TestCase):
         self.assertIn("contents: write", workflow)
         self.assertIn("runs-on: macos-26", workflow)
         self.assertIn('refs/heads/main', workflow)
+        self.assertIn("Sources/JoyHarness/Resources/VERSION", workflow)
+        self.assertIn("does not match source version", workflow)
         self.assertIn("gh release create", workflow)
         self.assertIn("--draft", workflow)
         self.assertNotIn("PRERELEASE_ARGS", workflow)
