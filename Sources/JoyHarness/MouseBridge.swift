@@ -53,6 +53,8 @@ final class MouseBridge: NSObject {
     private var keyRepeatDelayTimer: Timer?
     private var keyRepeatTimer: Timer?
     private var lastPermissionState = false
+    private var cachedDisplayBounds: [CGRect] = []
+    private var cachedDisplayBoundsAt: TimeInterval = 0
 
     /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
     nonisolated static let precisionSpeedMultiplier: CGFloat = 0.32
@@ -273,6 +275,39 @@ final class MouseBridge: NSObject {
         return 1 - exp(-deltaTime / responseTime)
     }
 
+    /// Keeps synthetic pointer events on a real display.
+    ///
+    /// `CGEvent` absolute moves can accept coordinates past the screen edge; the
+    /// visible cursor stops, but the HID location keeps drifting. Reversing the
+    /// stick then has to travel that off-screen debt before the cursor moves again.
+    nonisolated static func clampPointerLocation(
+        _ point: CGPoint,
+        displays: [CGRect]
+    ) -> CGPoint {
+        guard !displays.isEmpty else { return point }
+        for bounds in displays where bounds.contains(point) {
+            return point
+        }
+
+        var nearest = point
+        var nearestDistance = CGFloat.greatestFiniteMagnitude
+        for bounds in displays {
+            // CGRect.contains treats maxX/maxY as exclusive; stay on the last pixel.
+            let clamped = CGPoint(
+                x: min(max(point.x, bounds.minX), max(bounds.minX, bounds.maxX - 1)),
+                y: min(max(point.y, bounds.minY), max(bounds.minY, bounds.maxY - 1))
+            )
+            let dx = point.x - clamped.x
+            let dy = point.y - clamped.y
+            let distance = dx * dx + dy * dy
+            if distance < nearestDistance {
+                nearestDistance = distance
+                nearest = clamped
+            }
+        }
+        return nearest
+    }
+
     @objc private func handleMovementTimer() {
         movePointer(at: ProcessInfo.processInfo.systemUptime)
     }
@@ -327,11 +362,12 @@ final class MouseBridge: NSObject {
     }
 
     private func postPointerMove(delta: CGPoint) {
-        guard let location = CGEvent(source: nil)?.location else { return }
-
-        let nextLocation = CGPoint(
-            x: location.x + delta.x,
-            y: location.y + delta.y
+        guard let rawLocation = CGEvent(source: nil)?.location else { return }
+        let displays = displayBounds()
+        let location = Self.clampPointerLocation(rawLocation, displays: displays)
+        let nextLocation = Self.clampPointerLocation(
+            CGPoint(x: location.x + delta.x, y: location.y + delta.y),
+            displays: displays
         )
         let drag: (CGEventType, CGMouseButton)
         if pressedMouseButtons.contains(.left) {
@@ -350,6 +386,31 @@ final class MouseBridge: NSObject {
             mouseButton: drag.1
         ) else { return }
         event.post(tap: .cghidEventTap)
+    }
+
+    private func displayBounds(
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> [CGRect] {
+        if now - cachedDisplayBoundsAt < 1, !cachedDisplayBounds.isEmpty {
+            return cachedDisplayBounds
+        }
+        let bounds = Self.fetchActiveDisplayBounds()
+        cachedDisplayBounds = bounds
+        cachedDisplayBoundsAt = now
+        return bounds
+    }
+
+    private static func fetchActiveDisplayBounds() -> [CGRect] {
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success,
+              displayCount > 0 else {
+            return [CGDisplayBounds(CGMainDisplayID())]
+        }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &displays, &displayCount) == .success else {
+            return [CGDisplayBounds(CGMainDisplayID())]
+        }
+        return displays.prefix(Int(displayCount)).map(CGDisplayBounds)
     }
 
     private func postScroll(delta: CGPoint) {

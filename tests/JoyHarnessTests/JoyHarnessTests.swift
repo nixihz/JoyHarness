@@ -771,6 +771,65 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func pointerLocationStaysInsideDisplayBounds() {
+        let display = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+
+        #expect(
+            MouseBridge.clampPointerLocation(CGPoint(x: 100, y: 200), displays: [display])
+                == CGPoint(x: 100, y: 200)
+        )
+        #expect(
+            MouseBridge.clampPointerLocation(CGPoint(x: 100, y: -400), displays: [display])
+                == CGPoint(x: 100, y: 0)
+        )
+        #expect(
+            MouseBridge.clampPointerLocation(CGPoint(x: 2_500, y: 500), displays: [display])
+                == CGPoint(x: 1_919, y: 500)
+        )
+        #expect(
+            MouseBridge.clampPointerLocation(CGPoint(x: -50, y: 2_000), displays: [display])
+                == CGPoint(x: 0, y: 1_079)
+        )
+    }
+
+    @Test
+    func pointerLocationDoesNotAccumulateOffscreenDebt() {
+        let display = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        // Simulate holding the stick past the top edge for several frames.
+        var location = CGPoint(x: 720, y: 0)
+        for _ in 0..<120 {
+            location = MouseBridge.clampPointerLocation(
+                CGPoint(x: location.x, y: location.y - 20),
+                displays: [display]
+            )
+        }
+        #expect(location == CGPoint(x: 720, y: 0))
+
+        // One frame of reverse travel should move the cursor immediately.
+        location = MouseBridge.clampPointerLocation(
+            CGPoint(x: location.x, y: location.y + 20),
+            displays: [display]
+        )
+        #expect(location == CGPoint(x: 720, y: 20))
+    }
+
+    @Test
+    func pointerLocationCanCrossOntoAnAdjacentDisplay() {
+        let left = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let right = CGRect(x: 1_920, y: 0, width: 1_920, height: 1_080)
+        let displays = [left, right]
+
+        #expect(
+            MouseBridge.clampPointerLocation(CGPoint(x: 1_930, y: 100), displays: displays)
+                == CGPoint(x: 1_930, y: 100)
+        )
+        #expect(
+            MouseBridge.clampPointerLocation(CGPoint(x: 4_000, y: -200), displays: displays)
+                == CGPoint(x: 3_839, y: 0)
+        )
+    }
+
+    @Test
     func touchpadTrackerIgnoresTheFirstContactAndEmitsRelativeDeltas() {
         var tracker = TouchpadPointerTracker()
 
