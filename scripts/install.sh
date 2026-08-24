@@ -67,6 +67,9 @@ for legacy_plist in "${LEGACY_AGENTDECK_PLIST}" "${LEGACY_CODEXPAD_PLIST}"; do
 done
 rm -rf "${APP_DIR}" "${LEGACY_APP_DIR}"
 mv "${STAGED_APP_DIR}" "${APP_DIR}"
+# Drop download/quarantine markers so LaunchAgent startup is less likely to be
+# treated as an untrusted first-run payload by Gatekeeper/XProtect.
+xattr -cr "${APP_DIR}" 2>/dev/null || true
 if [[ -e "${BIN_DIR}/JoyHarness" && ! -L "${BIN_DIR}/JoyHarness" ]]; then
   mv "${BIN_DIR}/JoyHarness" "${BIN_DIR}/JoyHarness.legacy"
 elif [[ -L "${BIN_DIR}/JoyHarness" ]]; then
