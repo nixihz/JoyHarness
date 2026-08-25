@@ -85,8 +85,8 @@ shasum -a 256 -c Joy-Harness-v0.2.5-macOS-arm64.dmg.sha256
 
 - **离开键盘操作 Codex**：用手柄在六个 Codex Micro 任务槽之间切换、打开当前任务、
   批准或拒绝权限请求，以及输入 `yes` / `no`；Fast 模式和拆分任务仍可配置为自定义映射。
-- **按住说话**：按住 Menu/Options 键时发送 Codex Micro `ACT10`，松开时结束；DualSense
-  还可用触控板按键。录音仍由 Codex Desktop 原生完成。
+- **按住说话**：按住 Menu/Options 键时发送 Codex Micro `ACT10`，松开时结束。录音仍由
+  Codex Desktop 原生完成；DualSense 触控板按键默认是鼠标左键，也可手动映射为按住说话。
 - **DualSense 语音诊断**：检测通过 USB 暴露的手柄麦克风，并提示它是否已被设为 macOS
   默认输入；Joy Harness 不抢占录音设备，也不改动全局声音设置。
 - **DualSense R2 强反馈**：R2 轻触时给一次轻震，中段形成明显阻力墙，完全按下越过触发点
@@ -352,12 +352,16 @@ task demo
 同一设置窗口顶部可以选择“跟随系统”“简体中文”或 `English`；手动选择会覆盖系统语言。
 Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴露对应事件时才会生效。
 
+任意可映射输入都可以选择“录制按键…”。点击“点击录制”后，在键盘上按下单键或包含
+`Command`、`Control`、`Option`、`Shift`、`Fn` 的组合键；还可以填写备注说明用途。录制结果和
+备注会随映射一起保存在当前用户的偏好设置中，触发时发送给当前前台应用，并需要辅助功能权限。
+
 ### 鼠标和系统控制
 
 | 按键 | 实际效果 | 是否需要辅助功能权限 |
 |---|---|---|
 | 左摇杆 | 以 120Hz 平滑移动 macOS 鼠标，带死区和渐进加速 | 是 |
-| DualSense / DualShock 触控板滑动 | 慢速相对移动指针，适合精细瞄准；无需按住任何修饰键。触控板按下仍走映射（默认按住说话） | 是 |
+| DualSense / DualShock 触控板滑动 | 慢速相对移动指针，适合精细瞄准；无需按住任何修饰键。触控板按下仍走映射（默认鼠标左键） | 是 |
 | LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度；可在设置中选择自然滚动或传统滚动 | 是 |
 | L3 按住 | 鼠标速度临时提升到 `1.8x`，松开恢复正常速度 | 是 |
 | A 按下 / 松开 | 鼠标左键按下 / 松开，可单击、长按或拖动 | 是 |
@@ -391,7 +395,7 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | LT + 上 / 左 / 下 / 右 | `AG00`–`AG03` | 逆时针直接选择任务槽 1 / 2 / 3 / 4 |
 | LT + LB / RB | `AG04` / `AG05` | 直接选择任务槽 5 / 6 |
 | Menu / Options 按住 / 松开 | `ACT10` 按下 / 松开 | Codex Desktop 原生按住说话 |
-| DualSense / DualShock 触控板按住 / 松开 | `ACT10` 按下 / 松开 | PlayStation 手柄的备用按住说话入口 |
+| DualSense / DualShock 触控板按住 / 松开（映射为按住说话时） | `ACT10` 按下 / 松开 | PlayStation 手柄的可选按住说话入口 |
 | RT / R2 扣过阻力墙 | `ACT12` | 到达确认行程后聚焦 Codex Desktop；轻按不会触发 |
 | 十字键左 / 下 / 右（未按 LT）及右摇杆 | `v.oai.rad` | 发送角度和力度形式的径向输入；十字键上默认映射为右侧 Command |
 

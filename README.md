@@ -283,12 +283,14 @@ Finally, open a task in Codex Desktop and verify approval with `LT + A`, rejecti
 
 Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in the mapping area, to customize buttons and LT combinations. Settings apply immediately and are stored in the current user's preferences. **Restore Default Mapping** restores the behavior below.
 
+Any mappable input can use **Record Shortcut...**. Select **Click to Record**, then press a single key or a combination using Command, Control, Option, Shift, or Fn. An optional note can describe the shortcut's purpose. The shortcut and note are saved in the current user's preferences; playback targets the foreground application and requires Accessibility permission.
+
 ### Mouse and System Controls
 
 | Input | Action | Accessibility required |
 |---|---|---|
 | Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
-| DualSense / DualShock touchpad slide | Slow relative pointer movement for fine aiming; no modifier required. Touchpad click remains the mapped touchpad button action (default push-to-talk) | Yes |
+| DualSense / DualShock touchpad slide | Slow relative pointer movement for fine aiming; no modifier required. Touchpad click remains the mapped touchpad button action (default left mouse button) | Yes |
 | LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings | Yes |
 | Hold L3 | Temporarily increase pointer speed to `1.8x` | Yes |
 | A press/release | Left mouse button, including hold and drag | Yes |
@@ -318,7 +320,7 @@ These actions target the foreground application, not only Codex Desktop. LT is a
 | LT + Up / Left / Down / Right | `AG00`-`AG03` | Select task slots 1/2/3/4 counterclockwise |
 | LT + LB / RB | `AG04` / `AG05` | Select task slots 5/6 |
 | Hold/release Menu or Options | `ACT10` press/release | Native Codex Desktop push-to-talk |
-| Hold/release DualSense/DualShock touchpad | `ACT10` press/release | Alternate PlayStation push-to-talk input |
+| Hold/release DualSense/DualShock touchpad (when mapped to push-to-talk) | `ACT10` press/release | Optional PlayStation push-to-talk input |
 | RT / R2 past the resistance wall | `ACT12` | Focus Codex Desktop after the confirmation travel point |
 | D-pad Left/Down/Right without LT and right stick | `v.oai.rad` | Radial input as angle and magnitude |
 
