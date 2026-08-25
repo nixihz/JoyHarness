@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ControllerMappingSettingsPane: View {
     @ObservedObject var store: ControllerMappingStore
     @State private var isResetConfirmationPresented = false
+    @State private var recordingInput: ControllerInput?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +22,12 @@ struct ControllerMappingSettingsPane: View {
                                 .pickerStyle(.menu)
 
                                 if store.action(for: input) == .openApplication {
+                                    configurationDivider
                                     openApplicationRow(for: input)
+                                }
+                                if store.action(for: input) == .recordedShortcut {
+                                    configurationDivider
+                                    recordedShortcutRows(for: input)
                                 }
                             }
                         }
@@ -59,27 +65,36 @@ struct ControllerMappingSettingsPane: View {
 
     @ViewBuilder
     private func openApplicationRow(for input: ControllerInput) -> some View {
-        HStack(spacing: 8) {
-            Text(
-                store.openApplicationDisplayName(for: input)
-                    ?? L10n.text("未选择应用", "No application selected")
-            )
-            .foregroundStyle(store.openApplicationTarget(for: input) == nil ? .secondary : .primary)
-            .lineLimit(1)
+        HStack(spacing: 12) {
+            configurationLabel(L10n.text("应用", "Application"))
 
-            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                Text(
+                    store.openApplicationDisplayName(for: input)
+                        ?? L10n.text("未选择应用", "No application selected")
+                )
+                .foregroundStyle(store.openApplicationTarget(for: input) == nil ? .secondary : .primary)
+                .lineLimit(1)
 
-            Button(L10n.text("选择…", "Choose…")) {
-                chooseApplication(for: input)
-            }
+                Spacer(minLength: 8)
 
-            if store.openApplicationTarget(for: input) != nil {
-                Button(L10n.text("清除", "Clear")) {
-                    store.setOpenApplicationTarget(nil, for: input)
+                Button(L10n.text("选择…", "Choose…")) {
+                    chooseApplication(for: input)
+                }
+                .controlSize(.small)
+
+                if store.openApplicationTarget(for: input) != nil {
+                    clearButton(
+                        help: L10n.text("清除所选应用", "Clear selected application")
+                    ) {
+                        store.setOpenApplicationTarget(nil, for: input)
+                    }
                 }
             }
         }
         .font(.caption)
+        .padding(.leading, 12)
+        .padding(.bottom, 2)
     }
 
     private func inputs(in group: ControllerInputGroup) -> [ControllerInput] {
@@ -90,6 +105,81 @@ struct ControllerMappingSettingsPane: View {
             }
             return true
         }
+    }
+
+    @ViewBuilder
+    private func recordedShortcutRows(for input: ControllerInput) -> some View {
+        let configuration = store.recordedShortcutConfiguration(for: input)
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+            GridRow {
+                configurationLabel(L10n.text("快捷键", "Shortcut"))
+
+                HStack(spacing: 10) {
+                    ShortcutRecorderButton(
+                        shortcut: configuration.shortcut,
+                        isRecording: Binding(
+                            get: { recordingInput == input },
+                            set: { recordingInput = $0 ? input : nil }
+                        )
+                    ) { shortcut in
+                        store.setRecordedShortcut(shortcut, for: input)
+                        recordingInput = nil
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 24)
+
+                    if configuration.shortcut != nil {
+                        clearButton(
+                            help: L10n.text("清除已录制的快捷键", "Clear recorded shortcut")
+                        ) {
+                            store.setRecordedShortcut(nil, for: input)
+                        }
+                    }
+                }
+            }
+
+            GridRow {
+                configurationLabel(L10n.text("备注", "Note"))
+
+                TextField(
+                    "",
+                    text: Binding(
+                        get: { store.recordedShortcutConfiguration(for: input).note },
+                        set: { store.setRecordedShortcutNote($0, for: input) }
+                    ),
+                    prompt: Text(L10n.text("例如：打开搜索", "For example: Open Search"))
+                )
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 180, maxWidth: .infinity)
+            }
+        }
+        .font(.caption)
+        .padding(.leading, 12)
+        .padding(.bottom, 2)
+    }
+
+    private var configurationDivider: some View {
+        Divider()
+            .padding(.leading, 12)
+    }
+
+    private func configurationLabel(_ title: String) -> some View {
+        Text(title)
+            .foregroundStyle(.secondary)
+            .frame(width: 52, alignment: .leading)
+    }
+
+    private func clearButton(help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark.circle.fill")
+                .symbolRenderingMode(.hierarchical)
+        }
+        .buttonStyle(.borderless)
+        .frame(width: 24, height: 24)
+        .foregroundStyle(.secondary)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func binding(for input: ControllerInput) -> Binding<ControllerMappedAction> {
@@ -117,6 +207,107 @@ struct ControllerMappingSettingsPane: View {
         store.setOpenApplicationTarget(bundleIdentifier, for: input)
         if store.action(for: input) != .openApplication {
             store.setAction(.openApplication, for: input)
+        }
+    }
+}
+
+private struct ShortcutRecorderButton: NSViewRepresentable {
+    let shortcut: RecordedKeyboardShortcut?
+    @Binding var isRecording: Bool
+    let onRecord: (RecordedKeyboardShortcut) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> RecorderButton {
+        let button = RecorderButton()
+        button.onActivate = { context.coordinator.setRecording(true) }
+        button.onRecord = { context.coordinator.record($0) }
+        return button
+    }
+
+    func updateNSView(_ button: RecorderButton, context: Context) {
+        context.coordinator.parent = self
+        button.isRecording = isRecording
+        button.title = if isRecording {
+            L10n.text("请按下按键…", "Press shortcut…")
+        } else {
+            shortcut?.recorderDisplayName ?? L10n.text("点击录制", "Click to Record")
+        }
+        button.bezelColor = isRecording ? .controlAccentColor : nil
+        button.contentTintColor = isRecording ? .white : .labelColor
+        button.font = shortcut == nil || isRecording
+            ? .systemFont(ofSize: 11, weight: .medium)
+            : .monospacedSystemFont(ofSize: 12, weight: .medium)
+        if isRecording, button.window?.firstResponder !== button {
+            DispatchQueue.main.async {
+                button.window?.makeFirstResponder(button)
+            }
+        }
+    }
+
+    final class Coordinator {
+        var parent: ShortcutRecorderButton
+
+        init(parent: ShortcutRecorderButton) {
+            self.parent = parent
+        }
+
+        func setRecording(_ recording: Bool) {
+            parent.isRecording = recording
+        }
+
+        func record(_ event: NSEvent) {
+            parent.onRecord(RecordedKeyboardShortcut(event: event))
+        }
+    }
+
+    final class RecorderButton: NSButton {
+        var isRecording = false
+        var onActivate: (() -> Void)?
+        var onRecord: ((NSEvent) -> Void)?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            bezelStyle = .rounded
+            controlSize = .small
+            setButtonType(.momentaryPushIn)
+            target = self
+            action = #selector(activateRecording)
+            focusRingType = .exterior
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override var acceptsFirstResponder: Bool { true }
+
+        @objc private func activateRecording() {
+            isRecording = true
+            window?.makeFirstResponder(self)
+            onActivate?()
+        }
+
+        override func keyDown(with event: NSEvent) {
+            guard isRecording else {
+                super.keyDown(with: event)
+                return
+            }
+            capture(event)
+        }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard isRecording else { return super.performKeyEquivalent(with: event) }
+            capture(event)
+            return true
+        }
+
+        private func capture(_ event: NSEvent) {
+            guard event.type == .keyDown, !event.isARepeat else { return }
+            isRecording = false
+            onRecord?(event)
         }
     }
 }

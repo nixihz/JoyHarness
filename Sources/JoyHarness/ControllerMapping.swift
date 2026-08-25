@@ -175,6 +175,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case browserBack
     case browserForward
     case openApplication
+    case recordedShortcut
 
     var id: Self { self }
 
@@ -214,12 +215,13 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .browserBack: L10n.text("网页上一页", "Browser Back")
         case .browserForward: L10n.text("网页下一页", "Browser Forward")
         case .openApplication: L10n.text("打开应用…", "Open Application…")
+        case .recordedShortcut: L10n.text("录制按键…", "Record Shortcut…")
         }
     }
 
     var controllerAction: ControllerAction? {
         switch self {
-        case .disabled, .radialInput, .functionModifier, .openApplication: nil
+        case .disabled, .radialInput, .functionModifier, .openApplication, .recordedShortcut: nil
         case .mouseLeft: .mouseButton(.left)
         case .mouseRight: .mouseButton(.right)
         case .mouseMiddle: .mouseButton(.middle)
@@ -254,6 +256,87 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum RecordedShortcutModifier: String, CaseIterable, Codable, Hashable {
+    case control
+    case option
+    case shift
+    case command
+    case function
+
+    var displayName: String {
+        switch self {
+        case .control: "⌃"
+        case .option: "⌥"
+        case .shift: "⇧"
+        case .command: "⌘"
+        case .function: "fn"
+        }
+    }
+
+    var eventFlag: NSEvent.ModifierFlags {
+        switch self {
+        case .control: .control
+        case .option: .option
+        case .shift: .shift
+        case .command: .command
+        case .function: .function
+        }
+    }
+}
+
+struct RecordedKeyboardShortcut: Codable, Hashable {
+    let keyCode: UInt16
+    let keyName: String
+    let modifiers: [RecordedShortcutModifier]
+
+    init(keyCode: UInt16, keyName: String, modifiers: [RecordedShortcutModifier]) {
+        self.keyCode = keyCode
+        self.keyName = keyName
+        self.modifiers = RecordedShortcutModifier.allCases.filter(modifiers.contains)
+    }
+
+    init(event: NSEvent) {
+        self.init(
+            keyCode: event.keyCode,
+            keyName: Self.keyName(for: event),
+            modifiers: RecordedShortcutModifier.allCases.filter {
+                event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains($0.eventFlag)
+            }
+        )
+    }
+
+    var displayName: String {
+        modifiers.map(\.displayName).joined() + keyName
+    }
+
+    var recorderDisplayName: String {
+        (modifiers.map(\.displayName) + [keyName]).joined(separator: " ")
+    }
+
+    private static func keyName(for event: NSEvent) -> String {
+        let specialKeys: [UInt16: String] = [
+            36: "↩", 48: "⇥", 49: "Space", 51: "⌫", 53: "Esc",
+            71: "Clear", 76: "⌅", 117: "⌦", 115: "↖", 119: "↘",
+            116: "⇞", 121: "⇟", 123: "←", 124: "→", 125: "↓", 126: "↑",
+            122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
+            98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+            105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17",
+            79: "F18", 80: "F19", 90: "F20",
+        ]
+        if let specialKey = specialKeys[event.keyCode] { return specialKey }
+        if let characters = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !characters.isEmpty {
+            return characters.uppercased()
+        }
+        return String(format: "Key 0x%02X", event.keyCode)
+    }
+}
+
+struct RecordedShortcutConfiguration: Codable, Hashable {
+    var shortcut: RecordedKeyboardShortcut?
+    var note: String
+}
+
 final class ControllerMappingStore: ObservableObject {
     private static let baseDefaultMappings: [ControllerInput: ControllerMappedAction] = [
         .buttonA: .mouseLeft,
@@ -269,7 +352,7 @@ final class ControllerMappingStore: ObservableObject {
         .rightTrigger: .focusCodex,
         .leftThumbstickButton: .mouseSpeedBoost,
         .rightThumbstickButton: .mouseMiddle,
-        .touchpadButton: .pushToTalk,
+        .touchpadButton: .mouseLeft,
         .dpadUp: .rightCommand,
         .dpadLeft: .radialInput,
         .dpadDown: .radialInput,
@@ -302,10 +385,12 @@ final class ControllerMappingStore: ObservableObject {
     @Published private(set) var mappings: [ControllerInput: ControllerMappedAction]
     @Published private(set) var controllerFamily: ControllerFamily
     @Published private(set) var openApplicationTargets: [ControllerInput: String]
+    @Published private(set) var recordedShortcutConfigurations: [ControllerInput: RecordedShortcutConfiguration]
 
     private let userDefaults: UserDefaults
     private let storageKey: String
     private var openApplicationStorageKey: String { "\(storageKey).openApplications" }
+    private var recordedShortcutsStorageKey: String { "\(storageKey).recordedShortcuts" }
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -325,6 +410,10 @@ final class ControllerMappingStore: ObservableObject {
             from: userDefaults,
             key: "\(storageKey).openApplications"
         )
+        self.recordedShortcutConfigurations = Self.loadRecordedShortcutConfigurations(
+            from: userDefaults,
+            key: "\(storageKey).recordedShortcuts"
+        )
         migrateYesNoFaceButtonsIfNeeded()
         migrateUnifiedFaceButtonLayoutIfNeeded()
         migrateDPadUpToRightCommandIfNeeded()
@@ -332,6 +421,7 @@ final class ControllerMappingStore: ObservableObject {
         migrateClipboardToThumbsticksIfNeeded()
         migrateFunctionRightStickBrowserDefaultsIfNeeded()
         migrateLeftThumbstickBoostRestoredIfNeeded()
+        migrateTouchpadMouseLeftDefaultIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
@@ -367,6 +457,31 @@ final class ControllerMappingStore: ObservableObject {
         persistOpenApplicationTargets()
     }
 
+    func recordedShortcutConfiguration(for input: ControllerInput) -> RecordedShortcutConfiguration {
+        recordedShortcutConfigurations[input] ?? RecordedShortcutConfiguration(shortcut: nil, note: "")
+    }
+
+    func mappedActionDisplayName(for input: ControllerInput) -> String {
+        let mappedAction = action(for: input)
+        guard mappedAction == .recordedShortcut else { return mappedAction.displayName }
+        let configuration = recordedShortcutConfiguration(for: input)
+        let note = configuration.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty { return note }
+        return configuration.shortcut?.displayName ?? mappedAction.displayName
+    }
+
+    func setRecordedShortcut(_ shortcut: RecordedKeyboardShortcut?, for input: ControllerInput) {
+        var configuration = recordedShortcutConfiguration(for: input)
+        configuration.shortcut = shortcut
+        setRecordedShortcutConfiguration(configuration, for: input)
+    }
+
+    func setRecordedShortcutNote(_ note: String, for input: ControllerInput) {
+        var configuration = recordedShortcutConfiguration(for: input)
+        configuration.note = note
+        setRecordedShortcutConfiguration(configuration, for: input)
+    }
+
     func setControllerFamily(_ family: ControllerFamily) {
         guard family != controllerFamily else { return }
         let previousDefaults = Self.defaultMappings(for: controllerFamily)
@@ -400,6 +515,23 @@ final class ControllerMappingStore: ObservableObject {
             uniqueKeysWithValues: openApplicationTargets.map { ($0.key.rawValue, $0.value) }
         )
         userDefaults.set(encoded, forKey: openApplicationStorageKey)
+    }
+
+    private func setRecordedShortcutConfiguration(
+        _ configuration: RecordedShortcutConfiguration,
+        for input: ControllerInput
+    ) {
+        if configuration.shortcut == nil && configuration.note.isEmpty {
+            recordedShortcutConfigurations.removeValue(forKey: input)
+        } else {
+            recordedShortcutConfigurations[input] = configuration
+        }
+        persistRecordedShortcutConfigurations()
+    }
+
+    private func persistRecordedShortcutConfigurations() {
+        guard let data = try? JSONEncoder().encode(recordedShortcutConfigurations) else { return }
+        userDefaults.set(data, forKey: recordedShortcutsStorageKey)
     }
 
     private func migrateYesNoFaceButtonsIfNeeded() {
@@ -516,6 +648,17 @@ final class ControllerMappingStore: ObservableObject {
         userDefaults.set(true, forKey: migrationKey)
     }
 
+    private func migrateTouchpadMouseLeftDefaultIfNeeded() {
+        let migrationKey = "\(storageKey).touchpadMouseLeftDefaultMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        if mappings[.touchpadButton] == .pushToTalk {
+            mappings[.touchpadButton] = .mouseLeft
+            persist()
+        }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
     private static func loadMappings(
         from userDefaults: UserDefaults,
         key: String,
@@ -549,5 +692,19 @@ final class ControllerMappingStore: ObservableObject {
             result[input] = trimmed
         }
         return result
+    }
+
+    private static func loadRecordedShortcutConfigurations(
+        from userDefaults: UserDefaults,
+        key: String
+    ) -> [ControllerInput: RecordedShortcutConfiguration] {
+        guard let data = userDefaults.data(forKey: key),
+              let stored = try? JSONDecoder().decode(
+                  [ControllerInput: RecordedShortcutConfiguration].self,
+                  from: data
+              ) else {
+            return [:]
+        }
+        return stored
     }
 }

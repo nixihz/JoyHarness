@@ -43,6 +43,7 @@ enum ControllerAction: Hashable {
     case mouseSpeedBoost
     case mousePrecision
     case openApplication(String)
+    case recordedShortcut(RecordedKeyboardShortcut)
 }
 
 enum StickDirection: Hashable {
@@ -135,6 +136,8 @@ final class ButtonBridge {
     var mousePrecisionHandler: ((Bool) -> Void)?
     var openApplicationHandler: ((String) -> Bool)?
     var openApplicationTargetProvider: ((ControllerInput) -> String?)?
+    var recordedShortcutProvider: ((ControllerInput) -> RecordedKeyboardShortcut?)?
+    var recordedShortcutHandler: ((RecordedKeyboardShortcut, Bool) -> Void)?
     var rightTriggerFeedbackHandler: ((Float) -> Void)?
     var onSlotSelected: ((Int) -> Void)?
     var onControllerChange: ((GCController?, ControllerFamily) -> Void)?
@@ -347,6 +350,10 @@ final class ButtonBridge {
             }
             return .openApplication(bundleIdentifier)
         }
+        if mapped == .recordedShortcut {
+            guard let shortcut = recordedShortcutProvider?(input) else { return nil }
+            return .recordedShortcut(shortcut)
+        }
         return mapped.controllerAction
     }
 
@@ -428,6 +435,9 @@ final class ButtonBridge {
             succeeded = true
         case .openApplication(let bundleIdentifier):
             succeeded = openApplicationHandler?(bundleIdentifier) == true
+        case .recordedShortcut(let shortcut):
+            recordedShortcutHandler?(shortcut, true)
+            succeeded = true
         }
         if succeeded { activeActionCounts[action] = 1 }
         return succeeded
@@ -454,6 +464,8 @@ final class ButtonBridge {
             systemKeyHandler?(key, false)
         case .textInput, .openApplication:
             break
+        case .recordedShortcut(let shortcut):
+            recordedShortcutHandler?(shortcut, false)
         case .microKey(let key):
             _ = keyHandler?(key, 0)
         case .slotOffset, .selectSlot:

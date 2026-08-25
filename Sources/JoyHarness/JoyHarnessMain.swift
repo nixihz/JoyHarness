@@ -210,6 +210,12 @@ final class JoyHarnessRuntime {
         buttons.openApplicationTargetProvider = { [weak self] input in
             self?.mappings.openApplicationTarget(for: input)
         }
+        buttons.recordedShortcutProvider = { [weak self] input in
+            self?.mappings.recordedShortcutConfiguration(for: input).shortcut
+        }
+        buttons.recordedShortcutHandler = { [weak self] shortcut, pressed in
+            self?.mouse.setRecordedShortcut(shortcut, pressed: pressed)
+        }
         buttons.openApplicationHandler = { [weak self] bundleIdentifier in
             self?.openApplication(bundleIdentifier: bundleIdentifier) ?? false
         }

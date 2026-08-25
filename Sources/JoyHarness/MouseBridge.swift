@@ -1,10 +1,26 @@
 import ApplicationServices
+import AppKit
 import CoreGraphics
 import Foundation
 
 struct SystemKeyEventDescriptor {
     let keyCode: CGKeyCode
     let flags: CGEventFlags
+}
+
+extension RecordedKeyboardShortcut {
+    var eventDescriptor: SystemKeyEventDescriptor {
+        let flags = modifiers.reduce(into: CGEventFlags()) { result, modifier in
+            switch modifier {
+            case .control: result.insert(.maskControl)
+            case .option: result.insert(.maskAlternate)
+            case .shift: result.insert(.maskShift)
+            case .command: result.insert(.maskCommand)
+            case .function: result.insert(.maskSecondaryFn)
+            }
+        }
+        return SystemKeyEventDescriptor(keyCode: CGKeyCode(keyCode), flags: flags)
+    }
 }
 
 extension SystemKey {
@@ -35,6 +51,49 @@ extension SystemKey {
     }
 }
 
+struct MouseClickSequenceTracker {
+    private struct ButtonState {
+        var activeClickCount: Int64 = 1
+        var lastClickLocation: CGPoint?
+        var lastReleaseTime: TimeInterval?
+    }
+
+    private var buttonStates: [MouseButton: ButtonState] = [:]
+
+    mutating func clickCount(
+        for button: MouseButton,
+        pressed: Bool,
+        at timestamp: TimeInterval,
+        location: CGPoint,
+        doubleClickInterval: TimeInterval,
+        movementTolerance: CGFloat = 4
+    ) -> Int64 {
+        var state = buttonStates[button] ?? ButtonState()
+
+        if pressed {
+            let elapsed = state.lastReleaseTime.map { timestamp - $0 }
+            let distanceSquared = state.lastClickLocation.map {
+                let deltaX = location.x - $0.x
+                let deltaY = location.y - $0.y
+                return deltaX * deltaX + deltaY * deltaY
+            }
+            let continuesSequence = elapsed.map {
+                $0 >= 0 && $0 <= doubleClickInterval
+            } == true && distanceSquared.map {
+                $0 <= movementTolerance * movementTolerance
+            } == true
+
+            state.activeClickCount = continuesSequence ? state.activeClickCount + 1 : 1
+            state.lastClickLocation = location
+        } else {
+            state.lastReleaseTime = timestamp
+        }
+
+        buttonStates[button] = state
+        return state.activeClickCount
+    }
+}
+
 @MainActor
 final class MouseBridge: NSObject {
     private var targetVelocity = CGPoint.zero
@@ -49,6 +108,7 @@ final class MouseBridge: NSObject {
     private var lastTickTime: TimeInterval?
     private var movementTimer: Timer?
     private var pressedMouseButtons: Set<MouseButton> = []
+    private var mouseClickSequence = MouseClickSequenceTracker()
     private var pressedSystemKeys: Set<SystemKey> = []
     private var keyRepeatDelayTimer: Timer?
     private var keyRepeatTimer: Timer?
@@ -145,6 +205,33 @@ final class MouseBridge: NSObject {
             return
         }
         guard let location = CGEvent(source: nil)?.location else { return }
+        let clickCount = mouseClickSequence.clickCount(
+            for: button,
+            pressed: pressed,
+            at: ProcessInfo.processInfo.systemUptime,
+            location: location,
+            doubleClickInterval: NSEvent.doubleClickInterval
+        )
+        guard let event = Self.mouseButtonEvent(
+            button: button,
+            pressed: pressed,
+            location: location,
+            clickCount: clickCount
+        ) else { return }
+        event.post(tap: .cghidEventTap)
+        if pressed {
+            pressedMouseButtons.insert(button)
+        } else {
+            pressedMouseButtons.remove(button)
+        }
+    }
+
+    nonisolated static func mouseButtonEvent(
+        button: MouseButton,
+        pressed: Bool,
+        location: CGPoint,
+        clickCount: Int64
+    ) -> CGEvent? {
         let eventType: CGEventType
         let cgButton: CGMouseButton
         switch (button, pressed) {
@@ -155,18 +242,14 @@ final class MouseBridge: NSObject {
         case (.middle, true): (eventType, cgButton) = (.otherMouseDown, .center)
         case (.middle, false): (eventType, cgButton) = (.otherMouseUp, .center)
         }
-        guard let event = CGEvent(
+        let event = CGEvent(
             mouseEventSource: nil,
             mouseType: eventType,
             mouseCursorPosition: location,
             mouseButton: cgButton
-        ) else { return }
-        event.post(tap: .cghidEventTap)
-        if pressed {
-            pressedMouseButtons.insert(button)
-        } else {
-            pressedMouseButtons.remove(button)
-        }
+        )
+        event?.setIntegerValueField(.mouseEventClickState, value: max(clickCount, 1))
+        return event
     }
 
     func setSystemKey(_ key: SystemKey, pressed: Bool) {
@@ -185,6 +268,22 @@ final class MouseBridge: NSObject {
             pressedSystemKeys.remove(key)
             stopKeyRepeat(for: key)
         }
+    }
+
+    func setRecordedShortcut(_ shortcut: RecordedKeyboardShortcut, pressed: Bool) {
+        guard isAccessibilityGranted else {
+            requestAccessibilityPermission()
+            return
+        }
+        let descriptor = shortcut.eventDescriptor
+        let eventSource = CGEventSource(stateID: .hidSystemState)
+        guard let event = CGEvent(
+            keyboardEventSource: eventSource,
+            virtualKey: descriptor.keyCode,
+            keyDown: pressed
+        ) else { return }
+        event.flags = descriptor.flags
+        event.post(tap: .cghidEventTap)
     }
 
     @discardableResult

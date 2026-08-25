@@ -483,7 +483,37 @@ struct JoyHarnessTests {
         #expect(ControllerInput.functionRightStickUp.displayName(for: .dualSense) == "L2 + 右摇杆 上")
         #expect(ControllerInput.functionRightStickLeft.displayName(for: .xbox) == "LT + 右摇杆 左")
         L10n.language = previousLanguage
-        #expect(ControllerMappingStore.defaultMappings[.touchpadButton] == .pushToTalk)
+        #expect(ControllerMappingStore.defaultMappings[.touchpadButton] == .mouseLeft)
+    }
+
+    @Test
+    func touchpadOldPushToTalkDefaultMigratesToMouseLeft() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [ControllerInput.touchpadButton.rawValue: ControllerMappedAction.pushToTalk.rawValue],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .touchpadButton) == .mouseLeft)
+    }
+
+    @Test
+    func touchpadDefaultMigrationPreservesCustomMapping() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            [ControllerInput.touchpadButton.rawValue: ControllerMappedAction.screenshotTool.rawValue],
+            forKey: "controllerMappings.v1"
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        #expect(store.action(for: .touchpadButton) == .screenshotTool)
     }
 
     @Test
@@ -548,6 +578,55 @@ struct JoyHarnessTests {
         #expect(reloaded.openApplicationTarget(for: .functionRightStickUp) == "com.apple.Safari")
         #expect(SystemKey.browserBack.eventDescriptor(pressed: true).keyCode == 0x21)
         #expect(SystemKey.browserForward.eventDescriptor(pressed: true).keyCode == 0x1E)
+    }
+
+    @Test
+    func recordedShortcutPersistsKeyCombinationAndNote() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let shortcut = RecordedKeyboardShortcut(
+            keyCode: 0x2D,
+            keyName: "N",
+            modifiers: [.shift, .command]
+        )
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setAction(.recordedShortcut, for: .functionRightStickUp)
+        store.setRecordedShortcut(shortcut, for: .functionRightStickUp)
+        store.setRecordedShortcutNote("新建窗口", for: .functionRightStickUp)
+
+        let reloaded = ControllerMappingStore(userDefaults: defaults)
+        let configuration = reloaded.recordedShortcutConfiguration(for: .functionRightStickUp)
+        #expect(reloaded.action(for: .functionRightStickUp) == .recordedShortcut)
+        #expect(configuration.shortcut == shortcut)
+        #expect(configuration.note == "新建窗口")
+        #expect(configuration.shortcut?.displayName == "⇧⌘N")
+        #expect(reloaded.mappedActionDisplayName(for: .functionRightStickUp) == "新建窗口")
+
+        reloaded.setRecordedShortcutNote("", for: .functionRightStickUp)
+        #expect(reloaded.mappedActionDisplayName(for: .functionRightStickUp) == "⇧⌘N")
+    }
+
+    @Test
+    func recordedShortcutDescriptorContainsEveryModifier() {
+        let shortcut = RecordedKeyboardShortcut(
+            keyCode: 0x31,
+            keyName: "Space",
+            modifiers: [.function, .command, .shift, .option, .control]
+        )
+
+        let descriptor = shortcut.eventDescriptor
+
+        #expect(descriptor.keyCode == 0x31)
+        #expect(descriptor.flags.contains(.maskControl))
+        #expect(descriptor.flags.contains(.maskAlternate))
+        #expect(descriptor.flags.contains(.maskShift))
+        #expect(descriptor.flags.contains(.maskCommand))
+        #expect(descriptor.flags.contains(.maskSecondaryFn))
+        #expect(shortcut.displayName == "⌃⌥⇧⌘fnSpace")
+        #expect(shortcut.recorderDisplayName == "⌃ ⌥ ⇧ ⌘ fn Space")
+        #expect(ControllerInput.buttonA.availableActions.contains(.recordedShortcut))
     }
 
     @Test
@@ -719,6 +798,87 @@ struct JoyHarnessTests {
         let velocity = MouseBridge.pointerVelocity(x: 0, y: 1)
         #expect(velocity.x == 0)
         #expect(velocity.y < 0)
+    }
+
+    @Test
+    func mouseClicksExposeDoubleAndTripleClickState() throws {
+        var tracker = MouseClickSequenceTracker()
+        let location = CGPoint(x: 320, y: 240)
+
+        for expectedCount in 1...3 {
+            let timestamp = TimeInterval(expectedCount - 1) * 0.1
+            let downCount = tracker.clickCount(
+                for: .left,
+                pressed: true,
+                at: timestamp,
+                location: location,
+                doubleClickInterval: 0.2
+            )
+            let upCount = tracker.clickCount(
+                for: .left,
+                pressed: false,
+                at: timestamp + 0.02,
+                location: location,
+                doubleClickInterval: 0.2
+            )
+            let down = try #require(MouseBridge.mouseButtonEvent(
+                button: .left,
+                pressed: true,
+                location: location,
+                clickCount: downCount
+            ))
+            let up = try #require(MouseBridge.mouseButtonEvent(
+                button: .left,
+                pressed: false,
+                location: location,
+                clickCount: upCount
+            ))
+
+            #expect(down.getIntegerValueField(.mouseEventClickState) == Int64(expectedCount))
+            #expect(up.getIntegerValueField(.mouseEventClickState) == Int64(expectedCount))
+        }
+    }
+
+    @Test
+    func mouseClickSequenceResetsAfterTimeoutOrPointerMovement() {
+        var tracker = MouseClickSequenceTracker()
+        let location = CGPoint(x: 100, y: 100)
+
+        #expect(tracker.clickCount(
+            for: .left,
+            pressed: true,
+            at: 0,
+            location: location,
+            doubleClickInterval: 0.2
+        ) == 1)
+        #expect(tracker.clickCount(
+            for: .left,
+            pressed: false,
+            at: 0.02,
+            location: location,
+            doubleClickInterval: 0.2
+        ) == 1)
+        #expect(tracker.clickCount(
+            for: .left,
+            pressed: true,
+            at: 0.3,
+            location: location,
+            doubleClickInterval: 0.2
+        ) == 1)
+        #expect(tracker.clickCount(
+            for: .left,
+            pressed: false,
+            at: 0.32,
+            location: location,
+            doubleClickInterval: 0.2
+        ) == 1)
+        #expect(tracker.clickCount(
+            for: .left,
+            pressed: true,
+            at: 0.4,
+            location: CGPoint(x: 110, y: 100),
+            doubleClickInterval: 0.2
+        ) == 1)
     }
 
     @Test

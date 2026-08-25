@@ -297,7 +297,7 @@ private struct ControllerMap: View {
     }
 
     private func title(for input: ControllerInput) -> String {
-        mappingStore.action(for: input).displayName
+        mappingStore.mappedActionDisplayName(for: input)
     }
 
     private func key(for input: ControllerInput) -> String {
