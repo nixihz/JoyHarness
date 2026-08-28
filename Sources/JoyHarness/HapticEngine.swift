@@ -3,7 +3,7 @@ import GameController
 import CoreHaptics
 
 final class HapticEngine {
-    private var engine: CHHapticEngine?
+    private var engines: [CHHapticEngine] = []
     private var rightTriggerEngine: CHHapticEngine?
     private var activePlayers: [UUID: CHHapticPatternPlayer] = [:]
     private var pulseTimer: Timer?
@@ -12,22 +12,38 @@ final class HapticEngine {
 
     var onConnectionChange: (() -> Void)?
 
-    var hasController: Bool { engine != nil }
+    private var engine: CHHapticEngine? { engines.first }
+
+    var hasController: Bool { !engines.isEmpty }
     var connectedName: String { controllerName }
 
     func attach(_ controller: GCController?) {
-        guard let controller else {
-            detach()
+        attach(controller.map { [$0] } ?? [])
+    }
+
+    func attach(_ controllers: [GCController]) {
+        detach()
+        guard !controllers.isEmpty else {
             print("[agent-deck] no game controller connected")
             return
         }
-        detach()
-        controllerName = controller.vendorName ?? "Game Controller"
-        guard let haptics = controller.haptics else {
+        controllerName = controllers.map { $0.vendorName ?? $0.productCategory }.joined(separator: " + ")
+        for controller in controllers {
+            attachHaptics(for: controller)
+        }
+        if engines.isEmpty {
             print("[agent-deck] connected \(controllerName) (no haptics)")
             onConnectionChange?()
             return
         }
+        if controllers.count == 1, let controller = controllers.first, let haptics = controller.haptics {
+            attachXboxRightTriggerEngine(haptics, controller: controller)
+        }
+        onConnectionChange?()
+    }
+
+    private func attachHaptics(for controller: GCController) {
+        guard let haptics = controller.haptics else { return }
         let localities = haptics.supportedLocalities
             .map { String(describing: $0) }
             .sorted()
@@ -35,7 +51,6 @@ final class HapticEngine {
         print("[agent-deck] controller category=\(controller.productCategory) haptic-localities=\(localities)")
         guard let created = haptics.createEngine(withLocality: .all) else {
             print("[agent-deck] connected \(controllerName) (haptic engine unavailable)")
-            onConnectionChange?()
             return
         }
         do {
@@ -44,18 +59,14 @@ final class HapticEngine {
             created.stoppedHandler = { reason in
                 print("[agent-deck] haptic engine stopped: \(reason.rawValue)")
             }
-            created.resetHandler = { [weak self] in
-                try? self?.engine?.start()
+            created.resetHandler = { [weak created] in
+                try? created?.start()
             }
             try created.start()
-            engine = created
-            print("[agent-deck] haptics ready on \(controllerName)")
-            attachXboxRightTriggerEngine(haptics, controller: controller)
-            onConnectionChange?()
+            engines.append(created)
+            print("[agent-deck] haptics ready on \(controller.vendorName ?? controller.productCategory)")
         } catch {
             print("[agent-deck] failed to start haptics: \(error)")
-            engine = nil
-            onConnectionChange?()
         }
     }
 
@@ -64,8 +75,8 @@ final class HapticEngine {
         stopAll()
         rightTriggerEngine?.stop(completionHandler: nil)
         rightTriggerEngine = nil
-        engine?.stop(completionHandler: nil)
-        engine = nil
+        for engine in engines { engine.stop(completionHandler: nil) }
+        engines.removeAll()
         controllerName = "none"
         if wasConnected {
             onConnectionChange?()
@@ -142,6 +153,21 @@ final class HapticEngine {
         }
     }
 
+    func playOperationModeFeedback(_ mode: ControllerOperationMode) {
+        stopAll()
+        switch mode {
+        case .native:
+            playBurst(events: [
+                (0.0, 0.65, 0.75, 0.05),
+                (0.12, 0.65, 0.75, 0.05),
+            ])
+        case .mapping:
+            playBurst(events: [
+                (0.0, 0.75, 0.85, 0.08),
+            ])
+        }
+    }
+
     private func startPulse(interval: TimeInterval, intensity: Float, sharpness: Float, duration: TimeInterval) {
         playOneShot(intensity: intensity, sharpness: sharpness, duration: duration)
         pulseTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -150,7 +176,13 @@ final class HapticEngine {
     }
 
     private func playOneShot(intensity: Float, sharpness: Float, duration: TimeInterval) {
-        playOneShot(on: engine, intensity: intensity, sharpness: sharpness, duration: duration)
+        guard !engines.isEmpty else {
+            print("[agent-deck] rumble skipped (no haptic engine) intensity=\(intensity)")
+            return
+        }
+        for engine in engines {
+            playOneShot(on: engine, intensity: intensity, sharpness: sharpness, duration: duration)
+        }
     }
 
     private func playOneShot(
@@ -182,10 +214,17 @@ final class HapticEngine {
     }
 
     private func playBurst(events: [(TimeInterval, Float, Float, TimeInterval)]) {
-        guard let engine else {
+        guard !engines.isEmpty else {
             print("[agent-deck] burst skipped (no haptic engine)")
             return
         }
+        for engine in engines { playBurst(events: events, on: engine) }
+    }
+
+    private func playBurst(
+        events: [(TimeInterval, Float, Float, TimeInterval)],
+        on engine: CHHapticEngine
+    ) {
         do {
             let hapticEvents: [CHHapticEvent] = events.map { start, intensity, sharpness, duration in
                 CHHapticEvent(

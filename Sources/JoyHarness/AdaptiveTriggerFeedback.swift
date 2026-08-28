@@ -43,6 +43,10 @@ final class AdaptiveTriggerFeedback {
     private var observers: [NSObjectProtocol] = []
 
     var onFeedback: ((RightTriggerFeedbackEvent) -> Void)?
+    var onHomeButtonChange: ((Bool) -> Void)? {
+        get { hidOutput.onHomeButtonChange }
+        set { hidOutput.onHomeButtonChange = newValue }
+    }
 
     var isAvailable: Bool { trigger != nil }
 

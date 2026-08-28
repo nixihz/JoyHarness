@@ -39,6 +39,10 @@ final class DualSenseHIDOutput {
 
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
+    private var inputBuffer = [UInt8](repeating: 0, count: 64)
+    private var lastPSPressed = false
+
+    var onHomeButtonChange: ((Bool) -> Void)?
 
     func connectUSB() -> Bool {
         disconnect()
@@ -57,19 +61,55 @@ final class DualSenseHIDOutput {
         }
         self.manager = manager
         self.device = device
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        inputBuffer.withUnsafeMutableBufferPointer { ptr in
+            if let base = ptr.baseAddress {
+                IOHIDDeviceRegisterInputReportCallback(
+                    device,
+                    base,
+                    ptr.count,
+                    Self.inputReportCallback,
+                    context
+                )
+            }
+        }
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         print("[agent-deck] DualSense USB HID background trigger ready")
         return true
     }
 
+    private static let inputReportCallback: IOHIDReportCallback = { context, result, sender, type, reportID, report, reportLength in
+        guard let context else { return }
+        let instance = Unmanaged<DualSenseHIDOutput>.fromOpaque(context).takeUnretainedValue()
+        instance.handleInputReport(report: report, length: reportLength)
+    }
+
+    private func handleInputReport(report: UnsafeMutablePointer<UInt8>, length: CFIndex) {
+        guard length > 10 else { return }
+        let bytes = UnsafeBufferPointer(start: report, count: length)
+        let ps = (bytes[10] & 0x01) != 0
+        if ps != lastPSPressed {
+            lastPSPressed = ps
+            DispatchQueue.main.async { [weak self] in
+                self?.onHomeButtonChange?(ps)
+            }
+        }
+    }
+
     func disconnect() {
-        if device != nil {
+        if let device {
             _ = send(DualSenseUSBOutputReport.off())
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 0)
+            IOHIDDeviceRegisterInputReportCallback(device, buffer, 0, nil, nil)
+            buffer.deallocate()
         }
         device = nil
         if let manager {
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         }
         manager = nil
+        lastPSPressed = false
     }
 
     func applyWeaponEffect() -> Bool {
