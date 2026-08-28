@@ -41,6 +41,16 @@ class InstallationTests(unittest.TestCase):
         self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
         self.assertIn('pgrep -f -x "${APP_BINARY}"', script)
 
+    def test_joycon_pointer_verifier_has_passing_self_test(self) -> None:
+        result = subprocess.run(
+            [str(ROOT / "scripts" / "verify_joycon_pointer.sh"), "--self-test"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("verifier self-test passed", result.stdout)
+
     def test_shared_stop_step_terminates_bundle_process_by_full_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             executable = (
