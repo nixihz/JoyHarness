@@ -44,6 +44,8 @@ shasum -a 256 -c Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256
 - Added independent Normal, Fast, and Slow pointer sensitivity adjustments in Settings.
 - Added multi-controller concurrent haptics and real-time controller button press feedback on the dashboard.
 
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
+
 ## What's New in v0.3.0
 
 - Added recordable keyboard shortcuts, including modifier combinations and optional mapping notes.
