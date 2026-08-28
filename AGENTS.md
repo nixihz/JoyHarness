@@ -11,3 +11,7 @@ Use the five default canonical triage labels. See `docs/agents/triage-labels.md`
 ### Domain docs
 
 Use the single-context domain documentation layout. See `docs/agents/domain.md`.
+
+### Release automation
+
+Release lifecycle automation using Conventional Commits and GitHub Actions. See `.agents/skills/release/SKILL.md` and `docs/agents/release-automation.md`.

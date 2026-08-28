@@ -7,13 +7,22 @@ publishes the release only after every previous step succeeds.
 
 ## Run a release
 
-Use **Actions > Release DMG > Run workflow** on GitHub, select `main`, and enter
-the next semantic version without or with a leading `v`, for example `0.2.0`.
-The same workflow can be dispatched with GitHub CLI:
+1. Prepare release files and changelog automatically from Conventional Commits:
+   ```bash
+   python3 scripts/prepare_release.py <version>
+   ```
+   Or invoke the `.agents/skills/release/SKILL.md` skill with prompt: `帮我发版 vX.Y.Z`.
 
-```bash
-gh workflow run release.yml --ref main -f version=0.2.0 -f prerelease=false
-```
+2. Commit and push the release preparation:
+   ```bash
+   git commit -am "chore: prepare v<version> release"
+   git push origin main
+   ```
+
+3. Dispatch the GitHub Actions release workflow:
+   ```bash
+   gh workflow run release.yml --ref main -f version=<version> -f prerelease=false
+   ```
 
 The workflow rejects invalid versions and versions whose tag or Release already
 exists. It does not modify an existing release.
