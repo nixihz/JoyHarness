@@ -42,6 +42,7 @@ shasum -a 256 -c Joy-Harness-v0.3.0-macOS-arm64.dmg.sha256
 - Added recordable keyboard shortcuts, including modifier combinations and optional mapping notes.
 - Added native double-click and triple-click behavior for controller mouse buttons.
 - Changed the DualSense / DualShock touchpad button default to left click while keeping push-to-talk available as a custom mapping.
+- Normal, Fast, and Slow pointer sensitivity can now be adjusted independently in Settings.
 
 ## What's New in v0.2.5
 
@@ -91,6 +92,7 @@ shasum -a 256 -c Joy-Harness-v0.3.0-macOS-arm64.dmg.sha256
 - **Control macOS:** move and scroll with the left stick; hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
 - **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
+- **Native Gamepad Mode (Passthrough):** automatically disable simulated mouse and key mappings when switching into specific applications (such as JoyDSH, Steam, or games) so they can directly receive raw controller events. Press the **PS / Home** button anytime to manually toggle between Native Mode and Mapping Mode with haptic feedback.
 - **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
 - **Run in the background:** launch at login can be enabled in Settings, and disconnected controllers or RP2040 boards are detected again while the app is running.
 
@@ -161,11 +163,25 @@ xcode-select --install
 The RP2040 is optional for mouse control, system shortcuts, the dashboard, and manual haptic tests. Codex Micro task slots, approvals, and push-to-talk require the complete hardware path:
 
 - A Mac running macOS.
-- An extended gamepad recognized by macOS `GameController`. Joy Harness directly supports PS5 DualSense, PS4 DualShock 4, and Xbox Series controllers. Other controllers depend on the inputs and haptics exposed by macOS.
+- A gamepad recognized by macOS `GameController`. Joy Harness directly supports PS5 DualSense, PS4 DualShock 4, Xbox Series controllers, and experimental first-generation Joy-Con L/R input. Other controllers depend on the inputs and haptics exposed by macOS.
 - A Raspberry Pi Pico or compatible RP2040 development board.
 - A data-capable USB cable. Charge-only cables cannot flash firmware or expose serial/HID devices.
 
 Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
+
+First-generation Joy-Con connect individually over Bluetooth. Joy Harness supports an L/R pair as one logical controller and either side alone. For a single Joy-Con, choose **Horizontal** or **Vertical** in the main controller-mapping panel; left and right preferences persist independently, while paired mode ignores them. A Joy-Con (L) vertical trace established the Apple axis basis used by the current transform. The corrected pointer output, right-only, horizontal, and paired modes still require final hardware validation before removing the experimental label; haptics and motion remain conditional on what macOS exposes.
+
+With the freshly built app running, verify the physical stick-to-pointer directions using the matching hardware scenario:
+
+```bash
+./scripts/verify_joycon_pointer.sh left-horizontal
+./scripts/verify_joycon_pointer.sh left-vertical
+./scripts/verify_joycon_pointer.sh right-horizontal
+./scripts/verify_joycon_pointer.sh right-vertical
+./scripts/verify_joycon_pointer.sh pair
+```
+
+The verifier checks the active Joy-Con mode first, then measures the pointer displacement for physical up, right, down, and left. Paired verification uses the left Joy-Con stick because the right stick belongs to the secondary/radial input path.
 
 The DualSense microphone appears as `DualSense Wireless Controller` or `Wireless Controller` even when connected over USB. Select it under **System Settings > Sound > Input**. Joy Harness reports the actual USB transport and whether the device is the default input. The controller's physical mute button is not exposed through the public GameController API.
 
@@ -298,7 +314,7 @@ Any mappable input can use **Record Shortcut...**. Select **Click to Record**, t
 | Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
 | DualSense / DualShock touchpad slide | Slow relative pointer movement for fine aiming; no modifier required. Touchpad click remains the mapped touchpad button action (default left mouse button) | Yes |
 | LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings | Yes |
-| Hold L3 | Temporarily increase pointer speed to `1.8x` | Yes |
+| Hold L3 | Temporarily use the configurable Fast pointer sensitivity (default `1.8x`) | Yes |
 | A press/release | Left mouse button, including hold and drag | Yes |
 | B press/release | Right mouse button, including hold and drag | Yes |
 | R3 press/release | Middle mouse button | Yes |
@@ -479,6 +495,8 @@ scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
 scripts/package_dmg.sh          versioned macOS DMG and SHA-256 checksum
 scripts/build_and_run.sh        foreground `.app` build and debugging entry point
+scripts/verify_joycon_pointer.sh
+                                hardware stick-to-pointer direction verifier
 tests/                          Swift and Python tests
 docs/research/                  controller audio, wireless, and agent integration research
 Taskfile.yml                    common task entry points
@@ -490,6 +508,7 @@ Research notes:
 - [DualSense wireless USB and USB-over-IP options](docs/research/dualsense-wireless-usb-options.md)
 - [Xbox controller 3.5 mm headset support on macOS](docs/research/xbox-controller-headset-macos.md)
 - [Cursor Agent and Pi Agent integration feasibility](docs/research/cursor-pi-agent-integration.md)
+- [First-generation Nintendo Joy-Con support](docs/research/nintendo-switch-generation-1-controller-support.md)
 
 ## Current Limitations
 

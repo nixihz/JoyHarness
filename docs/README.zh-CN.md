@@ -44,6 +44,7 @@ shasum -a 256 -c Joy-Harness-v0.3.0-macOS-arm64.dmg.sha256
 - 新增可录制键盘快捷键，支持组合修饰键和可选映射备注。
 - 手柄鼠标按键现在支持系统原生双击和三击行为。
 - DualSense / DualShock 触控板按键默认改为鼠标左键，按住说话仍可作为自定义映射使用。
+- 设置中可分别调整普通、快速和慢速鼠标灵敏度。
 
 ## v0.2.5 更新
 
@@ -103,6 +104,7 @@ shasum -a 256 -c Joy-Harness-v0.3.0-macOS-arm64.dmg.sha256
   对应次数的短震确认当前槽号。
 - **可视化诊断**：macOS 控制台展示当前槽位、手柄电量与震动能力、
   RP2040 连接状态以及辅助功能授权状态，并可打开当前任务。
+- **原生手柄模式（直通模式）**：切换到指定应用（如 JoyDSH、Steam 或独立游戏）时自动暂停 Joy Harness 模拟鼠标与按键映射，让目标应用直接接收原生手柄事件，离开时自动恢复；也可随时按手柄上的 **PS / Home** 键手动进出原生/映射模式，并伴有触觉反馈。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
 - **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
@@ -180,8 +182,8 @@ xcode-select --install
 任务槽、审批和按住说话，则需要完整硬件链路。
 
 - 一台运行 macOS 的 Mac。
-- 一只可被 macOS `GameController` 框架识别、具有 Extended Gamepad 布局的手柄。项目原生
-  适配 PS5 DualSense、PS4 DualShock 4 和 Xbox Series 手柄；其他手柄可使用标准按键、
+- 一只可被 macOS `GameController` 框架识别的手柄。项目原生适配 PS5 DualSense、
+  PS4 DualShock 4、Xbox Series，并实验性支持初代 Joy-Con L/R；其他手柄可使用标准按键、
   摇杆与十字键，具体能力取决于 macOS 暴露的输入与震动接口。
 - 一块 RP2040 开发板，例如 Raspberry Pi Pico 或兼容板。
 - 一根**支持数据传输**的 USB 线。只能充电的线无法刷写固件或创建串口/HID 设备。
@@ -189,6 +191,25 @@ xcode-select --install
 手柄可以通过蓝牙或 USB 连接，但当前测试的 Xbox Series 手柄在 macOS 26.5.2 下只有
 **蓝牙模式可以正常震动**；USB 模式虽可被系统识别，系统原生 Identify 也不会触发震动。
 需要状态反馈时优先使用蓝牙。
+
+初代 Joy-Con 需要分别通过蓝牙连接。Joy Harness 可将 L/R 组合为一只逻辑手柄，也支持左单支
+或右单支。在主界面的“控制映射”区域可选择横握或竖握，左右单支分别保存方向与映射，双支模式
+不受该方向设置影响。左 Joy-Con 竖握的实机轨迹已经确定当前变换使用的 Apple 轴基准；修正后的
+鼠标输出、右单支、横握和双支仍待最终真机验收，因此暂时保留实验性标记。震动和 motion 仅在
+macOS 实际暴露时可用。
+
+保持刚构建的 App 正在运行，然后按实际硬件场景执行对应的摇杆到鼠标方向验证：
+
+```bash
+./scripts/verify_joycon_pointer.sh left-horizontal
+./scripts/verify_joycon_pointer.sh left-vertical
+./scripts/verify_joycon_pointer.sh right-horizontal
+./scripts/verify_joycon_pointer.sh right-vertical
+./scripts/verify_joycon_pointer.sh pair
+```
+
+验证器会先检查当前 Joy-Con 模式，再依次测量实体上、右、下、左造成的鼠标位移。双支模式只验证
+左 Joy-Con 摇杆，因为右摇杆属于 secondary/radial 输入路径，不控制鼠标。
 
 DualSense 的标准按键、触控板按键和震动由 Apple 的 `GCDualSenseGamepad` / Core Haptics
 接口支持。若要使用手柄内置麦克风，应通过支持数据传输的 USB 线连接，并在“系统设置 →
@@ -369,7 +390,7 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | 左摇杆 | 以 120Hz 平滑移动 macOS 鼠标，带死区和渐进加速 | 是 |
 | DualSense / DualShock 触控板滑动 | 慢速相对移动指针，适合精细瞄准；无需按住任何修饰键。触控板按下仍走映射（默认鼠标左键） | 是 |
 | LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度；可在设置中选择自然滚动或传统滚动 | 是 |
-| L3 按住 | 鼠标速度临时提升到 `1.8x`，松开恢复正常速度 | 是 |
+| L3 按住 | 临时使用可配置的快速灵敏度（默认 `1.8x`），松开恢复普通灵敏度 | 是 |
 | A 按下 / 松开 | 鼠标左键按下 / 松开，可单击、长按或拖动 | 是 |
 | B 按下 / 松开 | 鼠标右键按下 / 松开，可右击或拖动 | 是 |
 | R3 按下 / 松开 | 鼠标中键按下 / 松开 | 是 |
@@ -594,6 +615,8 @@ scripts/build_rp2040_firmware.sh
 scripts/flash_rp2040_firmware.sh
 scripts/package_dmg.sh           构建版本化 macOS DMG 与 SHA-256 校验文件
 scripts/build_and_run.sh        前台 `.app` 构建与调试入口
+scripts/verify_joycon_pointer.sh
+                                实机摇杆到鼠标四向验证器
 tests/                          Swift 和 Python 测试
 docs/research/                  手柄音频、无线方案与 agent 接入可行性研究
 Taskfile.yml                    常用任务入口
@@ -605,6 +628,7 @@ Taskfile.yml                    常用任务入口
 - [DualSense 无线 USB / USB-over-IP 方案](research/dualsense-wireless-usb-options.md)
 - [Xbox 手柄 3.5 mm 耳麦在 macOS 上的可用性](research/xbox-controller-headset-macos.md)
 - [Cursor Agent 与 Pi Agent 接入可行性](research/cursor-pi-agent-integration.md)
+- [初代 Nintendo Joy-Con 支持调研](research/nintendo-switch-generation-1-controller-support.md)
 
 ## 当前边界
 
