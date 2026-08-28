@@ -57,8 +57,14 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
 
     var id: Self { self }
 
-    func displayName(for family: ControllerFamily = .xbox) -> String {
+    func displayName(
+        for family: ControllerFamily = .xbox,
+        joyConOrientation: JoyConOrientation = .horizontal
+    ) -> String {
         let playStation = family == .dualSense || family == .dualShock
+        if family.isJoyCon {
+            return joyConDisplayName(for: family, orientation: joyConOrientation)
+        }
         return switch self {
         case .buttonA: playStation ? "×" : "A"
         case .buttonB: playStation ? "○" : "B"
@@ -114,6 +120,88 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    private func joyConDisplayName(
+        for family: ControllerFamily,
+        orientation: JoyConOrientation
+    ) -> String {
+        let modifier = switch family {
+        case .joyConPair, .joyConLeft: "ZL"
+        case .joyConRight: "ZR"
+        default: "ZL"
+        }
+        let shoulderNames: (left: String, right: String) = switch (family, orientation) {
+        case (.joyConPair, _): ("L", "R")
+        case (.joyConLeft, .vertical): ("L", "ZL")
+        case (.joyConRight, .vertical): ("ZR", "R")
+        case (.joyConLeft, .horizontal), (.joyConRight, .horizontal): ("SL", "SR")
+        default: ("L", "R")
+        }
+        let faceNames: (String, String, String, String) = switch family {
+        case .joyConPair: ("B", "A", "Y", "X")
+        case .joyConLeft: ("←", "↓", "↑", "→")
+        case .joyConRight: ("A", "X", "B", "Y")
+        default: ("A", "B", "X", "Y")
+        }
+        return switch self {
+        case .buttonA: faceNames.0
+        case .buttonB: faceNames.1
+        case .buttonX: faceNames.2
+        case .buttonY: faceNames.3
+        case .leftShoulder: shoulderNames.left
+        case .rightShoulder: shoulderNames.right
+        case .leftTrigger: modifier
+        case .rightTrigger: family == .joyConPair ? "ZR" : (family == .joyConLeft ? "L" : "R")
+        case .menu: family == .joyConLeft ? "−" : "+"
+        case .options: family == .joyConPair ? "−" : (family == .joyConLeft ? "Capture" : "Home")
+        case .home: "Home"
+        case .leftThumbstickButton: family == .joyConPair ? "L3" : L10n.text("摇杆按下", "Stick Click")
+        case .rightThumbstickButton: "R3"
+        case .touchpadButton: L10n.text("触控板按键", "Touchpad Button")
+        case .dpadUp: L10n.text("方向键 上", "D-Pad Up")
+        case .dpadLeft: L10n.text("方向键 左", "D-Pad Left")
+        case .dpadDown: L10n.text("方向键 下", "D-Pad Down")
+        case .dpadRight: L10n.text("方向键 右", "D-Pad Right")
+        case .functionButtonA: "\(modifier) + \(faceNames.0)"
+        case .functionButtonB: "\(modifier) + \(faceNames.1)"
+        case .functionButtonX: "\(modifier) + \(faceNames.2)"
+        case .functionButtonY: "\(modifier) + \(faceNames.3)"
+        case .functionLeftShoulder: "\(modifier) + \(shoulderNames.left)"
+        case .functionRightShoulder: "\(modifier) + \(shoulderNames.right)"
+        case .functionRightTrigger:
+            "\(modifier) + \(family == .joyConPair ? "ZR" : (family == .joyConLeft ? "L" : "R"))"
+        case .functionLeftThumbstickButton: "\(modifier) + \(family == .joyConPair ? "L3" : L10n.text("摇杆按下", "Stick Click"))"
+        case .functionRightThumbstickButton: "\(modifier) + R3"
+        case .functionDpadUp: "\(modifier) + \(L10n.text("方向键 上", "D-Pad Up"))"
+        case .functionDpadLeft: "\(modifier) + \(L10n.text("方向键 左", "D-Pad Left"))"
+        case .functionDpadDown: "\(modifier) + \(L10n.text("方向键 下", "D-Pad Down"))"
+        case .functionDpadRight: "\(modifier) + \(L10n.text("方向键 右", "D-Pad Right"))"
+        case .functionRightStickUp: "\(modifier) + \(L10n.text("右摇杆 上", "Right Stick Up"))"
+        case .functionRightStickLeft: "\(modifier) + \(L10n.text("右摇杆 左", "Right Stick Left"))"
+        case .functionRightStickDown: "\(modifier) + \(L10n.text("右摇杆 下", "Right Stick Down"))"
+        case .functionRightStickRight: "\(modifier) + \(L10n.text("右摇杆 右", "Right Stick Right"))"
+        }
+    }
+
+    static func availableInputs(for family: ControllerFamily) -> Set<ControllerInput> {
+        switch family {
+        case .joyConLeft, .joyConRight:
+            return [
+                .buttonA, .buttonB, .buttonX, .buttonY,
+                .leftShoulder, .rightShoulder,
+                .menu, .options, .leftThumbstickButton,
+                .functionButtonA, .functionButtonB, .functionButtonX, .functionButtonY,
+                .functionLeftShoulder, .functionRightShoulder,
+                .functionLeftThumbstickButton,
+            ]
+        case .joyConPair:
+            return Set(allCases).subtracting([.touchpadButton])
+        case .dualSense, .dualShock:
+            return Set(allCases)
+        case .xbox, .generic:
+            return Set(allCases).subtracting([.touchpadButton])
+        }
+    }
+
     var group: ControllerInputGroup {
         switch self {
         case .dpadUp, .dpadLeft, .dpadDown, .dpadRight:
@@ -134,7 +222,14 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
     var availableActions: [ControllerMappedAction] {
         ControllerMappedAction.allCases.filter { action in
             if action == .radialInput { return group == .dpad }
-            if action == .functionModifier { return self == .leftTrigger }
+            if action == .functionModifier {
+                return self == .leftTrigger ||
+                    self == .leftShoulder ||
+                    self == .rightShoulder ||
+                    self == .leftThumbstickButton ||
+                    self == .menu ||
+                    self == .options
+            }
             return true
         }
     }
@@ -176,6 +271,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case browserForward
     case openApplication
     case recordedShortcut
+    case toggleOperationMode
 
     var id: Self { self }
 
@@ -216,6 +312,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .browserForward: L10n.text("网页下一页", "Browser Forward")
         case .openApplication: L10n.text("打开应用…", "Open Application…")
         case .recordedShortcut: L10n.text("录制按键…", "Record Shortcut…")
+        case .toggleOperationMode: L10n.text("切换原生/映射模式", "Toggle Native/Mapping Mode")
         }
     }
 
@@ -252,6 +349,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .slot6: .selectSlot(5)
         case .mouseSpeedBoost: .mouseSpeedBoost
         case .mousePrecision: .mousePrecision
+        case .toggleOperationMode: .toggleOperationMode
         }
     }
 }
@@ -348,7 +446,7 @@ final class ControllerMappingStore: ObservableObject {
         .leftTrigger: .functionModifier,
         .menu: .pushToTalk,
         .options: .screenshotTool,
-        .home: .disabled,
+        .home: .toggleOperationMode,
         .rightTrigger: .focusCodex,
         .leftThumbstickButton: .mouseSpeedBoost,
         .rightThumbstickButton: .mouseMiddle,
@@ -378,19 +476,33 @@ final class ControllerMappingStore: ObservableObject {
 
     static let defaultMappings = defaultMappings(for: .xbox)
 
-    static func defaultMappings(for _: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
-        baseDefaultMappings
+    static func defaultMappings(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        guard family == .joyConLeft || family == .joyConRight else { return baseDefaultMappings }
+        var defaults = baseDefaultMappings
+        let available = ControllerInput.availableInputs(for: family)
+        for input in ControllerInput.allCases where !available.contains(input) {
+            defaults[input] = .disabled
+        }
+        return defaults
     }
 
     @Published private(set) var mappings: [ControllerInput: ControllerMappedAction]
     @Published private(set) var controllerFamily: ControllerFamily
+    @Published private(set) var availableInputs: Set<ControllerInput>
+    @Published private(set) var joyConOrientation: JoyConOrientation
     @Published private(set) var openApplicationTargets: [ControllerInput: String]
     @Published private(set) var recordedShortcutConfigurations: [ControllerInput: RecordedShortcutConfiguration]
 
+    var onJoyConOrientationChange: ((JoyConOrientation) -> Void)?
+
     private let userDefaults: UserDefaults
     private let storageKey: String
-    private var openApplicationStorageKey: String { "\(storageKey).openApplications" }
-    private var recordedShortcutsStorageKey: String { "\(storageKey).recordedShortcuts" }
+    private var activeStorageKey: String {
+        Self.storageKey(base: storageKey, family: controllerFamily)
+    }
+    private var openApplicationStorageKey: String { "\(activeStorageKey).openApplications" }
+    private var recordedShortcutsStorageKey: String { "\(activeStorageKey).recordedShortcuts" }
+    private var joyConOrientationStorageKey: String { "\(activeStorageKey).orientation" }
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -400,36 +512,48 @@ final class ControllerMappingStore: ObservableObject {
         self.storageKey = storageKey
         let storedFamily = userDefaults.string(forKey: "\(storageKey).controllerFamily")
             .flatMap(ControllerFamily.init(rawValue:)) ?? .xbox
+        let activeStorageKey = Self.storageKey(base: storageKey, family: storedFamily)
         self.controllerFamily = storedFamily
+        self.availableInputs = ControllerInput.availableInputs(for: storedFamily)
+        self.joyConOrientation = Self.loadJoyConOrientation(
+            from: userDefaults,
+            key: "\(activeStorageKey).orientation"
+        )
         self.mappings = Self.loadMappings(
             from: userDefaults,
-            key: storageKey,
+            key: activeStorageKey,
             defaults: Self.defaultMappings(for: storedFamily)
         )
         self.openApplicationTargets = Self.loadOpenApplicationTargets(
             from: userDefaults,
-            key: "\(storageKey).openApplications"
+            key: "\(activeStorageKey).openApplications"
         )
         self.recordedShortcutConfigurations = Self.loadRecordedShortcutConfigurations(
             from: userDefaults,
-            key: "\(storageKey).recordedShortcuts"
+            key: "\(activeStorageKey).recordedShortcuts"
         )
-        migrateYesNoFaceButtonsIfNeeded()
-        migrateUnifiedFaceButtonLayoutIfNeeded()
-        migrateDPadUpToRightCommandIfNeeded()
-        migrateClipboardAndScreenshotDefaultsIfNeeded()
-        migrateClipboardToThumbsticksIfNeeded()
-        migrateFunctionRightStickBrowserDefaultsIfNeeded()
-        migrateLeftThumbstickBoostRestoredIfNeeded()
-        migrateTouchpadMouseLeftDefaultIfNeeded()
+        if !storedFamily.isJoyCon {
+            migrateYesNoFaceButtonsIfNeeded()
+            migrateUnifiedFaceButtonLayoutIfNeeded()
+            migrateDPadUpToRightCommandIfNeeded()
+            migrateClipboardAndScreenshotDefaultsIfNeeded()
+            migrateClipboardToThumbsticksIfNeeded()
+            migrateFunctionRightStickBrowserDefaultsIfNeeded()
+            migrateLeftThumbstickBoostRestoredIfNeeded()
+            migrateTouchpadMouseLeftDefaultIfNeeded()
+            migrateHomeButtonToToggleOperationModeIfNeeded()
+        }
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
-        mappings[input] ?? Self.defaultMappings[input] ?? .disabled
+        mappings[input] ?? Self.defaultMappings(for: controllerFamily)[input] ?? .disabled
     }
 
     func displayName(for input: ControllerInput) -> String {
-        input.displayName(for: controllerFamily)
+        input.displayName(
+            for: controllerFamily,
+            joyConOrientation: joyConOrientation
+        )
     }
 
     func openApplicationTarget(for input: ControllerInput) -> String? {
@@ -484,14 +608,52 @@ final class ControllerMappingStore: ObservableObject {
 
     func setControllerFamily(_ family: ControllerFamily) {
         guard family != controllerFamily else { return }
+        persistAll()
+        let previousFamily = controllerFamily
         let previousDefaults = Self.defaultMappings(for: controllerFamily)
         let newDefaults = Self.defaultMappings(for: family)
-        for input in ControllerInput.allCases where mappings[input] == previousDefaults[input] {
-            mappings[input] = newDefaults[input]
-        }
         controllerFamily = family
+        availableInputs = ControllerInput.availableInputs(for: family)
+        joyConOrientation = Self.loadJoyConOrientation(
+            from: userDefaults,
+            key: joyConOrientationStorageKey
+        )
+        if previousFamily.isJoyCon || family.isJoyCon {
+            mappings = Self.loadMappings(
+                from: userDefaults,
+                key: activeStorageKey,
+                defaults: newDefaults
+            )
+            openApplicationTargets = Self.loadOpenApplicationTargets(
+                from: userDefaults,
+                key: openApplicationStorageKey
+            )
+            recordedShortcutConfigurations = Self.loadRecordedShortcutConfigurations(
+                from: userDefaults,
+                key: recordedShortcutsStorageKey
+            )
+        } else {
+            for input in ControllerInput.allCases where mappings[input] == previousDefaults[input] {
+                mappings[input] = newDefaults[input]
+            }
+        }
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
-        persist()
+        persistAll()
+    }
+
+    func setJoyConOrientation(_ orientation: JoyConOrientation) {
+        guard controllerFamily == .joyConLeft || controllerFamily == .joyConRight,
+              orientation != joyConOrientation else { return }
+        joyConOrientation = orientation
+        userDefaults.set(orientation.rawValue, forKey: joyConOrientationStorageKey)
+        onJoyConOrientationChange?(orientation)
+    }
+
+    func setAvailableInputs(_ inputs: Set<ControllerInput>) {
+        let supported = ControllerInput.availableInputs(for: controllerFamily)
+        let next = inputs.intersection(supported)
+        guard next != availableInputs else { return }
+        availableInputs = next
     }
 
     func setAction(_ newAction: ControllerMappedAction, for input: ControllerInput) {
@@ -507,7 +669,13 @@ final class ControllerMappingStore: ObservableObject {
 
     private func persist() {
         let encoded = Dictionary(uniqueKeysWithValues: mappings.map { ($0.key.rawValue, $0.value.rawValue) })
-        userDefaults.set(encoded, forKey: storageKey)
+        userDefaults.set(encoded, forKey: activeStorageKey)
+    }
+
+    private func persistAll() {
+        persist()
+        persistOpenApplicationTargets()
+        persistRecordedShortcutConfigurations()
     }
 
     private func persistOpenApplicationTargets() {
@@ -659,6 +827,17 @@ final class ControllerMappingStore: ObservableObject {
         userDefaults.set(true, forKey: migrationKey)
     }
 
+    private func migrateHomeButtonToToggleOperationModeIfNeeded() {
+        let migrationKey = "\(storageKey).homeButtonToggleOperationModeMigrated"
+        guard !userDefaults.bool(forKey: migrationKey) else { return }
+
+        if mappings[.home] == .disabled || mappings[.home] == nil {
+            mappings[.home] = .toggleOperationMode
+            persist()
+        }
+        userDefaults.set(true, forKey: migrationKey)
+    }
+
     private static func loadMappings(
         from userDefaults: UserDefaults,
         key: String,
@@ -675,6 +854,17 @@ final class ControllerMappingStore: ObservableObject {
             result[input] = action
         }
         return result
+    }
+
+    private static func storageKey(base: String, family: ControllerFamily) -> String {
+        family.isJoyCon ? "\(base).profiles.\(family.rawValue)" : base
+    }
+
+    private static func loadJoyConOrientation(
+        from userDefaults: UserDefaults,
+        key: String
+    ) -> JoyConOrientation {
+        userDefaults.string(forKey: key).flatMap(JoyConOrientation.init(rawValue:)) ?? .horizontal
     }
 
     private static func loadOpenApplicationTargets(

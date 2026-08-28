@@ -2,30 +2,82 @@ import CoreAudio
 import Foundation
 import GameController
 
+struct ControllerArtworkDescriptor: Equatable {
+    let resource: String
+    let rotationDegrees: Double
+}
+
 enum ControllerFamily: String {
     case dualSense = "dualsense"
     case dualShock = "dualshock"
     case xbox = "xbox"
+    case joyConPair = "joycon-pair"
+    case joyConLeft = "joycon-left"
+    case joyConRight = "joycon-right"
     case generic = "generic"
+
+    var joyConMode: JoyConMode? {
+        switch self {
+        case .joyConPair: .pair
+        case .joyConLeft: .left
+        case .joyConRight: .right
+        default: nil
+        }
+    }
+
+    var isJoyCon: Bool { joyConMode != nil }
 
     var displayName: String {
         switch self {
         case .dualSense: "PS5 DualSense"
         case .dualShock: "PlayStation DualShock"
         case .xbox: "Xbox"
+        case .joyConPair: "Nintendo Joy-Con L + R"
+        case .joyConLeft: "Nintendo Joy-Con (L)"
+        case .joyConRight: "Nintendo Joy-Con (R)"
         case .generic: L10n.text("通用手柄", "Generic Controller")
         }
     }
 
-    var dashboardArtworkResource: String? {
+    func dashboardArtworkDescriptors(
+        orientation: JoyConOrientation = .vertical
+    ) -> [ControllerArtworkDescriptor] {
         switch self {
-        case .dualSense: "controller-dashboard-dualsense-transparent"
-        case .xbox, .generic: "controller-dashboard"
-        case .dualShock: nil
+        case .dualSense:
+            [ControllerArtworkDescriptor(
+                resource: "controller-dashboard-dualsense-transparent",
+                rotationDegrees: 0
+            )]
+        case .xbox, .generic:
+            [ControllerArtworkDescriptor(resource: "controller-dashboard", rotationDegrees: 0)]
+        case .joyConPair:
+            [
+                ControllerArtworkDescriptor(resource: "controller-dashboard-joycon-left", rotationDegrees: 0),
+                ControllerArtworkDescriptor(resource: "controller-dashboard-joycon-right", rotationDegrees: 0),
+            ]
+        case .joyConLeft:
+            [ControllerArtworkDescriptor(
+                resource: "controller-dashboard-joycon-left",
+                rotationDegrees: orientation == .horizontal ? -90 : 0
+            )]
+        case .joyConRight:
+            [ControllerArtworkDescriptor(
+                resource: "controller-dashboard-joycon-right",
+                rotationDegrees: orientation == .horizontal ? 90 : 0
+            )]
+        case .dualShock:
+            []
         }
     }
 
     static func detect(controller: GCController) -> Self {
+        if let joyCon = controller.joyConHardwareKind {
+            return switch joyCon {
+            case .left: .joyConLeft
+            case .right: .joyConRight
+            case .pair: .joyConPair
+            }
+        }
         if controller.extendedGamepad is GCDualSenseGamepad ||
             controller.productCategory == GCProductCategoryDualSense {
             return .dualSense

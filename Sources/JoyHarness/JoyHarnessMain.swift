@@ -51,6 +51,8 @@ struct JoyHarnessApp: App {
                 languageSettings: languageSettings,
                 launchAtLogin: launchAtLogin,
                 scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
+                pointerSensitivitySettings: appDelegate.runtime.pointerSensitivitySettings,
+                nativeModeSettings: appDelegate.runtime.nativeGamepadAppSettings,
                 settingsCoordinator: settingsCoordinator
             )
             .environment(\.locale, languageSettings.locale)
@@ -78,6 +80,12 @@ final class JoyHarnessRuntime {
     let dashboard: DashboardStore
     let mappings: ControllerMappingStore
     let scrollDirectionSettings: ScrollDirectionSettings
+    let pointerSensitivitySettings: PointerSensitivitySettings
+    let nativeGamepadAppSettings: NativeGamepadAppSettings
+    private(set) var operationMode: ControllerOperationMode = .mapping
+    private var frontmostAppName: String?
+    private var frontmostAppBundleID: String?
+    private var manuallySuppressedNativeBundleID: String?
 
     private let home: String
     private let statusURL: URL
@@ -89,12 +97,17 @@ final class JoyHarnessRuntime {
     private let buttons: ButtonBridge
     private let mouse = MouseBridge()
     private let rp2040 = RP2040Bridge()
+    private let joyConMotion = JoyConHIDMotionManager()
     private var current: PadState = .idle
     private var controllerFamily: ControllerFamily = .generic
+    private var joyConSnapshot: JoyConControllerSnapshot?
     private var slotStates = Array(repeating: PadState.idle, count: 6)
     private var slotThreads = Array<CodexThreadSummary?>(repeating: nil, count: 6)
     private var threadStates: [String: PadState] = [:]
     private var lastBatterySnapshot: ControllerBatterySnapshot?
+    private var lastJoyConBatterySnapshots: [JoyConSide: ControllerBatterySnapshot] = [:]
+    private var lastMotionStatusWriteTime: TimeInterval = 0
+    private let motionStatusWriteThrottleInterval: TimeInterval = 0.5
     private var batteryTimer: Timer?
     private var server: SocketServer?
     private var instanceLock: SingleInstanceLock?
@@ -112,14 +125,27 @@ final class JoyHarnessRuntime {
         self.mappings = mappings
         let scrollDirectionSettings = ScrollDirectionSettings()
         self.scrollDirectionSettings = scrollDirectionSettings
+        let pointerSensitivitySettings = PointerSensitivitySettings()
+        self.pointerSensitivitySettings = pointerSensitivitySettings
+        let nativeGamepadAppSettings = NativeGamepadAppSettings()
+        self.nativeGamepadAppSettings = nativeGamepadAppSettings
         self.buttons = ButtonBridge(mappingProvider: { mappings.action(for: $0) })
         self.dashboard = DashboardStore(statusURL: statusURL)
         self.dashboard.onAction = { [weak self] action in
             self?.perform(action) ?? false
         }
         self.mouse.setScrollDirection(scrollDirectionSettings.preference)
+        self.mouse.setPointerSensitivities(pointerSensitivitySettings.values)
         scrollDirectionSettings.onChange = { [weak self] preference in
             self?.mouse.setScrollDirection(preference)
+        }
+        pointerSensitivitySettings.onChange = { [weak self] values in
+            self?.mouse.setPointerSensitivities(values)
+        }
+        nativeGamepadAppSettings.onChange = { [weak self] in
+            MainActor.assumeIsolated {
+                self?.checkFrontmostAppMode()
+            }
         }
     }
 
@@ -141,12 +167,24 @@ final class JoyHarnessRuntime {
 
         mouse.start()
         buttons.start()
+        joyConMotion.start()
         startBatteryMonitoring()
         rp2040.start()
         threads.start()
         writeStatus(.idle, note: "boot")
         startSocketServer()
         dashboard.startMonitoring()
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.checkFrontmostAppMode()
+            }
+        }
+        checkFrontmostAppMode()
 
         print("[agent-deck] physical Codex Micro mode; task metadata enabled")
         print("[agent-deck] ready - left stick=pointer, L3=speed boost, touchpad=slow slide, LT+left stick=scroll, LT+face=Codex actions")
@@ -213,6 +251,12 @@ final class JoyHarnessRuntime {
         buttons.recordedShortcutProvider = { [weak self] input in
             self?.mappings.recordedShortcutConfiguration(for: input).shortcut
         }
+        buttons.joyConOrientationProvider = { [weak self] in
+            self?.mappings.joyConOrientation ?? .horizontal
+        }
+        mappings.onJoyConOrientationChange = { [weak self] _ in
+            self?.buttons.refreshJoyConOrientation()
+        }
         buttons.recordedShortcutHandler = { [weak self] shortcut, pressed in
             self?.mouse.setRecordedShortcut(shortcut, pressed: pressed)
         }
@@ -232,6 +276,9 @@ final class JoyHarnessRuntime {
         adaptiveTrigger.onFeedback = { [weak self] event in
             self?.haptics.playAdaptiveTriggerFeedback(event)
         }
+        adaptiveTrigger.onHomeButtonChange = { [weak self] isPressed in
+            self?.buttons.handleRawHomeButton(isPressed: isPressed)
+        }
         buttons.onSlotSelected = { [weak self] index in
             guard let self else { return }
             self.current = self.slotStates[index]
@@ -241,11 +288,38 @@ final class JoyHarnessRuntime {
         buttons.onControllerChange = { [weak self] controller, family in
             guard let self else { return }
             self.lastBatterySnapshot = nil
+            self.lastJoyConBatterySnapshots.removeAll()
             self.controllerFamily = family
             self.xboxTriggerPressState = RightTriggerPressState()
             self.mappings.setControllerFamily(family)
-            self.haptics.attach(controller)
             self.adaptiveTrigger.attach(controller)
+        }
+        buttons.onControllerSetChange = { [weak self] controllers in
+            self?.haptics.attach(controllers)
+        }
+        buttons.onJoyConChange = { [weak self] snapshot in
+            guard let self else { return }
+            self.joyConSnapshot = snapshot
+            self.writeStatus(self.current, note: "joycon-mode-change")
+        }
+        joyConMotion.onMotionChange = { [weak self] _, _ in
+            guard let self else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - self.lastMotionStatusWriteTime >= self.motionStatusWriteThrottleInterval else { return }
+            self.lastMotionStatusWriteTime = now
+            self.writeStatus(self.current, note: "joycon-motion")
+        }
+        joyConMotion.onShoulderChange = { [weak self] side, snapshot in
+            self?.buttons.updateJoyConHIDShoulders(side: side, snapshot: snapshot)
+        }
+        buttons.onAvailableInputsChange = { [weak self] inputs in
+            self?.mappings.setAvailableInputs(inputs)
+        }
+        buttons.onInputStateChange = { [weak self] input, pressed in
+            self?.dashboard.setControllerInput(input, pressed: pressed)
+        }
+        buttons.onOperationModeChange = { [weak self] mode in
+            self?.handleOperationModeChanged(mode)
         }
         haptics.onConnectionChange = { [weak self] in
             guard let self else { return }
@@ -263,6 +337,82 @@ final class JoyHarnessRuntime {
             guard let self else { return }
             self.writeStatus(self.current, note: "accessibility-change")
         }
+    }
+
+    func checkFrontmostAppMode() {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        let bundleID = app.bundleIdentifier
+        let appName = app.localizedName
+        self.frontmostAppName = appName
+        self.frontmostAppBundleID = bundleID
+        guard nativeGamepadAppSettings.autoSwitchEnabled else { return }
+
+        let matches = nativeGamepadAppSettings.matches(runningApp: app)
+        if matches {
+            if let bundleID, bundleID == manuallySuppressedNativeBundleID {
+                return
+            }
+            if operationMode != .native {
+                setOperationMode(.native, note: "auto-switch: \(appName ?? bundleID ?? "native-app")")
+            }
+        } else {
+            manuallySuppressedNativeBundleID = nil
+            if operationMode == .native {
+                setOperationMode(.mapping, note: "auto-switch: \(appName ?? bundleID ?? "mapping-app")")
+            }
+        }
+    }
+
+    func unfocusFrontmostNativeAppIfNeeded() {
+        guard let frontmost = NSWorkspace.shared.frontmostApplication else { return }
+        if nativeGamepadAppSettings.matches(runningApp: frontmost) {
+            manuallySuppressedNativeBundleID = frontmost.bundleIdentifier
+            frontmost.hide()
+
+            let candidates = NSWorkspace.shared.runningApplications.filter { app in
+                app.activationPolicy == .regular &&
+                !app.isHidden &&
+                !app.isTerminated &&
+                app.bundleIdentifier != frontmost.bundleIdentifier &&
+                !self.nativeGamepadAppSettings.matches(runningApp: app)
+            }
+            if let nextApp = candidates.first(where: { $0.bundleIdentifier != "tech.keli.joyharness" }) ?? candidates.first {
+                nextApp.activate(options: .activateIgnoringOtherApps)
+                print("[agent-deck] leaving native mode: activated next app \(nextApp.localizedName ?? "")")
+            } else if let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
+                finder.activate(options: .activateIgnoringOtherApps)
+            }
+            print("[agent-deck] leaving native mode: hiding frontmost native app \(frontmost.localizedName ?? frontmost.bundleIdentifier ?? "")")
+        }
+    }
+
+    func handleManualModeToggle() {
+        let nextMode: ControllerOperationMode = (operationMode == .native ? .mapping : .native)
+        setOperationMode(nextMode, note: "manual-toggle")
+    }
+
+    private func handleOperationModeChanged(_ mode: ControllerOperationMode) {
+        guard mode != operationMode else { return }
+        let previousMode = operationMode
+        operationMode = mode
+        if previousMode == .native && mode == .mapping {
+            unfocusFrontmostNativeAppIfNeeded()
+        }
+        haptics.playOperationModeFeedback(mode)
+        writeStatus(current, note: "mode-change: \(mode.rawValue)")
+    }
+
+    func setOperationMode(_ mode: ControllerOperationMode, note: String) {
+        guard mode != operationMode else { return }
+        let previousMode = operationMode
+        operationMode = mode
+        buttons.setOperationMode(mode)
+        if previousMode == .native && mode == .mapping && note.contains("manual") {
+            unfocusFrontmostNativeAppIfNeeded()
+        }
+        haptics.playOperationModeFeedback(mode)
+        writeStatus(current, note: note)
+        print("[agent-deck] operation mode=\(mode.rawValue) note=\(note)")
     }
 
     private func tapMicroKey(_ key: String) -> Bool {
@@ -319,12 +469,50 @@ final class JoyHarnessRuntime {
             "default_voice_input": audio.defaultInputName ?? "",
             "rp2040": rp2040.isConnected,
             "mode": "physical-codex-micro",
+            "operation_mode": operationMode.rawValue,
+            "frontmost_app_name": frontmostAppName ?? "",
+            "frontmost_app_bundle_id": frontmostAppBundleID ?? "",
             "note": note ?? "",
             "ts": ISO8601DateFormatter().string(from: Date()),
         ]
         if let battery {
             payload["controller_battery_level"] = battery.level
             payload["controller_battery_state"] = battery.state.rawValue
+        }
+        if let joyConSnapshot {
+            payload["joycon_mode"] = joyConSnapshot.mode.rawValue
+            if joyConSnapshot.mode != .pair {
+                payload["joycon_orientation"] = mappings.joyConOrientation.rawValue
+            }
+            let sticks = buttons.joyConSticks
+            payload["joycon_primary_stick"] = stickPayload(sticks.primary)
+            payload["joycon_secondary_stick"] = stickPayload(sticks.secondary)
+            payload["joycon_left_connected"] = joyConSnapshot.left != nil
+            payload["joycon_right_connected"] = joyConSnapshot.right != nil
+            payload["joycon_left_haptics"] = joyConSnapshot.left?.hasHaptics ?? false
+            payload["joycon_right_haptics"] = joyConSnapshot.right?.hasHaptics ?? false
+            payload["joycon_left_motion"] = joyConSnapshot.left?.hasMotion == true
+                || joyConMotion.snapshots[.left] != nil
+            payload["joycon_right_motion"] = joyConSnapshot.right?.hasMotion == true
+                || joyConMotion.snapshots[.right] != nil
+            payload["joycon_left_profile_elements"] = joyConSnapshot.left?.profileElements ?? []
+            payload["joycon_right_profile_elements"] = joyConSnapshot.right?.profileElements ?? []
+            payload["joycon_inactive_endpoints"] = joyConSnapshot.inactiveEndpointCount
+            let sideBatteries = buttons.joyConBatterySnapshots
+            if let left = sideBatteries[.left] {
+                payload["joycon_left_battery_level"] = left.level
+                payload["joycon_left_battery_state"] = left.state.rawValue
+            }
+            if let right = sideBatteries[.right] {
+                payload["joycon_right_battery_level"] = right.level
+                payload["joycon_right_battery_state"] = right.state.rawValue
+            }
+            if let left = joyConMotion.snapshots[.left] {
+                payload["joycon_left_imu"] = motionPayload(left)
+            }
+            if let right = joyConMotion.snapshots[.right] {
+                payload["joycon_right_imu"] = motionPayload(right)
+            }
         }
         guard let data = try? JSONSerialization.data(
             withJSONObject: payload,
@@ -339,14 +527,34 @@ final class JoyHarnessRuntime {
         dashboard.reload()
     }
 
+    private func motionPayload(_ snapshot: JoyConHIDMotionSnapshot) -> [String: Any] {
+        [
+            "acceleration_g": vectorPayload(snapshot.accelerationG),
+            "rotation_rate_dps": vectorPayload(snapshot.rotationRateDPS),
+            "calibration_source": snapshot.calibrationSource.rawValue,
+        ]
+    }
+
+    private func vectorPayload(_ vector: JoyConVector3) -> [String: Double] {
+        ["x": vector.x, "y": vector.y, "z": vector.z]
+    }
+
+    private func stickPayload(_ stick: JoyConStick) -> [String: Double] {
+        ["x": Double(stick.x), "y": Double(stick.y)]
+    }
+
     private func startBatteryMonitoring() {
         lastBatterySnapshot = buttons.batterySnapshot
+        lastJoyConBatterySnapshots = buttons.joyConBatterySnapshots
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let snapshot = self.buttons.batterySnapshot
-                guard snapshot != self.lastBatterySnapshot else { return }
+                let joyConSnapshots = self.buttons.joyConBatterySnapshots
+                guard snapshot != self.lastBatterySnapshot ||
+                        joyConSnapshots != self.lastJoyConBatterySnapshots else { return }
                 self.lastBatterySnapshot = snapshot
+                self.lastJoyConBatterySnapshots = joyConSnapshots
                 self.writeStatus(self.current, note: "controller-battery-change")
             }
         }
@@ -421,6 +629,7 @@ final class JoyHarnessRuntime {
                 print("[agent-deck] pong controller=\(haptics.connectedName) haptics=\(haptics.hasController)")
             case "status":
                 print("[agent-deck] state=\(current.rawValue) controller=\(haptics.connectedName)")
+                writeStatus(current, note: command.note ?? "status-request")
             case "slots-refresh":
                 _ = perform(.refresh)
             case "slot-next":

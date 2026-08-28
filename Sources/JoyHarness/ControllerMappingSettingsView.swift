@@ -6,9 +6,42 @@ struct ControllerMappingSettingsPane: View {
     @ObservedObject var store: ControllerMappingStore
     @State private var isResetConfirmationPresented = false
     @State private var recordingInput: ControllerInput?
+    private var joyConOrientationBinding: Binding<JoyConOrientation> {
+        Binding(
+            get: { store.joyConOrientation },
+            set: { store.setJoyConOrientation($0) }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            if store.controllerFamily == .joyConLeft || store.controllerFamily == .joyConRight {
+                HStack(spacing: 12) {
+                    Text(L10n.text("握持方向", "Grip Orientation"))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+
+                    Picker(
+                        L10n.text("握持方向", "Grip Orientation"),
+                        selection: joyConOrientationBinding
+                    ) {
+                        ForEach(JoyConOrientation.allCases) { orientation in
+                            Text(orientation.displayName).tag(orientation)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 180)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.bar)
+
+                Divider()
+            }
+
             Form {
                 ForEach(ControllerInputGroup.allCases) { group in
                     Section(group.displayName) {
@@ -99,11 +132,7 @@ struct ControllerMappingSettingsPane: View {
 
     private func inputs(in group: ControllerInputGroup) -> [ControllerInput] {
         ControllerInput.allCases.filter { input in
-            guard input.group == group else { return false }
-            if input == .touchpadButton {
-                return store.controllerFamily == .dualSense || store.controllerFamily == .dualShock
-            }
-            return true
+            input.group == group && store.availableInputs.contains(input)
         }
     }
 
@@ -264,9 +293,20 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
     }
 
     final class RecorderButton: NSButton {
-        var isRecording = false
+        var isRecording = false {
+            didSet {
+                guard isRecording != oldValue else { return }
+                if isRecording {
+                    startEventTap()
+                } else {
+                    stopEventTap()
+                }
+            }
+        }
         var onActivate: (() -> Void)?
         var onRecord: ((NSEvent) -> Void)?
+        private var eventTap: CFMachPort?
+        private var eventTapSource: CFRunLoopSource?
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -280,6 +320,10 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
 
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+
+        deinit {
+            stopEventTap()
         }
 
         override var acceptsFirstResponder: Bool { true }
@@ -308,6 +352,66 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
             guard event.type == .keyDown, !event.isARepeat else { return }
             isRecording = false
             onRecord?(event)
+        }
+
+        private func startEventTap() {
+            guard eventTap == nil else { return }
+            let keyDownMask = CGEventMask(1) << CGEventType.keyDown.rawValue
+            guard let tap = CGEvent.tapCreate(
+                tap: .cghidEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: keyDownMask,
+                callback: { _, type, event, userInfo in
+                    guard let userInfo else {
+                        return Unmanaged.passUnretained(event)
+                    }
+                    let button = Unmanaged<RecorderButton>
+                        .fromOpaque(userInfo)
+                        .takeUnretainedValue()
+                    return button.handleEventTap(type: type, event: event)
+                },
+                userInfo: Unmanaged.passUnretained(self).toOpaque()
+            ) else {
+                return
+            }
+
+            let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+            eventTap = tap
+            eventTapSource = source
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
+
+        private func stopEventTap() {
+            if let source = eventTapSource {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: false)
+                CFMachPortInvalidate(tap)
+            }
+            eventTapSource = nil
+            eventTap = nil
+        }
+
+        private func handleEventTap(
+            type: CGEventType,
+            event: CGEvent
+        ) -> Unmanaged<CGEvent>? {
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if isRecording, let eventTap {
+                    CGEvent.tapEnable(tap: eventTap, enable: true)
+                }
+                return Unmanaged.passUnretained(event)
+            }
+            guard type == .keyDown else { return Unmanaged.passUnretained(event) }
+            guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return nil }
+            guard let keyEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            capture(keyEvent)
+            return nil
         }
     }
 }
