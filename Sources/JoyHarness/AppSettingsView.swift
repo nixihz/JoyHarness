@@ -5,6 +5,8 @@ struct AppSettingsView: View {
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
+    @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
+    @ObservedObject var nativeModeSettings: NativeGamepadAppSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
 
     var body: some View {
@@ -27,10 +29,13 @@ struct AppSettingsView: View {
                 GeneralSettingsView(
                     languageSettings: languageSettings,
                     launchAtLogin: launchAtLogin,
-                    scrollDirectionSettings: scrollDirectionSettings
+                    scrollDirectionSettings: scrollDirectionSettings,
+                    pointerSensitivitySettings: pointerSensitivitySettings
                 )
             case .controllerMapping:
                 ControllerMappingSettingsPane(store: mappingStore)
+            case .nativeMode:
+                NativeModeSettingsPane(settings: nativeModeSettings)
             }
         }
         .frame(width: 620, height: 640)
@@ -41,6 +46,7 @@ private struct GeneralSettingsView: View {
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
+    @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
 
     var body: some View {
         Form {
@@ -88,6 +94,42 @@ private struct GeneralSettingsView: View {
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
+
+            Section {
+                sensitivityRow(
+                    L10n.text("普通", "Normal"),
+                    value: $pointerSensitivitySettings.normal
+                )
+                sensitivityRow(
+                    L10n.text("快速", "Fast"),
+                    value: $pointerSensitivitySettings.fast
+                )
+                sensitivityRow(
+                    L10n.text("慢速", "Slow"),
+                    value: $pointerSensitivitySettings.slow
+                )
+
+                HStack {
+                    Text(L10n.text(
+                        "普通用于左摇杆，快速用于加速模式，慢速用于精细模式和触控板。",
+                        "Normal applies to the left stick, Fast to boost mode, and Slow to precision mode and the touchpad."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 12)
+
+                    Button {
+                        pointerSensitivitySettings.resetDefaults()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(L10n.text("恢复默认灵敏度", "Restore Default Sensitivity"))
+                }
+            } header: {
+                Text(L10n.text("鼠标灵敏度", "Pointer Sensitivity"))
             }
 
             Section {
@@ -145,5 +187,22 @@ private struct GeneralSettingsView: View {
             return true
         }
         return false
+    }
+
+    private func sensitivityRow(_ title: String, value: Binding<Double>) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 10) {
+                Slider(
+                    value: value,
+                    in: PointerSensitivitySettings.allowedRange,
+                    step: PointerSensitivitySettings.step
+                )
+                .frame(width: 180)
+
+                Text(value.wrappedValue.formatted(.percent.precision(.fractionLength(0))))
+                    .monospacedDigit()
+                    .frame(width: 48, alignment: .trailing)
+            }
+        }
     }
 }
