@@ -46,6 +46,21 @@ struct DashboardStatus: Decodable, Equatable {
     let controllerTouchpad: Bool?
     let controllerBatteryLevel: Float?
     let controllerBatteryState: String?
+    let joyConMode: String?
+    let joyConOrientation: JoyConOrientation?
+    let joyConPrimaryStick: JoyConStick?
+    let joyConSecondaryStick: JoyConStick?
+    let joyConLeftConnected: Bool?
+    let joyConRightConnected: Bool?
+    let joyConLeftBatteryLevel: Float?
+    let joyConRightBatteryLevel: Float?
+    let joyConLeftHaptics: Bool?
+    let joyConRightHaptics: Bool?
+    let joyConLeftMotion: Bool?
+    let joyConRightMotion: Bool?
+    let joyConLeftIMU: JoyConHIDMotionSnapshot?
+    let joyConRightIMU: JoyConHIDMotionSnapshot?
+    let joyConInactiveEndpoints: Int?
     let haptics: Bool
     let accessibility: Bool
     let inputMonitoring: Bool?
@@ -56,20 +71,45 @@ struct DashboardStatus: Decodable, Equatable {
     let defaultVoiceInput: String?
     let rp2040: Bool
     let mode: String
+    let operationMode: String?
+    let frontmostAppName: String?
+    let frontmostAppBundleID: String?
     let note: String
     let timestamp: String
 
     var padState: PadState { PadState.parse(state) ?? .idle }
     var selected: DashboardSlot? { slots.first(where: { $0.slot == selectedSlot }) }
+    var activeOperationMode: ControllerOperationMode {
+        operationMode.flatMap(ControllerOperationMode.init(rawValue:)) ?? .mapping
+    }
+    var isNativeMode: Bool { activeOperationMode == .native }
 
     enum CodingKeys: String, CodingKey {
         case state, slots, controller, haptics, accessibility, microphone, rp2040, mode, note
+        case operationMode = "operation_mode"
+        case frontmostAppName = "frontmost_app_name"
+        case frontmostAppBundleID = "frontmost_app_bundle_id"
         case inputMonitoring = "input_monitoring"
         case controllerConnected = "controller_connected"
         case controllerFamily = "controller_family"
         case controllerTouchpad = "controller_touchpad"
         case controllerBatteryLevel = "controller_battery_level"
         case controllerBatteryState = "controller_battery_state"
+        case joyConMode = "joycon_mode"
+        case joyConOrientation = "joycon_orientation"
+        case joyConPrimaryStick = "joycon_primary_stick"
+        case joyConSecondaryStick = "joycon_secondary_stick"
+        case joyConLeftConnected = "joycon_left_connected"
+        case joyConRightConnected = "joycon_right_connected"
+        case joyConLeftBatteryLevel = "joycon_left_battery_level"
+        case joyConRightBatteryLevel = "joycon_right_battery_level"
+        case joyConLeftHaptics = "joycon_left_haptics"
+        case joyConRightHaptics = "joycon_right_haptics"
+        case joyConLeftMotion = "joycon_left_motion"
+        case joyConRightMotion = "joycon_right_motion"
+        case joyConLeftIMU = "joycon_left_imu"
+        case joyConRightIMU = "joycon_right_imu"
+        case joyConInactiveEndpoints = "joycon_inactive_endpoints"
         case voiceInput = "voice_input"
         case voiceInputDefault = "voice_input_default"
         case voiceInputTransport = "voice_input_transport"
@@ -96,6 +136,21 @@ struct DashboardStatus: Decodable, Equatable {
         controllerTouchpad: false,
         controllerBatteryLevel: nil,
         controllerBatteryState: nil,
+        joyConMode: nil,
+        joyConOrientation: nil,
+        joyConPrimaryStick: nil,
+        joyConSecondaryStick: nil,
+        joyConLeftConnected: nil,
+        joyConRightConnected: nil,
+        joyConLeftBatteryLevel: nil,
+        joyConRightBatteryLevel: nil,
+        joyConLeftHaptics: nil,
+        joyConRightHaptics: nil,
+        joyConLeftMotion: nil,
+        joyConRightMotion: nil,
+        joyConLeftIMU: nil,
+        joyConRightIMU: nil,
+        joyConInactiveEndpoints: nil,
         haptics: false,
         accessibility: false,
         inputMonitoring: false,
@@ -106,6 +161,9 @@ struct DashboardStatus: Decodable, Equatable {
         defaultVoiceInput: nil,
         rp2040: false,
         mode: "physical-codex-micro",
+        operationMode: "mapping",
+        frontmostAppName: nil,
+        frontmostAppBundleID: nil,
         note: L10n.text("正在读取状态", "Reading status"),
         timestamp: ""
     )
@@ -115,6 +173,7 @@ struct DashboardStatus: Decodable, Equatable {
 final class DashboardStore: ObservableObject {
     @Published private(set) var status = DashboardStatus.empty
     @Published private(set) var actionMessage = ""
+    @Published private(set) var pressedControllerInputs: Set<ControllerInput> = []
 
     var onAction: ((DashboardAction) -> Bool)?
 
@@ -140,6 +199,18 @@ final class DashboardStore: ObservableObject {
               decoded.slots.count == 6
         else { return }
         if decoded != status { status = decoded }
+    }
+
+    func setControllerInput(_ input: ControllerInput, pressed: Bool) {
+        if pressed {
+            pressedControllerInputs.insert(input)
+        } else {
+            pressedControllerInputs.remove(input)
+        }
+    }
+
+    func clearControllerInputs() {
+        pressedControllerInputs.removeAll()
     }
 
     func perform(_ action: DashboardAction) {
