@@ -21,7 +21,7 @@ class ReleaseAutomationTests(unittest.TestCase):
         self.assertIn("--draft", workflow)
         self.assertNotIn("PRERELEASE_ARGS", workflow)
         self.assertIn("create_release --prerelease", workflow)
-        self.assertIn("else\n            create_release", workflow)
+        self.assertIn("README.md", workflow)
         self.assertIn('gh release edit "${TAG}" --draft=false --latest=false', workflow)
         self.assertIn('gh release edit "${TAG}" --draft=false --latest', workflow)
 

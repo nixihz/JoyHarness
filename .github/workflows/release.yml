@@ -197,19 +197,32 @@ jobs:
             SIGNING_NOTE="This build is not notarized. macOS may require approval in System Settings > Privacy & Security before first launch."
           fi
 
-          cat > "${RUNNER_TEMP}/release-notes.md" <<EOF
-          Joy Harness ${TAG} for Apple Silicon Macs running macOS 13.0 or later.
+          WHATS_NEW="$(python3 -c "
+          import re, sys
+          content = open('README.md', encoding='utf-8').read()
+          pattern = r'## What\'s New in v?' + re.escape('${VERSION}') + r'\n\n(.*?)(?=\n## |\Z)'
+          match = re.search(pattern, content, re.DOTALL)
+          if match:
+              print('## What\'s New\n\n' + match.group(1).strip() + '\n')
+          " || true)"
 
-          ## Install
-
-          1. Download ${DMG_NAME} and its .sha256 file.
-          2. Open the DMG and drag Joy Harness.app to Applications.
-          3. Use the checksum file to verify the download when needed.
-
-          ${SIGNING_NOTE}
-
-          The DMG contains the desktop app. Install from source with task install when Codex hooks, login startup, notify bridge, and the local CLI are also required.
-          EOF
+          {
+            echo "Joy Harness ${TAG} for Apple Silicon Macs running macOS 13.0 or later."
+            echo ""
+            if [[ -n "${WHATS_NEW}" ]]; then
+              echo "${WHATS_NEW}"
+              echo ""
+            fi
+            echo "## Install"
+            echo ""
+            echo "1. Download ${DMG_NAME} and its .sha256 file."
+            echo "2. Open the DMG and drag Joy Harness.app to Applications."
+            echo "3. Use the checksum file to verify the download when needed."
+            echo ""
+            echo "${SIGNING_NOTE}"
+            echo ""
+            echo "The DMG contains the desktop app. Install from source with task install when Codex hooks, login startup, notify bridge, and the local CLI are also required."
+          } > "${RUNNER_TEMP}/release-notes.md"
 
       - name: Create draft release and upload assets
         env:
