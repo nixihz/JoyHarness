@@ -105,6 +105,7 @@ final class MouseBridge: NSObject {
     private var speedBoostActive = false
     private var precisionActive = false
     private var scrollDirection: ScrollDirectionPreference = .traditional
+    private var pointerSensitivities = PointerSensitivityValues.defaults
     private var lastTickTime: TimeInterval?
     private var movementTimer: Timer?
     private var pressedMouseButtons: Set<MouseButton> = []
@@ -117,8 +118,8 @@ final class MouseBridge: NSObject {
     private var cachedDisplayBoundsAt: TimeInterval = 0
 
     /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
-    nonisolated static let precisionSpeedMultiplier: CGFloat = 0.32
-    nonisolated static let boostSpeedMultiplier: CGFloat = 1.8
+    nonisolated static let precisionSpeedMultiplier = PointerSensitivityValues.defaults.slow
+    nonisolated static let boostSpeedMultiplier = PointerSensitivityValues.defaults.fast
 
     var onPermissionChange: (() -> Void)?
 
@@ -175,9 +176,12 @@ final class MouseBridge: NSObject {
             requestAccessibilityPermission()
             return
         }
+        let sensitivityScale = Self.touchpadSensitivityScale(
+            slowSensitivity: pointerSensitivities.slow
+        )
         let accumulated = CGPoint(
-            x: fractionalTouchDelta.x + x,
-            y: fractionalTouchDelta.y + y
+            x: fractionalTouchDelta.x + x * sensitivityScale,
+            y: fractionalTouchDelta.y + y * sensitivityScale
         )
         let whole = CGPoint(
             x: accumulated.x.rounded(.towardZero),
@@ -194,6 +198,12 @@ final class MouseBridge: NSObject {
     func setScrollDirection(_ direction: ScrollDirectionPreference) {
         guard direction != scrollDirection else { return }
         scrollDirection = direction
+        updateTargetVelocity()
+    }
+
+    func setPointerSensitivities(_ values: PointerSensitivityValues) {
+        guard values != pointerSensitivities else { return }
+        pointerSensitivities = values
         updateTargetVelocity()
     }
 
@@ -293,23 +303,18 @@ final class MouseBridge: NSObject {
             return false
         }
         let characters = Array(text.utf16)
-        guard !characters.isEmpty,
-              let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-              let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-            return false
-        }
-        characters.withUnsafeBufferPointer { buffer in
-            textDown.keyboardSetUnicodeString(
-                stringLength: buffer.count,
-                unicodeString: buffer.baseAddress
-            )
-            textUp.keyboardSetUnicodeString(
-                stringLength: buffer.count,
-                unicodeString: buffer.baseAddress
-            )
-        }
-        for event in [textDown, textUp] {
-            event.post(tap: .cghidEventTap)
+        guard !characters.isEmpty else { return false }
+        let eventSource = CGEventSource(stateID: .hidSystemState)
+        for charCode in characters {
+            var char = charCode
+            guard let textDown = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: true),
+                  let textUp = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: false) else {
+                continue
+            }
+            textDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &char)
+            textUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &char)
+            textDown.post(tap: .cghidEventTap)
+            textUp.post(tap: .cghidEventTap)
         }
         return true
     }
@@ -338,11 +343,16 @@ final class MouseBridge: NSObject {
 
     nonisolated static func pointerSpeedMultiplier(
         precisionActive: Bool,
-        speedBoostActive: Bool
+        speedBoostActive: Bool,
+        sensitivities: PointerSensitivityValues = .defaults
     ) -> CGFloat {
-        if precisionActive { return precisionSpeedMultiplier }
-        if speedBoostActive { return boostSpeedMultiplier }
-        return 1
+        if precisionActive { return sensitivities.slow }
+        if speedBoostActive { return sensitivities.fast }
+        return sensitivities.normal
+    }
+
+    nonisolated static func touchpadSensitivityScale(slowSensitivity: CGFloat) -> CGFloat {
+        slowSensitivity / precisionSpeedMultiplier
     }
 
     nonisolated static func scrollVelocity(
@@ -585,7 +595,8 @@ final class MouseBridge: NSObject {
                 y: stickInput.y,
                 speedMultiplier: Self.pointerSpeedMultiplier(
                     precisionActive: precisionActive,
-                    speedBoostActive: speedBoostActive
+                    speedBoostActive: speedBoostActive,
+                    sensitivities: pointerSensitivities
                 )
             )
         }
