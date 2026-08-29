@@ -21,16 +21,18 @@ struct LifecycleTests {
     }
 
     @Test
-    func mouseBridgeCanRestartWithoutRetainingItsTimer() {
+    func mouseBridgeCanRestartWithoutRetainingItsMovementClock() {
         let bridge = MouseBridge()
 
         bridge.start()
         bridge.start()
         #expect(bridge.isRunning)
+        #expect(bridge.isObservingScreenChanges)
 
         bridge.stop()
         bridge.stop()
         #expect(!bridge.isRunning)
+        #expect(!bridge.isObservingScreenChanges)
 
         bridge.start()
         #expect(bridge.isRunning)

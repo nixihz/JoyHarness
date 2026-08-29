@@ -1325,6 +1325,26 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func mouseMovementPreservesDelayedTimeWithoutOneLargeCatchUpStep() {
+        let frameDuration = 1.0 / 60.0
+        var accumulator = MotionTimeAccumulator()
+
+        let delayedStep = accumulator.consume(
+            elapsed: frameDuration * 2,
+            frameDuration: frameDuration
+        )
+        let recoveryStep = accumulator.consume(
+            elapsed: frameDuration,
+            frameDuration: frameDuration
+        )
+
+        #expect(abs(delayedStep - frameDuration * 1.5) < 0.000_001)
+        #expect(abs(recoveryStep - frameDuration * 1.5) < 0.000_001)
+        #expect(abs(delayedStep + recoveryStep - frameDuration * 3) < 0.000_001)
+        #expect(abs(accumulator.pendingDuration) < 0.000_001)
+    }
+
+    @Test
     func mouseSpeedBoostScalesVelocityWithoutChangingDirection() {
         let normal = MouseBridge.pointerVelocity(x: 0.6, y: -0.3)
         let boosted = MouseBridge.pointerVelocity(
