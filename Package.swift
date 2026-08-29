@@ -16,6 +16,7 @@ let package = Package(
                 .linkedFramework("GameController"),
                 .linkedFramework("CoreHaptics"),
                 .linkedFramework("CoreAudio"),
+                .linkedFramework("CoreVideo"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement"),
                 .unsafeFlags([

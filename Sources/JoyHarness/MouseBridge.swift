@@ -1,6 +1,7 @@
 import ApplicationServices
 import AppKit
 import CoreGraphics
+import CoreVideo
 import Foundation
 
 struct SystemKeyEventDescriptor {
@@ -98,11 +99,184 @@ struct MouseClickSequenceTracker {
     }
 }
 
-@MainActor
-final class MouseBridge: NSObject {
+struct MotionTimeAccumulator {
+    private(set) var pendingDuration: TimeInterval = 0
+
+    mutating func consume(
+        elapsed: TimeInterval,
+        frameDuration: TimeInterval
+    ) -> TimeInterval {
+        let validFrameDuration = max(frameDuration, 1.0 / 240.0)
+        guard elapsed >= 0, elapsed <= 0.25 else {
+            pendingDuration = 0
+            return validFrameDuration
+        }
+        // Repay a missed frame gradually so motion keeps its distance without one large jump.
+        pendingDuration += elapsed
+        let consumed = min(pendingDuration, validFrameDuration * 1.5)
+        pendingDuration -= consumed
+        return consumed
+    }
+
+    mutating func reset() {
+        pendingDuration = 0
+    }
+}
+
+private struct PointerDisplay: Sendable {
+    let id: CGDirectDisplayID
+    let bounds: CGRect
+}
+
+private struct PointerMotionFrame: Sendable {
+    let delta: CGPoint
+    let scrolling: Bool
+    let pressedMouseButtons: Set<MouseButton>
+    let displays: [PointerDisplay]
+}
+
+private final class PointerMotionEngine: @unchecked Sendable {
+    private let lock = NSLock()
     private var targetVelocity = CGPoint.zero
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
+    private var timeAccumulator = MotionTimeAccumulator()
+    private var lastTickTime: TimeInterval?
+    private var scrolling = false
+    private var accessibilityGranted = false
+    private var pressedMouseButtons: Set<MouseButton> = []
+    private var displays: [PointerDisplay] = []
+
+    func start(at time: TimeInterval) {
+        lock.lock()
+        lastTickTime = time
+        timeAccumulator.reset()
+        lock.unlock()
+    }
+
+    func stop() {
+        lock.lock()
+        targetVelocity = .zero
+        lastTickTime = nil
+        resetMotionLocked()
+        lock.unlock()
+    }
+
+    func setTargetVelocity(_ velocity: CGPoint, scrolling: Bool) {
+        lock.lock()
+        if scrolling != self.scrolling {
+            resetMotionLocked()
+            self.scrolling = scrolling
+        }
+        targetVelocity = velocity
+        lock.unlock()
+    }
+
+    func setAccessibilityGranted(_ granted: Bool) {
+        lock.lock()
+        accessibilityGranted = granted
+        if !granted { resetMotionLocked() }
+        lock.unlock()
+    }
+
+    func setPressedMouseButtons(_ buttons: Set<MouseButton>) {
+        lock.lock()
+        pressedMouseButtons = buttons
+        lock.unlock()
+    }
+
+    func setDisplays(_ displays: [PointerDisplay]) {
+        lock.lock()
+        self.displays = displays
+        lock.unlock()
+    }
+
+    func resetMotion() {
+        lock.lock()
+        resetMotionLocked()
+        lock.unlock()
+    }
+
+    func tickAndPost(
+        at now: TimeInterval,
+        frameDuration: TimeInterval
+    ) -> CGDirectDisplayID? {
+        guard let frame = advance(at: now, frameDuration: frameDuration) else { return nil }
+        if frame.scrolling {
+            MouseBridge.postScroll(delta: frame.delta)
+            return nil
+        }
+        guard let location = MouseBridge.postPointerMove(
+            delta: frame.delta,
+            pressedMouseButtons: frame.pressedMouseButtons,
+            displays: frame.displays.map(\.bounds)
+        ) else { return nil }
+        return frame.displays.first(where: { $0.bounds.contains(location) })?.id
+    }
+
+    private func advance(
+        at now: TimeInterval,
+        frameDuration: TimeInterval
+    ) -> PointerMotionFrame? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let previousTick = lastTickTime else {
+            lastTickTime = now
+            return nil
+        }
+        lastTickTime = now
+        guard accessibilityGranted else {
+            resetMotionLocked()
+            return nil
+        }
+
+        if targetVelocity == .zero, hypot(smoothedVelocity.x, smoothedVelocity.y) < 1 {
+            resetMotionLocked()
+            return nil
+        }
+
+        let deltaTime = CGFloat(timeAccumulator.consume(
+            elapsed: now - previousTick,
+            frameDuration: frameDuration
+        ))
+        let responseTime: CGFloat = targetVelocity == .zero ? 0.028 : 0.05
+        let smoothing = MouseBridge.smoothingFactor(
+            deltaTime: deltaTime,
+            responseTime: responseTime
+        )
+        smoothedVelocity.x += (targetVelocity.x - smoothedVelocity.x) * smoothing
+        smoothedVelocity.y += (targetVelocity.y - smoothedVelocity.y) * smoothing
+
+        let accumulatedDelta = CGPoint(
+            x: fractionalDelta.x + smoothedVelocity.x * deltaTime,
+            y: fractionalDelta.y + smoothedVelocity.y * deltaTime
+        )
+        let wholeDelta = CGPoint(
+            x: accumulatedDelta.x.rounded(.towardZero),
+            y: accumulatedDelta.y.rounded(.towardZero)
+        )
+        fractionalDelta = CGPoint(
+            x: accumulatedDelta.x - wholeDelta.x,
+            y: accumulatedDelta.y - wholeDelta.y
+        )
+        guard wholeDelta != .zero else { return nil }
+        return PointerMotionFrame(
+            delta: wholeDelta,
+            scrolling: scrolling,
+            pressedMouseButtons: pressedMouseButtons,
+            displays: displays
+        )
+    }
+
+    private func resetMotionLocked() {
+        smoothedVelocity = .zero
+        fractionalDelta = .zero
+        timeAccumulator.reset()
+    }
+}
+
+@MainActor
+final class MouseBridge: NSObject {
     private var fractionalTouchDelta = CGPoint.zero
     private var stickInput = CGPoint.zero
     private var scrolling = false
@@ -110,16 +284,22 @@ final class MouseBridge: NSObject {
     private var precisionActive = false
     private var scrollDirection: ScrollDirectionPreference = .traditional
     private var pointerSensitivities = PointerSensitivityValues.defaults
-    private var lastTickTime: TimeInterval?
-    private var movementTimer: Timer?
+    private let motionEngine = PointerMotionEngine()
+    private let fallbackMovementQueue = DispatchQueue(
+        label: "tech.agentdeck.pointer-motion",
+        qos: .userInteractive
+    )
+    private var displayLink: CVDisplayLink?
+    private var fallbackMovementTimer: DispatchSourceTimer?
+    private var permissionTimer: Timer?
+    private var screenParametersObserver: NSObjectProtocol?
     private var pressedMouseButtons: Set<MouseButton> = []
     private var mouseClickSequence = MouseClickSequenceTracker()
     private var pressedSystemKeys: Set<SystemKey> = []
     private var keyRepeatDelayTimer: Timer?
     private var keyRepeatTimer: Timer?
     private var lastPermissionState = false
-    private var cachedDisplayBounds: [CGRect] = []
-    private var cachedDisplayBoundsAt: TimeInterval = 0
+    private var activeDisplays: [PointerDisplay] = []
 
     /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
     nonisolated static let precisionSpeedMultiplier = PointerSensitivityValues.defaults.slow
@@ -127,7 +307,8 @@ final class MouseBridge: NSObject {
 
     var onPermissionChange: (() -> Void)?
 
-    var isRunning: Bool { movementTimer != nil }
+    var isRunning: Bool { displayLink != nil || fallbackMovementTimer != nil }
+    var isObservingScreenChanges: Bool { screenParametersObserver != nil }
 
     var isAccessibilityGranted: Bool {
         AXIsProcessTrusted()
@@ -138,25 +319,33 @@ final class MouseBridge: NSObject {
     }
 
     func start() {
-        guard movementTimer == nil else { return }
+        guard !isRunning else { return }
+        let now = ProcessInfo.processInfo.systemUptime
         lastPermissionState = isAccessibilityGranted
         requestAccessibilityPermission()
-
-        let timer = Timer(
-            timeInterval: 1.0 / 120.0,
-            target: self,
-            selector: #selector(handleMovementTimer),
-            userInfo: nil,
-            repeats: true
-        )
-        timer.tolerance = 0.001
-        RunLoop.main.add(timer, forMode: .common)
-        movementTimer = timer
+        refreshActiveDisplays()
+        motionEngine.start(at: now)
+        startMovementClock()
+        startPermissionMonitoring()
+        screenParametersObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleScreenParametersChange()
+            }
+        }
     }
 
     func stop() {
-        movementTimer?.invalidate()
-        movementTimer = nil
+        stopMovementClock()
+        permissionTimer?.invalidate()
+        permissionTimer = nil
+        if let screenParametersObserver {
+            NotificationCenter.default.removeObserver(screenParametersObserver)
+            self.screenParametersObserver = nil
+        }
         keyRepeatDelayTimer?.invalidate()
         keyRepeatDelayTimer = nil
         keyRepeatTimer?.invalidate()
@@ -170,8 +359,8 @@ final class MouseBridge: NSObject {
         pressedMouseButtons.removeAll()
         pressedSystemKeys.removeAll()
         stickInput = .zero
-        targetVelocity = .zero
-        lastTickTime = nil
+        motionEngine.setPressedMouseButtons([])
+        motionEngine.stop()
         resetMotion()
     }
 
@@ -219,7 +408,11 @@ final class MouseBridge: NSObject {
             y: accumulated.y - whole.y
         )
         guard whole != .zero else { return }
-        postPointerMove(delta: whole)
+        Self.postPointerMove(
+            delta: whole,
+            pressedMouseButtons: pressedMouseButtons,
+            displays: activeDisplays.map(\.bounds)
+        )
     }
 
     func setScrollDirection(_ direction: ScrollDirectionPreference) {
@@ -238,6 +431,7 @@ final class MouseBridge: NSObject {
         guard pressed != pressedMouseButtons.contains(button) else { return }
         guard isAccessibilityGranted else {
             pressedMouseButtons.remove(button)
+            motionEngine.setPressedMouseButtons(pressedMouseButtons)
             requestAccessibilityPermission()
             return
         }
@@ -261,6 +455,7 @@ final class MouseBridge: NSObject {
         } else {
             pressedMouseButtons.remove(button)
         }
+        motionEngine.setPressedMouseButtons(pressedMouseButtons)
     }
 
     nonisolated static func mouseButtonEvent(
@@ -444,62 +639,121 @@ final class MouseBridge: NSObject {
         return nearest
     }
 
-    @objc private func handleMovementTimer() {
-        movePointer(at: ProcessInfo.processInfo.systemUptime)
+    private func startMovementClock() {
+        guard !startDisplayLink() else { return }
+        startFallbackMovementTimer()
     }
 
-    private func movePointer(at now: TimeInterval) {
+    private func startDisplayLink() -> Bool {
+        var candidate: CVDisplayLink?
+        let displayID = currentPointerDisplayID() ?? CGMainDisplayID()
+        guard CVDisplayLinkCreateWithCGDisplay(displayID, &candidate) == kCVReturnSuccess,
+              let candidate else {
+            return false
+        }
+        let engine = motionEngine
+        guard CVDisplayLinkSetOutputHandler(candidate, { displayLink, _, _, _, _ in
+            let frameDuration = Self.displayLinkFrameDuration(displayLink)
+            let targetDisplayID = engine.tickAndPost(
+                at: ProcessInfo.processInfo.systemUptime,
+                frameDuration: frameDuration
+            )
+            if let targetDisplayID,
+               targetDisplayID != CVDisplayLinkGetCurrentCGDisplay(displayLink) {
+                _ = CVDisplayLinkSetCurrentCGDisplay(displayLink, targetDisplayID)
+            }
+            return kCVReturnSuccess
+        }) == kCVReturnSuccess,
+              CVDisplayLinkStart(candidate) == kCVReturnSuccess else {
+            return false
+        }
+        displayLink = candidate
+        return true
+    }
+
+    private func startFallbackMovementTimer() {
+        let frameRate = min(max(NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60, 60), 120)
+        let frameDuration = 1.0 / Double(frameRate)
+        let timer = DispatchSource.makeTimerSource(queue: fallbackMovementQueue)
+        let engine = motionEngine
+        timer.schedule(
+            deadline: .now(),
+            repeating: frameDuration,
+            leeway: .milliseconds(1)
+        )
+        timer.setEventHandler {
+            _ = engine.tickAndPost(
+                at: ProcessInfo.processInfo.systemUptime,
+                frameDuration: frameDuration
+            )
+        }
+        fallbackMovementTimer = timer
+        timer.resume()
+    }
+
+    private func stopMovementClock() {
+        if let displayLink {
+            CVDisplayLinkStop(displayLink)
+            self.displayLink = nil
+        }
+        fallbackMovementTimer?.cancel()
+        fallbackMovementTimer = nil
+    }
+
+    private func startPermissionMonitoring() {
+        let timer = Timer(
+            timeInterval: 0.5,
+            target: self,
+            selector: #selector(handlePermissionTimer),
+            userInfo: nil,
+            repeats: true
+        )
+        timer.tolerance = 0.05
+        RunLoop.main.add(timer, forMode: .common)
+        permissionTimer = timer
+    }
+
+    @objc private func handlePermissionTimer() {
         updatePermissionState()
-        guard let previousTick = lastTickTime else {
-            lastTickTime = now
-            return
-        }
-        lastTickTime = now
-        let deltaTime = CGFloat(min(max(now - previousTick, 0), 1.0 / 30.0))
-
-        guard isAccessibilityGranted else {
-            resetMotion()
-            return
-        }
-
-        let responseTime: CGFloat = targetVelocity == .zero ? 0.028 : 0.05
-        let smoothing = Self.smoothingFactor(
-            deltaTime: deltaTime,
-            responseTime: responseTime
-        )
-        smoothedVelocity.x += (targetVelocity.x - smoothedVelocity.x) * smoothing
-        smoothedVelocity.y += (targetVelocity.y - smoothedVelocity.y) * smoothing
-
-        if targetVelocity == .zero, hypot(smoothedVelocity.x, smoothedVelocity.y) < 1 {
-            resetMotion()
-            return
-        }
-
-        let accumulatedDelta = CGPoint(
-            x: fractionalDelta.x + smoothedVelocity.x * deltaTime,
-            y: fractionalDelta.y + smoothedVelocity.y * deltaTime
-        )
-        let wholeDelta = CGPoint(
-            x: accumulatedDelta.x.rounded(.towardZero),
-            y: accumulatedDelta.y.rounded(.towardZero)
-        )
-        fractionalDelta = CGPoint(
-            x: accumulatedDelta.x - wholeDelta.x,
-            y: accumulatedDelta.y - wholeDelta.y
-        )
-        guard wholeDelta != .zero else { return }
-
-        if scrolling {
-            postScroll(delta: wholeDelta)
-            return
-        }
-
-        postPointerMove(delta: wholeDelta)
     }
 
-    private func postPointerMove(delta: CGPoint) {
-        guard let rawLocation = CGEvent(source: nil)?.location else { return }
-        let displays = displayBounds()
+    private func handleScreenParametersChange() {
+        refreshActiveDisplays()
+        let targetDisplayID = currentPointerDisplayID() ?? CGMainDisplayID()
+        if let displayLink {
+            _ = CVDisplayLinkSetCurrentCGDisplay(displayLink, targetDisplayID)
+            return
+        }
+        fallbackMovementTimer?.cancel()
+        fallbackMovementTimer = nil
+        startMovementClock()
+    }
+
+    private func refreshActiveDisplays() {
+        activeDisplays = Self.fetchActiveDisplays()
+        motionEngine.setDisplays(activeDisplays)
+    }
+
+    private func currentPointerDisplayID() -> CGDirectDisplayID? {
+        guard let location = CGEvent(source: nil)?.location else { return nil }
+        return activeDisplays.first(where: { $0.bounds.contains(location) })?.id
+    }
+
+    private nonisolated static func displayLinkFrameDuration(
+        _ displayLink: CVDisplayLink
+    ) -> TimeInterval {
+        let period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink)
+        guard period.timeValue > 0, period.timeScale > 0 else { return 1.0 / 60.0 }
+        return Double(period.timeValue) / Double(period.timeScale)
+    }
+
+    @discardableResult
+    nonisolated static func postPointerMove(
+        delta: CGPoint,
+        pressedMouseButtons: Set<MouseButton>,
+        displays: [CGRect]
+    ) -> CGPoint? {
+        guard let rawLocation = CGEvent(source: nil)?.location else { return nil }
         let location = Self.clampPointerLocation(rawLocation, displays: displays)
         let nextLocation = Self.clampPointerLocation(
             CGPoint(x: location.x + delta.x, y: location.y + delta.y),
@@ -520,36 +774,29 @@ final class MouseBridge: NSObject {
             mouseType: drag.0,
             mouseCursorPosition: nextLocation,
             mouseButton: drag.1
-        ) else { return }
+        ) else { return nil }
         event.post(tap: .cghidEventTap)
+        return nextLocation
     }
 
-    private func displayBounds(
-        now: TimeInterval = ProcessInfo.processInfo.systemUptime
-    ) -> [CGRect] {
-        if now - cachedDisplayBoundsAt < 1, !cachedDisplayBounds.isEmpty {
-            return cachedDisplayBounds
-        }
-        let bounds = Self.fetchActiveDisplayBounds()
-        cachedDisplayBounds = bounds
-        cachedDisplayBoundsAt = now
-        return bounds
-    }
-
-    private static func fetchActiveDisplayBounds() -> [CGRect] {
+    private nonisolated static func fetchActiveDisplays() -> [PointerDisplay] {
         var displayCount: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &displayCount) == .success,
               displayCount > 0 else {
-            return [CGDisplayBounds(CGMainDisplayID())]
+            let id = CGMainDisplayID()
+            return [PointerDisplay(id: id, bounds: CGDisplayBounds(id))]
         }
         var displays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
         guard CGGetActiveDisplayList(displayCount, &displays, &displayCount) == .success else {
-            return [CGDisplayBounds(CGMainDisplayID())]
+            let id = CGMainDisplayID()
+            return [PointerDisplay(id: id, bounds: CGDisplayBounds(id))]
         }
-        return displays.prefix(Int(displayCount)).map(CGDisplayBounds)
+        return displays.prefix(Int(displayCount)).map {
+            PointerDisplay(id: $0, bounds: CGDisplayBounds($0))
+        }
     }
 
-    private func postScroll(delta: CGPoint) {
+    nonisolated static func postScroll(delta: CGPoint) {
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,
@@ -604,12 +851,12 @@ final class MouseBridge: NSObject {
     }
 
     private func resetMotion() {
-        smoothedVelocity = .zero
-        fractionalDelta = .zero
+        motionEngine.resetMotion()
         fractionalTouchDelta = .zero
     }
 
     private func updateTargetVelocity() {
+        let targetVelocity: CGPoint
         if scrolling {
             targetVelocity = Self.scrollVelocity(
                 x: stickInput.x,
@@ -627,6 +874,7 @@ final class MouseBridge: NSObject {
                 )
             )
         }
+        motionEngine.setTargetVelocity(targetVelocity, scrolling: scrolling)
     }
 
     private func requestAccessibilityPermission() {
@@ -639,6 +887,7 @@ final class MouseBridge: NSObject {
 
     private func updatePermissionState() {
         let granted = isAccessibilityGranted
+        motionEngine.setAccessibilityGranted(granted)
         guard granted != lastPermissionState else { return }
         lastPermissionState = granted
         onPermissionChange?()
