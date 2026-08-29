@@ -52,6 +52,9 @@ struct JoyHarnessTests {
         #expect(screenshot.keyCode == 0x00)
         #expect(screenshot.flags.contains(.maskCommand))
         #expect(screenshot.flags.contains(.maskShift))
+        #expect(SystemKey.copy.eventDescriptor(pressed: false).flags.isEmpty)
+        #expect(SystemKey.paste.eventDescriptor(pressed: false).flags.isEmpty)
+        #expect(SystemKey.screenshotTool.eventDescriptor(pressed: false).flags.isEmpty)
     }
 
     @Test
@@ -675,6 +678,8 @@ struct JoyHarnessTests {
         #expect(reloaded.openApplicationTarget(for: .functionRightStickUp) == "com.apple.Safari")
         #expect(SystemKey.browserBack.eventDescriptor(pressed: true).keyCode == 0x21)
         #expect(SystemKey.browserForward.eventDescriptor(pressed: true).keyCode == 0x1E)
+        #expect(SystemKey.browserBack.eventDescriptor(pressed: false).flags.isEmpty)
+        #expect(SystemKey.browserForward.eventDescriptor(pressed: false).flags.isEmpty)
     }
 
     @Test
@@ -713,7 +718,8 @@ struct JoyHarnessTests {
             modifiers: [.function, .command, .shift, .option, .control]
         )
 
-        let descriptor = shortcut.eventDescriptor
+        let descriptor = shortcut.eventDescriptor(pressed: true)
+        let releasedDescriptor = shortcut.eventDescriptor(pressed: false)
 
         #expect(descriptor.keyCode == 0x31)
         #expect(descriptor.flags.contains(.maskControl))
@@ -721,6 +727,8 @@ struct JoyHarnessTests {
         #expect(descriptor.flags.contains(.maskShift))
         #expect(descriptor.flags.contains(.maskCommand))
         #expect(descriptor.flags.contains(.maskSecondaryFn))
+        #expect(releasedDescriptor.keyCode == descriptor.keyCode)
+        #expect(releasedDescriptor.flags.isEmpty)
         #expect(shortcut.displayName == "⌃⌥⇧⌘fnSpace")
         #expect(shortcut.recorderDisplayName == "⌃ ⌥ ⇧ ⌘ fn Space")
         #expect(ControllerInput.buttonA.availableActions.contains(.recordedShortcut))
