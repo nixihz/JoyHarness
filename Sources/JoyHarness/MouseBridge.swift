@@ -9,8 +9,8 @@ struct SystemKeyEventDescriptor {
 }
 
 extension RecordedKeyboardShortcut {
-    var eventDescriptor: SystemKeyEventDescriptor {
-        let flags = modifiers.reduce(into: CGEventFlags()) { result, modifier in
+    func eventDescriptor(pressed: Bool) -> SystemKeyEventDescriptor {
+        let pressedFlags = modifiers.reduce(into: CGEventFlags()) { result, modifier in
             switch modifier {
             case .control: result.insert(.maskControl)
             case .option: result.insert(.maskAlternate)
@@ -19,7 +19,10 @@ extension RecordedKeyboardShortcut {
             case .function: result.insert(.maskSecondaryFn)
             }
         }
-        return SystemKeyEventDescriptor(keyCode: CGKeyCode(keyCode), flags: flags)
+        return SystemKeyEventDescriptor(
+            keyCode: CGKeyCode(keyCode),
+            flags: pressed ? pressedFlags : []
+        )
     }
 }
 
@@ -38,15 +41,16 @@ extension SystemKey {
             let flags: CGEventFlags = pressed ? [.maskCommand, rightCommandDeviceFlag] : []
             return SystemKeyEventDescriptor(keyCode: 0x36, flags: flags)
         case .copy:
-            return SystemKeyEventDescriptor(keyCode: 0x08, flags: .maskCommand)
+            return SystemKeyEventDescriptor(keyCode: 0x08, flags: pressed ? .maskCommand : [])
         case .paste:
-            return SystemKeyEventDescriptor(keyCode: 0x09, flags: .maskCommand)
+            return SystemKeyEventDescriptor(keyCode: 0x09, flags: pressed ? .maskCommand : [])
         case .screenshotTool:
-            return SystemKeyEventDescriptor(keyCode: 0x00, flags: [.maskCommand, .maskShift])
+            let flags: CGEventFlags = [.maskCommand, .maskShift]
+            return SystemKeyEventDescriptor(keyCode: 0x00, flags: pressed ? flags : [])
         case .browserBack:
-            return SystemKeyEventDescriptor(keyCode: 0x21, flags: .maskCommand)
+            return SystemKeyEventDescriptor(keyCode: 0x21, flags: pressed ? .maskCommand : [])
         case .browserForward:
-            return SystemKeyEventDescriptor(keyCode: 0x1E, flags: .maskCommand)
+            return SystemKeyEventDescriptor(keyCode: 0x1E, flags: pressed ? .maskCommand : [])
         }
     }
 }
@@ -275,7 +279,7 @@ final class MouseBridge: NSObject {
             requestAccessibilityPermission()
             return
         }
-        let descriptor = shortcut.eventDescriptor
+        let descriptor = shortcut.eventDescriptor(pressed: pressed)
         let eventSource = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
             keyboardEventSource: eventSource,
