@@ -25,10 +25,16 @@ done
 
 for command in cmake arm-none-eabi-gcc; do
   if ! command -v "${command}" >/dev/null 2>&1; then
-    echo "missing ${command}; install with: brew install cmake arm-none-eabi-gcc" >&2
+    echo "missing ${command}; install with: brew install cmake && brew install --cask gcc-arm-embedded" >&2
     exit 1
   fi
 done
+
+NEWLIB_SPECS="$(arm-none-eabi-gcc -print-file-name=nosys.specs)"
+if [[ "${NEWLIB_SPECS}" == "nosys.specs" || ! -f "${NEWLIB_SPECS}" ]]; then
+  echo "arm-none-eabi-gcc is missing Newlib nosys.specs; install the complete toolchain with: brew install --cask gcc-arm-embedded" >&2
+  exit 1
+fi
 
 if [[ ! -f "${SDK_PATH}/external/pico_sdk_import.cmake" ]]; then
   mkdir -p "$(dirname "${SDK_PATH}")"

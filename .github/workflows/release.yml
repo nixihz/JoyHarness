@@ -34,7 +34,9 @@ jobs:
           fetch-depth: 0
 
       - name: Install release tools
-        run: brew install go-task shellcheck cmake ninja arm-none-eabi-gcc
+        run: |
+          brew install go-task shellcheck cmake ninja
+          brew install --cask gcc-arm-embedded
 
       - name: Validate release request
         env:

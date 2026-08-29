@@ -154,6 +154,13 @@ class ReleaseAutomationTests(unittest.TestCase):
         self.assertIn("task ci", release_workflow)
         self.assertIn('task release-check -- "${TAG}"', release_workflow)
         self.assertIn("task firmware", release_workflow)
+        self.assertIn("brew install --cask gcc-arm-embedded", ci_workflow)
+        self.assertIn("brew install --cask gcc-arm-embedded", release_workflow)
+        self.assertNotIn("brew install go-task cmake ninja arm-none-eabi-gcc", ci_workflow)
+        self.assertNotIn(
+            "brew install go-task shellcheck cmake ninja arm-none-eabi-gcc",
+            release_workflow,
+        )
 
     def test_release_workflow_has_a_guarded_one_click_flow(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
