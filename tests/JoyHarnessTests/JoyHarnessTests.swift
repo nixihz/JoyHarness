@@ -1,9 +1,11 @@
 import CoreAudio
 import CoreGraphics
+import Darwin
 import Foundation
 import Testing
 @testable import JoyHarness
 
+@Suite(.serialized)
 struct JoyHarnessTests {
     @Test
     func appVersionLoadsFromTheBundledVersionResource() {
@@ -131,6 +133,81 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func serialOutputBufferRetainsUnwrittenBytesAcrossBackpressure() {
+        var buffer = SerialOutputBuffer(capacity: 64)
+        let acceptedFirst = buffer.enqueue(Data("first\n".utf8))
+        let acceptedSecond = buffer.enqueue(Data("second\n".utf8))
+        #expect(acceptedFirst)
+        #expect(acceptedSecond)
+        var transmitted = Data()
+        var attempt = 0
+
+        let firstDrain = buffer.drain { pending in
+            defer { attempt += 1 }
+            if attempt == 0 {
+                transmitted.append(pending.prefix(3))
+                return .written(3)
+            }
+            return .wouldBlock
+        }
+
+        #expect(firstDrain == .pending)
+        #expect(buffer.pendingByteCount == 10)
+
+        let secondDrain = buffer.drain { pending in
+            transmitted.append(pending)
+            return .written(pending.count)
+        }
+
+        #expect(secondDrain == .empty)
+        #expect(buffer.pendingByteCount == 0)
+        #expect(String(decoding: transmitted, as: UTF8.self) == "first\nsecond\n")
+    }
+
+    @Test
+    func serialOutputBufferRejectsMessagesBeyondItsBound() {
+        var buffer = SerialOutputBuffer(capacity: 5)
+
+        let acceptedAtCapacity = buffer.enqueue(Data("12345".utf8))
+        let acceptedBeyondCapacity = buffer.enqueue(Data("6".utf8))
+        #expect(acceptedAtCapacity)
+        #expect(!acceptedBeyondCapacity)
+        #expect(buffer.pendingByteCount == 5)
+    }
+
+    @Test
+    func serialOutputBufferRetriesInterruptionsAndClearsFatalWrites() {
+        var buffer = SerialOutputBuffer(capacity: 16)
+        let accepted = buffer.enqueue(Data("command\n".utf8))
+        var attempts = 0
+
+        let interruptedDrain = buffer.drain { pending in
+            attempts += 1
+            return attempts == 1 ? .interrupted : .written(pending.count)
+        }
+
+        #expect(accepted)
+        #expect(interruptedDrain == .empty)
+        #expect(attempts == 2)
+
+        _ = buffer.enqueue(Data("next\n".utf8))
+        #expect(buffer.drain { _ in .failed } == .failed)
+        #expect(buffer.pendingByteCount == 0)
+    }
+
+    @Test
+    func serialOutputBufferClearsBytesFromADisconnectedGeneration() {
+        var buffer = SerialOutputBuffer(capacity: 16)
+        _ = buffer.enqueue(Data("old\n".utf8))
+
+        buffer.removeAll()
+
+        #expect(buffer.pendingByteCount == 0)
+        let acceptedNewGeneration = buffer.enqueue(Data("new\n".utf8))
+        #expect(acceptedNewGeneration)
+    }
+
+    @Test
     func stateParsingIsCaseAndWhitespaceInsensitive() {
         #expect(PadState.parse(" Waiting\n") == .waiting)
         #expect(PadState.parse("unknown") == nil)
@@ -245,6 +322,226 @@ struct JoyHarnessTests {
         let command = try JSONDecoder().decode(PadCommand.self, from: data)
         #expect(command.state == "waiting")
         #expect(command.threadID == "thread-123")
+    }
+
+    @Test
+    func socketServerRespondsAfterOneLineWithoutWaitingForClientEOF() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let commandReceived = DispatchSemaphore(value: 0)
+        let server = SocketServer(path: socketURL.path) { command in
+            if command.state == "waiting" {
+                commandReceived.signal()
+            }
+        }
+        try server.start()
+        defer { server.stop() }
+
+        let client = try connectUnixSocket(path: socketURL.path)
+        defer { close(client) }
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout)))
+        let request = Data("{\"state\":\"waiting\"}\n".utf8)
+        let written = request.withUnsafeBytes { bytes in
+            Darwin.write(client, bytes.baseAddress, bytes.count)
+        }
+        #expect(written == request.count)
+
+        var response = [UInt8](repeating: 0, count: 256)
+        let responseCount = Darwin.read(client, &response, response.count)
+
+        #expect(responseCount > 0)
+        if responseCount > 0 {
+            let body = String(decoding: response.prefix(responseCount), as: UTF8.self)
+            #expect(body == "{\"ok\":true}\n")
+        }
+        #expect(commandReceived.wait(timeout: .now() + 0.5) == .success)
+    }
+
+    @Test
+    func socketServerRejectsMalformedJSONWithoutDispatchingACommand() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let commandReceived = DispatchSemaphore(value: 0)
+        let server = SocketServer(path: socketURL.path) { _ in commandReceived.signal() }
+        try server.start()
+        defer { server.stop() }
+
+        let response = try sendUnixRequest(Data("{\"state\":\n".utf8), path: socketURL.path)
+
+        #expect(response == "{\"ok\":false,\"error\":\"invalid_json\"}\n")
+        #expect(commandReceived.wait(timeout: .now() + 0.05) == .timedOut)
+    }
+
+    @Test
+    func socketServerRejectsUnknownActionsAndInvalidUTF8() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let commandReceived = DispatchSemaphore(value: 0)
+        let server = SocketServer(path: socketURL.path) { _ in commandReceived.signal() }
+        try server.start()
+        defer { server.stop() }
+
+        let unknownAction = try sendUnixRequest(
+            Data("{\"action\":\"unknown\"}\n".utf8),
+            path: socketURL.path
+        )
+        #expect(unknownAction == "{\"ok\":false,\"error\":\"invalid_action\"}\n")
+
+        let invalidUTF8 = try sendUnixRequest(Data([0xFF, 0x0A]), path: socketURL.path)
+        #expect(invalidUTF8 == "{\"ok\":false,\"error\":\"invalid_utf8\"}\n")
+        #expect(commandReceived.wait(timeout: .now() + 0.05) == .timedOut)
+    }
+
+    @Test
+    func socketServerProcessesOnlyTheFirstLine() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let commandReceived = DispatchSemaphore(value: 0)
+        let server = SocketServer(path: socketURL.path) { _ in commandReceived.signal() }
+        try server.start()
+        defer { server.stop() }
+
+        let response = try sendUnixRequest(Data("busy\nerror\n".utf8), path: socketURL.path)
+
+        #expect(response == "{\"ok\":true}\n")
+        #expect(commandReceived.wait(timeout: .now() + 0.5) == .success)
+        #expect(commandReceived.wait(timeout: .now() + 0.05) == .timedOut)
+    }
+
+    @Test
+    func socketServerRejectsIncompleteAndOversizedRequests() throws {
+        let timeoutURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let timeoutServer = SocketServer(path: timeoutURL.path, requestTimeout: 0.05) { _ in }
+        try timeoutServer.start()
+        defer { timeoutServer.stop() }
+
+        let timeoutResponse = try sendUnixRequest(
+            Data("busy".utf8),
+            path: timeoutURL.path,
+            receiveTimeout: 0.5
+        )
+        #expect(timeoutResponse == "{\"ok\":false,\"error\":\"timeout\"}\n")
+
+        let limitURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let limitServer = SocketServer(path: limitURL.path, maximumRequestBytes: 8) { _ in }
+        try limitServer.start()
+        defer { limitServer.stop() }
+
+        let limitResponse = try sendUnixRequest(Data("123456789\n".utf8), path: limitURL.path)
+        #expect(limitResponse == "{\"ok\":false,\"error\":\"request_too_large\"}\n")
+    }
+
+    @Test
+    func socketServerCanRestartImmediatelyAtTheSamePath() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let first = SocketServer(path: socketURL.path) { _ in }
+        try first.start()
+        first.stop()
+
+        let second = SocketServer(path: socketURL.path) { _ in }
+        try second.start()
+        defer { second.stop() }
+        let cancellationFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async { cancellationFinished.signal() }
+        #expect(cancellationFinished.wait(timeout: .now() + 0.5) == .success)
+
+        let response = try sendUnixRequest(Data("busy\n".utf8), path: socketURL.path)
+        #expect(response == "{\"ok\":true}\n")
+    }
+
+    @Test
+    func socketServerStopPreservesAReplacementPath() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let server = SocketServer(path: socketURL.path) { _ in }
+        try server.start()
+        unlink(socketURL.path)
+        let replacement = Data("replacement".utf8)
+        try replacement.write(to: socketURL)
+        defer { try? FileManager.default.removeItem(at: socketURL) }
+
+        server.stop()
+
+        #expect(FileManager.default.fileExists(atPath: socketURL.path))
+        #expect(try Data(contentsOf: socketURL) == replacement)
+    }
+
+    @Test
+    func socketServerStopCancelsAcceptedRequestsWithoutDispatching() throws {
+        let socketURL = URL(fileURLWithPath: "/tmp/jh-\(UUID().uuidString.prefix(8)).sock")
+        let commandReceived = DispatchSemaphore(value: 0)
+        let server = SocketServer(path: socketURL.path) { _ in commandReceived.signal() }
+        try server.start()
+        let client = try connectUnixSocket(path: socketURL.path)
+        defer { close(client) }
+        let request = Data("busy".utf8)
+        _ = request.withUnsafeBytes { bytes in
+            Darwin.write(client, bytes.baseAddress, bytes.count)
+        }
+
+        let acceptanceDeadline = Date().addingTimeInterval(0.5)
+        while server.activeClientCount == 0, Date() < acceptanceDeadline {
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        #expect(server.activeClientCount == 1)
+
+        server.stop()
+
+        let cleanupDeadline = Date().addingTimeInterval(0.5)
+        while server.activeClientCount != 0, Date() < cleanupDeadline {
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        #expect(server.activeClientCount == 0)
+        #expect(commandReceived.wait(timeout: .now() + 0.05) == .timedOut)
+    }
+
+    private func sendUnixRequest(
+        _ request: Data,
+        path: String,
+        receiveTimeout: TimeInterval = 0.5
+    ) throws -> String {
+        let client = try connectUnixSocket(path: path)
+        defer { close(client) }
+        let seconds = Int(receiveTimeout)
+        let microseconds = Int32((receiveTimeout - Double(seconds)) * 1_000_000)
+        var timeout = timeval(tv_sec: seconds, tv_usec: microseconds)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout)))
+        let written = request.withUnsafeBytes { bytes in
+            Darwin.write(client, bytes.baseAddress, bytes.count)
+        }
+        guard written == request.count else { throw SocketTestError.write }
+        var response = [UInt8](repeating: 0, count: 256)
+        let count = Darwin.read(client, &response, response.count)
+        guard count > 0 else { throw SocketTestError.read }
+        return String(decoding: response.prefix(count), as: UTF8.self)
+    }
+
+    private func connectUnixSocket(path: String) throws -> Int32 {
+        let client = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard client >= 0 else { throw SocketTestError.socket }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = path.utf8.map { CChar(bitPattern: $0) }
+        let maxLength = MemoryLayout.size(ofValue: address.sun_path) - 1
+        guard bytes.count <= maxLength else {
+            close(client)
+            throw SocketTestError.pathTooLong
+        }
+        withUnsafeMutablePointer(to: &address.sun_path.0) { pointer in
+            for (index, byte) in bytes.enumerated() {
+                pointer.advanced(by: index).pointee = byte
+            }
+        }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                Darwin.connect(client, socketAddress, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard result == 0 else {
+            close(client)
+            throw SocketTestError.connect
+        }
+        return client
+    }
+
+    private enum SocketTestError: Error {
+        case socket, pathTooLong, connect, write, read
     }
 
     @Test

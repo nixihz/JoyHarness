@@ -29,13 +29,26 @@ def send(payload: dict, sock_path: Path, timeout: float = 0.8) -> int:
             except OSError:
                 pass
             try:
-                s.recv(64)
-            except OSError:
-                pass
+                response = s.recv(4096)
+            except OSError as exc:
+                print(f"[joy-harness-send] response failed: {exc}", file=sys.stderr)
+                return 1
     except OSError as exc:
         print(f"[joy-harness-send] send failed: {exc}", file=sys.stderr)
         return 1
-    return 0
+    line = response.splitlines()[0] if response else b""
+    if line == b"ok":
+        return 0
+    try:
+        result = json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        print("[joy-harness-send] invalid daemon response", file=sys.stderr)
+        return 1
+    if isinstance(result, dict) and result.get("ok") is True:
+        return 0
+    error = result.get("error", "request_rejected") if isinstance(result, dict) else "invalid_response"
+    print(f"[joy-harness-send] daemon rejected request: {error}", file=sys.stderr)
+    return 1
 
 
 def main() -> int:

@@ -387,6 +387,8 @@ Dashboard task commands require a connected RP2040. Task names come from Codex a
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
 | `task flash` | Copy firmware to an RP2040 in BOOTSEL mode |
+| `task ci` | Run tests, ShellCheck, and a release build |
+| `task release-check` | Validate release versions and artifact naming |
 | `task status` | Print `~/.agent-deck/status.json` |
 | `task send -- waiting` | Send one haptic state manually |
 | `task demo` | Play every haptic state in sequence |

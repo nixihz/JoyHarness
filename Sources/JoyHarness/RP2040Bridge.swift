@@ -6,19 +6,33 @@ final class RP2040Bridge {
     var onMessage: ((String) -> Void)?
 
     private let queue = DispatchQueue(label: "tech.agentdeck.rp2040")
+    private let queueKey = DispatchSpecificKey<Void>()
     private var descriptor: Int32 = -1
     private var source: DispatchSourceRead?
+    private var writeSource: DispatchSourceWrite?
     private var reconnectTimer: DispatchSourceTimer?
     private var readBuffer = Data()
     private var connectedPath: String?
     private var rejectedUntil: [String: Date] = [:]
     private let lock = NSLock()
     private var connected = false
+    private var outputBuffer = SerialOutputBuffer(capacity: 64_000)
+
+    init() {
+        queue.setSpecific(key: queueKey, value: ())
+    }
 
     var isConnected: Bool {
         lock.lock()
         defer { lock.unlock() }
         return connected
+    }
+
+    var isRunning: Bool {
+        if DispatchQueue.getSpecific(key: queueKey) != nil {
+            return reconnectTimer != nil
+        }
+        return queue.sync { reconnectTimer != nil }
     }
 
     func start() {
@@ -33,29 +47,32 @@ final class RP2040Bridge {
     }
 
     func stop() {
-        queue.async { [weak self] in
-            self?.reconnectTimer?.cancel()
-            self?.reconnectTimer = nil
-            self?.disconnect()
+        let cleanup = {
+            self.reconnectTimer?.cancel()
+            self.reconnectTimer = nil
+            self.disconnect()
+        }
+        if DispatchQueue.getSpecific(key: queueKey) != nil {
+            cleanup()
+        } else {
+            queue.sync(execute: cleanup)
         }
     }
 
     @discardableResult
     func sendKey(_ key: String, action: Int, agent: Int? = nil) -> Bool {
-        guard isConnected else { return false }
-        let safeKey = key.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
-        guard !safeKey.isEmpty else { return false }
-        send("H \(safeKey) \(action) \(agent ?? -1)\n")
-        return true
+        guard !key.isEmpty,
+              key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }) else {
+            return false
+        }
+        return send("H \(key) \(action) \(agent ?? -1)\n")
     }
 
     @discardableResult
     func sendJoystick(angle: Float, distance: Float) -> Bool {
-        guard isConnected else { return false }
         let angleValue = Int((min(max(angle, 0), 1) * 1000).rounded())
         let distanceValue = Int((min(max(distance, 0), 1) * 1000).rounded())
-        send("J \(angleValue) \(distanceValue)\n")
-        return true
+        return send("J \(angleValue) \(distanceValue)\n")
     }
 
     func tapSlot(_ index: Int, twice: Bool = false) {
@@ -74,9 +91,15 @@ final class RP2040Bridge {
         }
     }
 
-    private func send(_ line: String) {
-        guard let data = line.data(using: .utf8) else { return }
-        queue.async { [weak self] in self?.write(data) }
+    private func send(_ line: String) -> Bool {
+        guard let data = line.data(using: .utf8) else { return false }
+        lock.lock()
+        let accepted = connected && outputBuffer.enqueue(data)
+        lock.unlock()
+        if accepted {
+            queue.async { [weak self] in self?.drainWrites() }
+        }
+        return accepted
     }
 
     private func connectIfNeeded() {
@@ -93,11 +116,13 @@ final class RP2040Bridge {
             readBuffer.removeAll(keepingCapacity: true)
             let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
             source.setEventHandler { [weak self] in self?.readAvailable() }
-            source.setCancelHandler { close(fd) }
             self.source = source
             source.resume()
             print("[agent-deck] probing RP2040 bridge at \(path)")
-            write(Data("P\n".utf8))
+            lock.lock()
+            _ = outputBuffer.enqueue(Data("P\n".utf8))
+            lock.unlock()
+            drainWrites()
             queue.asyncAfter(deadline: .now() + 0.75) { [weak self] in
                 guard let self,
                       self.descriptor == fd,
@@ -133,13 +158,39 @@ final class RP2040Bridge {
         _ = tcsetattr(fd, TCSANOW, &settings)
     }
 
-    private func write(_ data: Data) {
+    private func drainWrites() {
         guard descriptor >= 0 else { return }
-        let result = data.withUnsafeBytes { bytes -> Int in
-            guard let base = bytes.baseAddress else { return 0 }
-            return Darwin.write(descriptor, base, bytes.count)
+        let currentDescriptor = descriptor
+        lock.lock()
+        let result = outputBuffer.drain { data in
+            let written = data.withUnsafeBytes { bytes -> Int in
+                guard let baseAddress = bytes.baseAddress else { return 0 }
+                return Darwin.write(currentDescriptor, baseAddress, bytes.count)
+            }
+            if written > 0 { return .written(written) }
+            if written < 0, errno == EINTR { return .interrupted }
+            if written == 0 || errno == EAGAIN || errno == EWOULDBLOCK { return .wouldBlock }
+            return .failed
         }
-        if result < 0, errno != EAGAIN { disconnect() }
+        lock.unlock()
+
+        switch result {
+        case .empty:
+            writeSource?.cancel()
+            writeSource = nil
+        case .pending:
+            armWriteSource(for: currentDescriptor)
+        case .failed:
+            disconnect()
+        }
+    }
+
+    private func armWriteSource(for fileDescriptor: Int32) {
+        guard writeSource == nil, descriptor == fileDescriptor else { return }
+        let source = DispatchSource.makeWriteSource(fileDescriptor: fileDescriptor, queue: queue)
+        source.setEventHandler { [weak self] in self?.drainWrites() }
+        writeSource = source
+        source.resume()
     }
 
     private func readAvailable() {
@@ -179,13 +230,25 @@ final class RP2040Bridge {
 
     private func disconnect() {
         guard descriptor >= 0 else { return }
+        lock.lock()
+        let connectionChanged = connected
+        connected = false
+        outputBuffer.removeAll()
+        lock.unlock()
+
+        let disconnectedDescriptor = descriptor
         let previousPath = connectedPath
         descriptor = -1
         connectedPath = nil
+        writeSource?.cancel()
+        writeSource = nil
         source?.cancel()
         source = nil
+        close(disconnectedDescriptor)
         readBuffer.removeAll(keepingCapacity: true)
-        setConnected(false)
+        if connectionChanged {
+            DispatchQueue.main.async { [weak self] in self?.onConnectionChange?(false) }
+        }
         print("[agent-deck] RP2040 bridge disconnected\(previousPath.map { " from \($0)" } ?? "")")
     }
 

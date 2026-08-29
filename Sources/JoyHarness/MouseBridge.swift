@@ -127,6 +127,8 @@ final class MouseBridge: NSObject {
 
     var onPermissionChange: (() -> Void)?
 
+    var isRunning: Bool { movementTimer != nil }
+
     var isAccessibilityGranted: Bool {
         AXIsProcessTrusted()
     }
@@ -150,6 +152,27 @@ final class MouseBridge: NSObject {
         timer.tolerance = 0.001
         RunLoop.main.add(timer, forMode: .common)
         movementTimer = timer
+    }
+
+    func stop() {
+        movementTimer?.invalidate()
+        movementTimer = nil
+        keyRepeatDelayTimer?.invalidate()
+        keyRepeatDelayTimer = nil
+        keyRepeatTimer?.invalidate()
+        keyRepeatTimer = nil
+        for button in Array(pressedMouseButtons) {
+            setMouseButton(button, pressed: false)
+        }
+        for key in pressedSystemKeys {
+            postSystemKey(key, pressed: false)
+        }
+        pressedMouseButtons.removeAll()
+        pressedSystemKeys.removeAll()
+        stickInput = .zero
+        targetVelocity = .zero
+        lastTickTime = nil
+        resetMotion()
     }
 
     func updateStick(x: Float, y: Float, scrolling: Bool = false) {

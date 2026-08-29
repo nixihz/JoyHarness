@@ -9,29 +9,58 @@ struct CodexThreadSummary: Equatable {
 @MainActor
 final class CodexThreadProvider {
     var onUpdate: (([CodexThreadSummary]) -> Void)?
+    var onHealthChange: ((CodexProviderHealth) -> Void)?
 
     private var process: Process?
     private var stdin: FileHandle?
+    private var stdout: FileHandle?
+    private var stderr: FileHandle?
     private var outputBuffer = Data()
     private var refreshTimer: Timer?
-    private var initialized = false
-    private var refreshPending = false
+    private var requestDeadlineTimer: DispatchSourceTimer?
+    private var restartTimer: DispatchSourceTimer?
     private var nextRequestID = 2
+    private let requestTimeout: TimeInterval
+    private var recovery = CodexThreadRecoveryStateMachine()
+    private var diagnosticBuffer: CodexDiagnosticBuffer
+
+    private(set) var health: CodexProviderHealth = .stopped
+    var stderrDiagnostics: String { diagnosticBuffer.text }
+
+    init(requestTimeout: TimeInterval = 3, diagnosticCapacity: Int = 16_384) {
+        self.requestTimeout = max(0.01, requestTimeout)
+        self.diagnosticBuffer = CodexDiagnosticBuffer(capacity: diagnosticCapacity)
+    }
 
     func start() {
-        guard process == nil else { return }
+        guard health == .stopped else { return }
+        recovery.start()
+        publishHealth()
         launch()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }
 
+    func stop() {
+        guard health != .stopped else { return }
+        recovery.stop()
+        publishHealth()
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        requestDeadlineTimer?.cancel()
+        requestDeadlineTimer = nil
+        restartTimer?.cancel()
+        restartTimer = nil
+        cleanupProcess(terminate: true)
+        outputBuffer.removeAll(keepingCapacity: true)
+    }
+
     func refresh() {
-        guard initialized, !refreshPending else { return }
-        refreshPending = true
+        guard health == .healthy, recovery.pendingRequest == nil else { return }
         let requestID = nextRequestID
         nextRequestID += 1
-        send([
+        sendRequest([
             "id": requestID,
             "method": "thread/list",
             "params": [
@@ -41,7 +70,7 @@ final class CodexThreadProvider {
                 "sortDirection": "desc",
                 "useStateDbOnly": true,
             ],
-        ])
+        ], id: requestID, kind: .threadList)
     }
 
     nonisolated static func decodeThreads(from response: Data) -> [CodexThreadSummary]? {
@@ -67,22 +96,28 @@ final class CodexThreadProvider {
     }
 
     private func launch() {
+        guard health != .stopped else { return }
         let process = Process()
         let input = Pipe()
         let output = Pipe()
+        let errorOutput = Pipe()
         let executable = codexExecutable()
 
         process.executableURL = executable.url
         process.arguments = executable.arguments + ["app-server", "--stdio"]
         process.standardInput = input
         process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { [weak self] _ in
+        process.standardError = errorOutput
+        process.terminationHandler = { [weak self, weak process] terminatedProcess in
             Task { @MainActor in
-                self?.process = nil
-                self?.stdin = nil
-                self?.initialized = false
-                self?.refreshPending = false
+                guard let self,
+                      let process,
+                      self.process === process,
+                      self.health != .stopped else { return }
+                self.handleFailure(
+                    .exit,
+                    reason: "app-server exited with status \(terminatedProcess.terminationStatus)"
+                )
             }
         }
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -90,12 +125,19 @@ final class CodexThreadProvider {
             guard !data.isEmpty else { return }
             Task { @MainActor in self?.consume(data) }
         }
+        errorOutput.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            Task { @MainActor in self?.appendDiagnostic(data) }
+        }
 
         do {
             try process.run()
             self.process = process
             stdin = input.fileHandleForWriting
-            send([
+            stdout = output.fileHandleForReading
+            stderr = errorOutput.fileHandleForReading
+            sendRequest([
                 "id": 1,
                 "method": "initialize",
                 "params": [
@@ -105,9 +147,15 @@ final class CodexThreadProvider {
                         "version": AppVersion.current,
                     ],
                 ],
-            ])
+            ], id: 1, kind: .initialization)
         } catch {
-            print("[agent-deck] unable to start Codex task metadata client: \(error)")
+            output.fileHandleForReading.readabilityHandler = nil
+            errorOutput.fileHandleForReading.readabilityHandler = nil
+            close(input.fileHandleForWriting, named: "stdin")
+            close(output.fileHandleForReading, named: "stdout")
+            close(errorOutput.fileHandleForReading, named: "stderr")
+            appendDiagnostic("unable to start Codex task metadata client: \(error)\n")
+            scheduleRecovery(after: recovery.handleProcessFailure(.launch))
         }
     }
 
@@ -123,11 +171,36 @@ final class CodexThreadProvider {
         return (URL(fileURLWithPath: "/usr/bin/env"), ["codex"])
     }
 
-    private func send(_ message: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: message),
-              let newline = "\n".data(using: .utf8)
-        else { return }
-        try? stdin?.write(contentsOf: data + newline)
+    private func sendRequest(_ message: [String: Any], id: Int, kind: CodexRequestKind) {
+        recovery.beginRequest(
+            id: id,
+            kind: kind,
+            deadline: Date().addingTimeInterval(requestTimeout)
+        )
+        do {
+            try write(message)
+            armRequestDeadline()
+        } catch {
+            appendDiagnostic("app-server write failed: \(error)\n")
+            handleFailure(.write, reason: "app-server write failed")
+        }
+    }
+
+    private func sendNotification(_ message: [String: Any]) -> Bool {
+        do {
+            try write(message)
+            return true
+        } catch {
+            appendDiagnostic("app-server write failed: \(error)\n")
+            handleFailure(.write, reason: "app-server write failed")
+            return false
+        }
+    }
+
+    private func write(_ message: [String: Any]) throws {
+        guard let stdin else { throw ProviderError.stdinUnavailable }
+        let data = try JSONSerialization.data(withJSONObject: message)
+        try stdin.write(contentsOf: data + Data("\n".utf8))
     }
 
     private func consume(_ data: Data) {
@@ -143,17 +216,137 @@ final class CodexThreadProvider {
         guard let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = message["id"] as? Int
         else { return }
-        if id == 1 {
-            initialized = message["result"] != nil
-            if initialized {
-                send(["method": "initialized", "params": [:]])
-                refresh()
-            }
+
+        let succeeded = message["result"] != nil && message["error"] == nil
+        guard let kind = recovery.receiveResponse(id: id, succeeded: succeeded) else { return }
+        requestDeadlineTimer?.cancel()
+        requestDeadlineTimer = nil
+        publishHealth()
+
+        guard succeeded else {
+            appendDiagnostic("app-server request \(id) failed\n")
+            handleRequestFailure("app-server request failed")
             return
         }
-        refreshPending = false
-        if let threads = Self.decodeThreads(from: data) {
-            onUpdate?(threads)
+
+        switch kind {
+        case .initialization:
+            guard sendNotification(["method": "initialized", "params": [:]]) else { return }
+            refresh()
+        case .threadList:
+            if let threads = Self.decodeThreads(from: data) {
+                onUpdate?(threads)
+            }
         }
+    }
+
+    private func armRequestDeadline() {
+        requestDeadlineTimer?.cancel()
+        guard let pendingRequest = recovery.pendingRequest else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + max(0, pendingRequest.deadline.timeIntervalSinceNow))
+        timer.setEventHandler { [weak self] in
+            Task { @MainActor in self?.requestTimedOut() }
+        }
+        requestDeadlineTimer = timer
+        timer.resume()
+    }
+
+    private func requestTimedOut() {
+        requestDeadlineTimer?.cancel()
+        requestDeadlineTimer = nil
+        guard let delay = recovery.handleTimeout(at: Date()) else {
+            armRequestDeadline()
+            return
+        }
+        appendDiagnostic("app-server request timed out\n")
+        cleanupProcess(terminate: true)
+        publishHealth()
+        scheduleRestart(after: delay)
+    }
+
+    private func handleFailure(_ failure: CodexProcessFailure, reason: String) {
+        guard health != .stopped else { return }
+        appendDiagnostic("\(reason)\n")
+        cleanupProcess(terminate: true)
+        scheduleRecovery(after: recovery.handleProcessFailure(failure))
+    }
+
+    private func handleRequestFailure(_ reason: String) {
+        guard health != .stopped else { return }
+        appendDiagnostic("\(reason)\n")
+        cleanupProcess(terminate: true)
+        scheduleRecovery(after: recovery.fail())
+    }
+
+    private func scheduleRecovery(after delay: TimeInterval?) {
+        publishHealth()
+        guard let delay else { return }
+        scheduleRestart(after: delay)
+    }
+
+    private func scheduleRestart(after delay: TimeInterval) {
+        restartTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + delay)
+        timer.setEventHandler { [weak self] in
+            Task { @MainActor in
+                guard let self, self.recovery.beginRestart() else { return }
+                self.restartTimer?.cancel()
+                self.restartTimer = nil
+                self.publishHealth()
+                self.launch()
+            }
+        }
+        restartTimer = timer
+        timer.resume()
+    }
+
+    private func cleanupProcess(terminate: Bool) {
+        let process = self.process
+        self.process = nil
+        requestDeadlineTimer?.cancel()
+        requestDeadlineTimer = nil
+        stdout?.readabilityHandler = nil
+        stderr?.readabilityHandler = nil
+        close(stdin, named: "stdin")
+        close(stdout, named: "stdout")
+        close(stderr, named: "stderr")
+        stdin = nil
+        stdout = nil
+        stderr = nil
+        outputBuffer.removeAll(keepingCapacity: true)
+        if terminate, process?.isRunning == true {
+            process?.terminate()
+        }
+    }
+
+    private func close(_ handle: FileHandle?, named name: String) {
+        guard let handle else { return }
+        do {
+            try handle.close()
+        } catch {
+            appendDiagnostic("unable to close app-server \(name): \(error)\n")
+        }
+    }
+
+    private func appendDiagnostic(_ data: Data) {
+        diagnosticBuffer.append(data)
+    }
+
+    private func appendDiagnostic(_ message: String) {
+        diagnosticBuffer.append(Data(message.utf8))
+        fputs("[agent-deck] \(message)", Foundation.stderr)
+    }
+
+    private func publishHealth() {
+        let updatedHealth = recovery.health
+        guard health != updatedHealth else { return }
+        health = updatedHealth
+        onHealthChange?(updatedHealth)
+    }
+
+    private enum ProviderError: Error {
+        case stdinUnavailable
     }
 }
