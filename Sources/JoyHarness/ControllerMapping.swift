@@ -436,6 +436,19 @@ struct RecordedShortcutConfiguration: Codable, Hashable {
 }
 
 final class ControllerMappingStore: ObservableObject {
+    private static let currentSchemaVersion = 8
+    private static let legacyMigrationFlagSuffixes = [
+        "yesNoFaceButtonsMigrated",
+        "unifiedFaceButtonLayoutMigrated",
+        "dpadUpRightCommandMigrated",
+        "clipboardAndScreenshotDefaultsMigrated",
+        "clipboardThumbstickDefaultsMigrated",
+        "functionRightStickBrowserDefaultsMigrated",
+        "leftThumbstickBoostRestoredMigrated",
+        "touchpadMouseLeftDefaultMigrated",
+        "homeButtonToggleOperationModeMigrated",
+    ]
+
     private static let baseDefaultMappings: [ControllerInput: ControllerMappedAction] = [
         .buttonA: .mouseLeft,
         .buttonB: .mouseRight,
@@ -500,6 +513,7 @@ final class ControllerMappingStore: ObservableObject {
     private var activeStorageKey: String {
         Self.storageKey(base: storageKey, family: controllerFamily)
     }
+    private var schemaVersionStorageKey: String { "\(activeStorageKey).schemaVersion" }
     private var openApplicationStorageKey: String { "\(activeStorageKey).openApplications" }
     private var recordedShortcutsStorageKey: String { "\(activeStorageKey).recordedShortcuts" }
     private var joyConOrientationStorageKey: String { "\(activeStorageKey).orientation" }
@@ -533,15 +547,7 @@ final class ControllerMappingStore: ObservableObject {
             key: "\(activeStorageKey).recordedShortcuts"
         )
         if !storedFamily.isJoyCon {
-            migrateYesNoFaceButtonsIfNeeded()
-            migrateUnifiedFaceButtonLayoutIfNeeded()
-            migrateDPadUpToRightCommandIfNeeded()
-            migrateClipboardAndScreenshotDefaultsIfNeeded()
-            migrateClipboardToThumbsticksIfNeeded()
-            migrateFunctionRightStickBrowserDefaultsIfNeeded()
-            migrateLeftThumbstickBoostRestoredIfNeeded()
-            migrateTouchpadMouseLeftDefaultIfNeeded()
-            migrateHomeButtonToToggleOperationModeIfNeeded()
+            migrateStoredMappingsIfNeeded()
         }
     }
 
@@ -637,6 +643,9 @@ final class ControllerMappingStore: ObservableObject {
                 mappings[input] = newDefaults[input]
             }
         }
+        if !family.isJoyCon {
+            migrateStoredMappingsIfNeeded()
+        }
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
         persistAll()
     }
@@ -702,9 +711,30 @@ final class ControllerMappingStore: ObservableObject {
         userDefaults.set(data, forKey: recordedShortcutsStorageKey)
     }
 
+    private func migrateStoredMappingsIfNeeded() {
+        let storedVersion = userDefaults.integer(forKey: schemaVersionStorageKey)
+        guard storedVersion < Self.currentSchemaVersion else { return }
+
+        if storedVersion < 1 { migrateYesNoFaceButtonsIfNeeded() }
+        if storedVersion < 2 { migrateUnifiedFaceButtonLayoutIfNeeded() }
+        if storedVersion < 3 { migrateDPadUpToRightCommandIfNeeded() }
+        if storedVersion < 4 { migrateClipboardAndScreenshotDefaultsIfNeeded() }
+        if storedVersion < 5 { migrateClipboardToThumbsticksIfNeeded() }
+        if storedVersion < 6 { migrateFunctionRightStickBrowserDefaultsIfNeeded() }
+        if storedVersion < 7 { migrateLeftThumbstickBoostRestoredIfNeeded() }
+        if storedVersion < 8 {
+            migrateTouchpadMouseLeftDefaultIfNeeded()
+            migrateHomeButtonToToggleOperationModeIfNeeded()
+        }
+
+        userDefaults.set(Self.currentSchemaVersion, forKey: schemaVersionStorageKey)
+        for suffix in Self.legacyMigrationFlagSuffixes {
+            userDefaults.removeObject(forKey: "\(storageKey).\(suffix)")
+        }
+    }
+
     private func migrateYesNoFaceButtonsIfNeeded() {
-        let migrationKey = "\(storageKey).yesNoFaceButtonsMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("yesNoFaceButtonsMigrated") else { return }
         if mappings[.functionButtonA] == .approve,
            mappings[.functionButtonB] == .deny,
            mappings[.functionButtonX] == .toggleFastMode,
@@ -720,12 +750,10 @@ final class ControllerMappingStore: ObservableObject {
             }
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateUnifiedFaceButtonLayoutIfNeeded() {
-        let migrationKey = "\(storageKey).unifiedFaceButtonLayoutMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("unifiedFaceButtonLayoutMigrated") else { return }
 
         let currentFaceMappings = [
             mappings[.functionButtonA],
@@ -747,22 +775,18 @@ final class ControllerMappingStore: ObservableObject {
             }
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateDPadUpToRightCommandIfNeeded() {
-        let migrationKey = "\(storageKey).dpadUpRightCommandMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("dpadUpRightCommandMigrated") else { return }
         if mappings[.dpadUp] == .radialInput {
             mappings[.dpadUp] = .rightCommand
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateClipboardAndScreenshotDefaultsIfNeeded() {
-        let migrationKey = "\(storageKey).clipboardAndScreenshotDefaultsMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("clipboardAndScreenshotDefaultsMigrated") else { return }
 
         var changed = false
         if mappings[.options] == .disabled {
@@ -770,12 +794,10 @@ final class ControllerMappingStore: ObservableObject {
             changed = true
         }
         if changed { persist() }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateClipboardToThumbsticksIfNeeded() {
-        let migrationKey = "\(storageKey).clipboardThumbstickDefaultsMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("clipboardThumbstickDefaultsMigrated") else { return }
 
         if mappings[.functionButtonX] == .copy,
            mappings[.functionButtonY] == .paste {
@@ -783,12 +805,10 @@ final class ControllerMappingStore: ObservableObject {
             mappings[.functionButtonY] = .answerYes
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateFunctionRightStickBrowserDefaultsIfNeeded() {
-        let migrationKey = "\(storageKey).functionRightStickBrowserDefaultsMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("functionRightStickBrowserDefaultsMigrated") else { return }
 
         var changed = false
         if mappings[.functionRightStickLeft] == .disabled {
@@ -800,12 +820,10 @@ final class ControllerMappingStore: ObservableObject {
             changed = true
         }
         if changed { persist() }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateLeftThumbstickBoostRestoredIfNeeded() {
-        let migrationKey = "\(storageKey).leftThumbstickBoostRestoredMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("leftThumbstickBoostRestoredMigrated") else { return }
 
         // Undo the brief L3→precision default; Xbox L3 stays speed boost.
         // Slow aiming is DualSense/DualShock touchpad sliding only.
@@ -813,29 +831,28 @@ final class ControllerMappingStore: ObservableObject {
             mappings[.leftThumbstickButton] = .mouseSpeedBoost
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private func migrateTouchpadMouseLeftDefaultIfNeeded() {
-        let migrationKey = "\(storageKey).touchpadMouseLeftDefaultMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("touchpadMouseLeftDefaultMigrated") else { return }
 
         if mappings[.touchpadButton] == .pushToTalk {
             mappings[.touchpadButton] = .mouseLeft
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
+    }
+
+    private func legacyMigrationCompleted(_ suffix: String) -> Bool {
+        userDefaults.bool(forKey: "\(storageKey).\(suffix)")
     }
 
     private func migrateHomeButtonToToggleOperationModeIfNeeded() {
-        let migrationKey = "\(storageKey).homeButtonToggleOperationModeMigrated"
-        guard !userDefaults.bool(forKey: migrationKey) else { return }
+        guard !legacyMigrationCompleted("homeButtonToggleOperationModeMigrated") else { return }
 
         if mappings[.home] == .disabled || mappings[.home] == nil {
             mappings[.home] = .toggleOperationMode
             persist()
         }
-        userDefaults.set(true, forKey: migrationKey)
     }
 
     private static func loadMappings(

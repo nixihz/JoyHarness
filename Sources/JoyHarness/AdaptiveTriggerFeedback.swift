@@ -51,6 +51,11 @@ final class AdaptiveTriggerFeedback {
     var isAvailable: Bool { trigger != nil }
 
     init() {
+        start()
+    }
+
+    func start() {
+        guard observers.isEmpty else { return }
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil,
@@ -92,6 +97,18 @@ final class AdaptiveTriggerFeedback {
         }
     }
 
+    func stop() {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers.removeAll()
+        hidOutput.disconnect()
+        trigger?.setModeOff()
+        trigger = nil
+        pressState = RightTriggerPressState()
+        backgroundEffectApplied = false
+    }
+
     private func applyGameControllerEffect() {
         guard let trigger else { return }
         backgroundEffectApplied = false
@@ -110,10 +127,6 @@ final class AdaptiveTriggerFeedback {
     }
 
     deinit {
-        for observer in observers {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        hidOutput.disconnect()
-        trigger?.setModeOff()
+        stop()
     }
 }

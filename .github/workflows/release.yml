@@ -33,6 +33,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install release tools
+        run: |
+          brew install go-task shellcheck cmake ninja
+          brew install --cask gcc-arm-embedded
+
       - name: Validate release request
         env:
           VERSION_INPUT: ${{ inputs.version }}
@@ -106,10 +111,11 @@ jobs:
             echo "RELEASE_MODE=notarized" >> "${GITHUB_ENV}"
           fi
 
-      - name: Run tests
+      - name: Run shared release checks
         run: |
-          swift test
-          python3 -m unittest discover -s tests -v
+          task ci
+          task release-check -- "${TAG}"
+          task firmware
 
       - name: Import Developer ID certificate
         if: env.RELEASE_MODE == 'notarized'

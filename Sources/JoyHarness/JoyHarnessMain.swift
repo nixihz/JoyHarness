@@ -73,6 +73,10 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        runtime.stop()
+    }
 }
 
 @MainActor
@@ -111,6 +115,7 @@ final class JoyHarnessRuntime {
     private var batteryTimer: Timer?
     private var server: SocketServer?
     private var instanceLock: SingleInstanceLock?
+    private var workspaceActivationObserver: NSObjectProtocol?
     private var hasStarted = false
 
     init() {
@@ -168,6 +173,7 @@ final class JoyHarnessRuntime {
         mouse.start()
         buttons.start()
         joyConMotion.start()
+        adaptiveTrigger.start()
         startBatteryMonitoring()
         rp2040.start()
         threads.start()
@@ -175,7 +181,7 @@ final class JoyHarnessRuntime {
         startSocketServer()
         dashboard.startMonitoring()
 
-        NSWorkspace.shared.notificationCenter.addObserver(
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
@@ -188,6 +194,28 @@ final class JoyHarnessRuntime {
 
         print("[agent-deck] physical Codex Micro mode; task metadata enabled")
         print("[agent-deck] ready - left stick=pointer, L3=speed boost, touchpad=slow slide, LT+left stick=scroll, LT+face=Codex actions")
+    }
+
+    func stop() {
+        guard hasStarted else { return }
+        hasStarted = false
+        batteryTimer?.invalidate()
+        batteryTimer = nil
+        dashboard.stopMonitoring()
+        server?.stop()
+        server = nil
+        if let workspaceActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
+            self.workspaceActivationObserver = nil
+        }
+        threads.stop()
+        joyConMotion.stop()
+        buttons.stop()
+        mouse.stop()
+        adaptiveTrigger.stop()
+        haptics.stop()
+        rp2040.stop()
+        instanceLock = nil
     }
 
     @discardableResult
@@ -441,106 +469,70 @@ final class JoyHarnessRuntime {
         let audio = ControllerAudioSupport.snapshot(for: controllerFamily)
         let voiceInput = audio.controllerInput
         let battery = buttons.batterySnapshot
-        let slotPayload: [[String: Any]] = (0..<6).map { index in
+        let slots = (0..<6).map { index in
             let thread = slotThreads[index]
-            return [
-                "slot": index + 1,
-                "selected": index == selectedSlot,
-                "thread_id": thread?.id ?? "",
-                "title": thread?.title ?? "",
-                "state": slotStates[index].rawValue,
-            ]
+            return DashboardSlot(
+                slot: index + 1,
+                selected: index == selectedSlot,
+                threadID: thread?.id ?? "",
+                title: thread?.title ?? "",
+                state: slotStates[index].rawValue
+            )
         }
-        var payload: [String: Any] = [
-            "state": state.rawValue,
-            "selected_slot": selectedSlot + 1,
-            "slots": slotPayload,
-            "controller": haptics.connectedName,
-            "controller_connected": haptics.connectedName != "none",
-            "controller_family": controllerFamily.rawValue,
-            "controller_touchpad": controllerFamily == .dualSense || controllerFamily == .dualShock,
-            "haptics": haptics.hasController,
-            "accessibility": mouse.isAccessibilityGranted,
-            "input_monitoring": mouse.isInputMonitoringGranted,
-            "microphone": voiceInput != nil,
-            "voice_input": voiceInput?.name ?? "",
-            "voice_input_default": voiceInput?.isDefault ?? false,
-            "voice_input_transport": voiceInput?.transport ?? "",
-            "default_voice_input": audio.defaultInputName ?? "",
-            "rp2040": rp2040.isConnected,
-            "mode": "physical-codex-micro",
-            "operation_mode": operationMode.rawValue,
-            "frontmost_app_name": frontmostAppName ?? "",
-            "frontmost_app_bundle_id": frontmostAppBundleID ?? "",
-            "note": note ?? "",
-            "ts": ISO8601DateFormatter().string(from: Date()),
-        ]
-        if let battery {
-            payload["controller_battery_level"] = battery.level
-            payload["controller_battery_state"] = battery.state.rawValue
-        }
-        if let joyConSnapshot {
-            payload["joycon_mode"] = joyConSnapshot.mode.rawValue
-            if joyConSnapshot.mode != .pair {
-                payload["joycon_orientation"] = mappings.joyConOrientation.rawValue
-            }
-            let sticks = buttons.joyConSticks
-            payload["joycon_primary_stick"] = stickPayload(sticks.primary)
-            payload["joycon_secondary_stick"] = stickPayload(sticks.secondary)
-            payload["joycon_left_connected"] = joyConSnapshot.left != nil
-            payload["joycon_right_connected"] = joyConSnapshot.right != nil
-            payload["joycon_left_haptics"] = joyConSnapshot.left?.hasHaptics ?? false
-            payload["joycon_right_haptics"] = joyConSnapshot.right?.hasHaptics ?? false
-            payload["joycon_left_motion"] = joyConSnapshot.left?.hasMotion == true
-                || joyConMotion.snapshots[.left] != nil
-            payload["joycon_right_motion"] = joyConSnapshot.right?.hasMotion == true
-                || joyConMotion.snapshots[.right] != nil
-            payload["joycon_left_profile_elements"] = joyConSnapshot.left?.profileElements ?? []
-            payload["joycon_right_profile_elements"] = joyConSnapshot.right?.profileElements ?? []
-            payload["joycon_inactive_endpoints"] = joyConSnapshot.inactiveEndpointCount
-            let sideBatteries = buttons.joyConBatterySnapshots
-            if let left = sideBatteries[.left] {
-                payload["joycon_left_battery_level"] = left.level
-                payload["joycon_left_battery_state"] = left.state.rawValue
-            }
-            if let right = sideBatteries[.right] {
-                payload["joycon_right_battery_level"] = right.level
-                payload["joycon_right_battery_state"] = right.state.rawValue
-            }
-            if let left = joyConMotion.snapshots[.left] {
-                payload["joycon_left_imu"] = motionPayload(left)
-            }
-            if let right = joyConMotion.snapshots[.right] {
-                payload["joycon_right_imu"] = motionPayload(right)
-            }
-        }
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: payload,
-            options: [.prettyPrinted, .sortedKeys]
-        ) else { return }
-
-        try? FileManager.default.createDirectory(
-            atPath: "\(home)/.agent-deck",
-            withIntermediateDirectories: true
+        let sideBatteries = buttons.joyConBatterySnapshots
+        let joyConSticks = joyConSnapshot.map { _ in buttons.joyConSticks }
+        let status = DashboardStatus(
+            state: state.rawValue,
+            selectedSlot: selectedSlot + 1,
+            slots: slots,
+            controller: haptics.connectedName,
+            controllerConnected: haptics.connectedName != "none",
+            controllerFamily: controllerFamily.rawValue,
+            controllerTouchpad: controllerFamily == .dualSense || controllerFamily == .dualShock,
+            controllerBatteryLevel: battery?.level,
+            controllerBatteryState: battery?.state.rawValue,
+            joyConMode: joyConSnapshot?.mode.rawValue,
+            joyConOrientation: joyConSnapshot.flatMap {
+                $0.mode == .pair ? nil : mappings.joyConOrientation
+            },
+            joyConPrimaryStick: joyConSticks?.primary,
+            joyConSecondaryStick: joyConSticks?.secondary,
+            joyConLeftConnected: joyConSnapshot.map { $0.left != nil },
+            joyConRightConnected: joyConSnapshot.map { $0.right != nil },
+            joyConLeftBatteryLevel: joyConSnapshot.flatMap { _ in sideBatteries[.left]?.level },
+            joyConRightBatteryLevel: joyConSnapshot.flatMap { _ in sideBatteries[.right]?.level },
+            joyConLeftBatteryState: joyConSnapshot.flatMap { _ in sideBatteries[.left]?.state.rawValue },
+            joyConRightBatteryState: joyConSnapshot.flatMap { _ in sideBatteries[.right]?.state.rawValue },
+            joyConLeftHaptics: joyConSnapshot.map { $0.left?.hasHaptics ?? false },
+            joyConRightHaptics: joyConSnapshot.map { $0.right?.hasHaptics ?? false },
+            joyConLeftMotion: joyConSnapshot.map {
+                $0.left?.hasMotion == true || joyConMotion.snapshots[.left] != nil
+            },
+            joyConRightMotion: joyConSnapshot.map {
+                $0.right?.hasMotion == true || joyConMotion.snapshots[.right] != nil
+            },
+            joyConLeftProfileElements: joyConSnapshot.map { $0.left?.profileElements ?? [] },
+            joyConRightProfileElements: joyConSnapshot.map { $0.right?.profileElements ?? [] },
+            joyConLeftIMU: joyConSnapshot.flatMap { _ in joyConMotion.snapshots[.left] },
+            joyConRightIMU: joyConSnapshot.flatMap { _ in joyConMotion.snapshots[.right] },
+            joyConInactiveEndpoints: joyConSnapshot?.inactiveEndpointCount,
+            haptics: haptics.hasController,
+            accessibility: mouse.isAccessibilityGranted,
+            inputMonitoring: mouse.isInputMonitoringGranted,
+            microphone: voiceInput != nil,
+            voiceInput: voiceInput?.name ?? "",
+            voiceInputDefault: voiceInput?.isDefault ?? false,
+            voiceInputTransport: voiceInput?.transport ?? "",
+            defaultVoiceInput: audio.defaultInputName ?? "",
+            rp2040: rp2040.isConnected,
+            mode: "physical-codex-micro",
+            operationMode: operationMode.rawValue,
+            frontmostAppName: frontmostAppName,
+            frontmostAppBundleID: frontmostAppBundleID,
+            note: note ?? "",
+            timestamp: ISO8601DateFormatter().string(from: Date())
         )
-        try? data.write(to: statusURL, options: .atomic)
-        dashboard.reload()
-    }
-
-    private func motionPayload(_ snapshot: JoyConHIDMotionSnapshot) -> [String: Any] {
-        [
-            "acceleration_g": vectorPayload(snapshot.accelerationG),
-            "rotation_rate_dps": vectorPayload(snapshot.rotationRateDPS),
-            "calibration_source": snapshot.calibrationSource.rawValue,
-        ]
-    }
-
-    private func vectorPayload(_ vector: JoyConVector3) -> [String: Double] {
-        ["x": vector.x, "y": vector.y, "z": vector.z]
-    }
-
-    private func stickPayload(_ stick: JoyConStick) -> [String: Double] {
-        ["x": Double(stick.x), "y": Double(stick.y)]
+        _ = dashboard.writeStatus(status)
     }
 
     private func startBatteryMonitoring() {
@@ -551,11 +543,14 @@ final class JoyHarnessRuntime {
                 guard let self else { return }
                 let snapshot = self.buttons.batterySnapshot
                 let joyConSnapshots = self.buttons.joyConBatterySnapshots
-                guard snapshot != self.lastBatterySnapshot ||
-                        joyConSnapshots != self.lastJoyConBatterySnapshots else { return }
+                let batteryChanged = snapshot != self.lastBatterySnapshot
+                    || joyConSnapshots != self.lastJoyConBatterySnapshots
                 self.lastBatterySnapshot = snapshot
                 self.lastJoyConBatterySnapshots = joyConSnapshots
-                self.writeStatus(self.current, note: "controller-battery-change")
+                self.writeStatus(
+                    self.current,
+                    note: batteryChanged ? "controller-battery-change" : "status-heartbeat"
+                )
             }
         }
         timer.tolerance = 3
@@ -623,23 +618,21 @@ final class JoyHarnessRuntime {
     }
 
     private func handle(_ command: PadCommand) {
-        if let action = command.action?.lowercased() {
+        if let action = command.action {
             switch action {
-            case "ping":
+            case .ping:
                 print("[agent-deck] pong controller=\(haptics.connectedName) haptics=\(haptics.hasController)")
-            case "status":
+            case .status:
                 print("[agent-deck] state=\(current.rawValue) controller=\(haptics.connectedName)")
                 writeStatus(current, note: command.note ?? "status-request")
-            case "slots-refresh":
+            case .slotsRefresh:
                 _ = perform(.refresh)
-            case "slot-next":
+            case .slotNext:
                 buttons.moveSlot(1)
-            case "slot-previous":
+            case .slotPrevious:
                 buttons.moveSlot(-1)
-            case "slot-open":
+            case .slotOpen:
                 _ = perform(.openThread)
-            default:
-                print("[agent-deck] unknown action=\(action)")
             }
         }
         if let raw = command.state, let state = PadState.parse(raw) {

@@ -18,6 +18,7 @@ pico_sdk_init()
 
 add_executable(joy_harness_rp2040
   src/main.c
+  src/transport_queue.c
   src/usb_descriptors.c
 )
 

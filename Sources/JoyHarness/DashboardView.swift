@@ -7,22 +7,63 @@ struct DashboardView: View {
     @EnvironmentObject private var languageSettings: AppLanguageSettings
 
     var body: some View {
-        HStack(spacing: 0) {
-            SlotSidebar(store: store)
-                .frame(width: 224)
+        VStack(spacing: 0) {
+            StatusFreshnessBanner(store: store)
 
-            Divider()
+            HStack(spacing: 0) {
+                SlotSidebar(store: store)
+                    .frame(width: 224)
 
-            TaskDetail(store: store, mappingStore: mappingStore)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
 
-            Divider()
+                TaskDetail(store: store, mappingStore: mappingStore)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            ConnectionInspector(status: store.status, store: store, mappingStore: mappingStore)
-                .frame(width: 252)
+                Divider()
+
+                ConnectionInspector(status: store.status, store: store, mappingStore: mappingStore)
+                    .frame(width: 252)
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .id(languageSettings.preference)
+    }
+}
+
+private struct StatusFreshnessBanner: View {
+    @ObservedObject var store: DashboardStore
+
+    var body: some View {
+        if store.freshness != .fresh {
+            HStack(spacing: 8) {
+                Image(systemName: store.freshness == .stale ? "clock.badge.exclamationmark" : "exclamationmark.triangle")
+                Text(message)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 14)
+            .frame(height: 32)
+            .frame(maxWidth: .infinity)
+            .background(tint.opacity(0.1))
+            .accessibilityLabel(message)
+        }
+    }
+
+    private var message: String {
+        switch store.freshness {
+        case .fresh:
+            return ""
+        case .stale:
+            return L10n.text("状态数据已过期", "Status data is stale")
+        case .unavailable:
+            return L10n.text("状态暂不可用", "Status is unavailable")
+        }
+    }
+
+    private var tint: Color {
+        store.freshness == .stale ? .orange : .red
     }
 }
 

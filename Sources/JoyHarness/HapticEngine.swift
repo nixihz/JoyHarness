@@ -83,6 +83,10 @@ final class HapticEngine {
         }
     }
 
+    func stop() {
+        detach()
+    }
+
     func apply(_ state: PadState) {
         stopAll()
         switch state {

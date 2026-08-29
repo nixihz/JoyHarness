@@ -11,7 +11,7 @@ enum DashboardAction: Equatable {
     case testState(PadState)
 }
 
-struct DashboardSlot: Decodable, Identifiable, Equatable {
+struct DashboardSlot: Codable, Identifiable, Equatable {
     let slot: Int
     let selected: Bool
     let threadID: String
@@ -36,7 +36,7 @@ struct DashboardSlot: Decodable, Identifiable, Equatable {
     }
 }
 
-struct DashboardStatus: Decodable, Equatable {
+struct DashboardStatus: Codable, Equatable {
     let state: String
     let selectedSlot: Int
     let slots: [DashboardSlot]
@@ -54,10 +54,14 @@ struct DashboardStatus: Decodable, Equatable {
     let joyConRightConnected: Bool?
     let joyConLeftBatteryLevel: Float?
     let joyConRightBatteryLevel: Float?
+    let joyConLeftBatteryState: String?
+    let joyConRightBatteryState: String?
     let joyConLeftHaptics: Bool?
     let joyConRightHaptics: Bool?
     let joyConLeftMotion: Bool?
     let joyConRightMotion: Bool?
+    let joyConLeftProfileElements: [String]?
+    let joyConRightProfileElements: [String]?
     let joyConLeftIMU: JoyConHIDMotionSnapshot?
     let joyConRightIMU: JoyConHIDMotionSnapshot?
     let joyConInactiveEndpoints: Int?
@@ -103,10 +107,14 @@ struct DashboardStatus: Decodable, Equatable {
         case joyConRightConnected = "joycon_right_connected"
         case joyConLeftBatteryLevel = "joycon_left_battery_level"
         case joyConRightBatteryLevel = "joycon_right_battery_level"
+        case joyConLeftBatteryState = "joycon_left_battery_state"
+        case joyConRightBatteryState = "joycon_right_battery_state"
         case joyConLeftHaptics = "joycon_left_haptics"
         case joyConRightHaptics = "joycon_right_haptics"
         case joyConLeftMotion = "joycon_left_motion"
         case joyConRightMotion = "joycon_right_motion"
+        case joyConLeftProfileElements = "joycon_left_profile_elements"
+        case joyConRightProfileElements = "joycon_right_profile_elements"
         case joyConLeftIMU = "joycon_left_imu"
         case joyConRightIMU = "joycon_right_imu"
         case joyConInactiveEndpoints = "joycon_inactive_endpoints"
@@ -116,6 +124,96 @@ struct DashboardStatus: Decodable, Equatable {
         case defaultVoiceInput = "default_voice_input"
         case selectedSlot = "selected_slot"
         case timestamp = "ts"
+    }
+
+    init(
+        state: String,
+        selectedSlot: Int,
+        slots: [DashboardSlot],
+        controller: String,
+        controllerConnected: Bool?,
+        controllerFamily: String?,
+        controllerTouchpad: Bool?,
+        controllerBatteryLevel: Float?,
+        controllerBatteryState: String?,
+        joyConMode: String? = nil,
+        joyConOrientation: JoyConOrientation? = nil,
+        joyConPrimaryStick: JoyConStick? = nil,
+        joyConSecondaryStick: JoyConStick? = nil,
+        joyConLeftConnected: Bool? = nil,
+        joyConRightConnected: Bool? = nil,
+        joyConLeftBatteryLevel: Float? = nil,
+        joyConRightBatteryLevel: Float? = nil,
+        joyConLeftBatteryState: String? = nil,
+        joyConRightBatteryState: String? = nil,
+        joyConLeftHaptics: Bool? = nil,
+        joyConRightHaptics: Bool? = nil,
+        joyConLeftMotion: Bool? = nil,
+        joyConRightMotion: Bool? = nil,
+        joyConLeftProfileElements: [String]? = nil,
+        joyConRightProfileElements: [String]? = nil,
+        joyConLeftIMU: JoyConHIDMotionSnapshot? = nil,
+        joyConRightIMU: JoyConHIDMotionSnapshot? = nil,
+        joyConInactiveEndpoints: Int? = nil,
+        haptics: Bool,
+        accessibility: Bool,
+        inputMonitoring: Bool?,
+        microphone: Bool,
+        voiceInput: String?,
+        voiceInputDefault: Bool?,
+        voiceInputTransport: String?,
+        defaultVoiceInput: String?,
+        rp2040: Bool,
+        mode: String,
+        operationMode: String? = nil,
+        frontmostAppName: String? = nil,
+        frontmostAppBundleID: String? = nil,
+        note: String,
+        timestamp: String
+    ) {
+        self.state = state
+        self.selectedSlot = selectedSlot
+        self.slots = slots
+        self.controller = controller
+        self.controllerConnected = controllerConnected
+        self.controllerFamily = controllerFamily
+        self.controllerTouchpad = controllerTouchpad
+        self.controllerBatteryLevel = controllerBatteryLevel
+        self.controllerBatteryState = controllerBatteryState
+        self.joyConMode = joyConMode
+        self.joyConOrientation = joyConOrientation
+        self.joyConPrimaryStick = joyConPrimaryStick
+        self.joyConSecondaryStick = joyConSecondaryStick
+        self.joyConLeftConnected = joyConLeftConnected
+        self.joyConRightConnected = joyConRightConnected
+        self.joyConLeftBatteryLevel = joyConLeftBatteryLevel
+        self.joyConRightBatteryLevel = joyConRightBatteryLevel
+        self.joyConLeftBatteryState = joyConLeftBatteryState
+        self.joyConRightBatteryState = joyConRightBatteryState
+        self.joyConLeftHaptics = joyConLeftHaptics
+        self.joyConRightHaptics = joyConRightHaptics
+        self.joyConLeftMotion = joyConLeftMotion
+        self.joyConRightMotion = joyConRightMotion
+        self.joyConLeftProfileElements = joyConLeftProfileElements
+        self.joyConRightProfileElements = joyConRightProfileElements
+        self.joyConLeftIMU = joyConLeftIMU
+        self.joyConRightIMU = joyConRightIMU
+        self.joyConInactiveEndpoints = joyConInactiveEndpoints
+        self.haptics = haptics
+        self.accessibility = accessibility
+        self.inputMonitoring = inputMonitoring
+        self.microphone = microphone
+        self.voiceInput = voiceInput
+        self.voiceInputDefault = voiceInputDefault
+        self.voiceInputTransport = voiceInputTransport
+        self.defaultVoiceInput = defaultVoiceInput
+        self.rp2040 = rp2040
+        self.mode = mode
+        self.operationMode = operationMode
+        self.frontmostAppName = frontmostAppName
+        self.frontmostAppBundleID = frontmostAppBundleID
+        self.note = note
+        self.timestamp = timestamp
     }
 
     static let empty = DashboardStatus(
@@ -144,10 +242,14 @@ struct DashboardStatus: Decodable, Equatable {
         joyConRightConnected: nil,
         joyConLeftBatteryLevel: nil,
         joyConRightBatteryLevel: nil,
+        joyConLeftBatteryState: nil,
+        joyConRightBatteryState: nil,
         joyConLeftHaptics: nil,
         joyConRightHaptics: nil,
         joyConLeftMotion: nil,
         joyConRightMotion: nil,
+        joyConLeftProfileElements: nil,
+        joyConRightProfileElements: nil,
         joyConLeftIMU: nil,
         joyConRightIMU: nil,
         joyConInactiveEndpoints: nil,
@@ -169,19 +271,198 @@ struct DashboardStatus: Decodable, Equatable {
     )
 }
 
+enum StatusFreshness: Equatable {
+    case fresh
+    case stale
+    case unavailable
+}
+
+enum StatusRepositoryError: Error, Equatable, CustomStringConvertible {
+    case missingFile(String)
+    case read(String)
+    case decode(String)
+    case invalidSlotCount(Int)
+    case invalidTimestamp(String)
+    case createDirectory(String)
+    case encode(String)
+    case atomicWrite(String)
+
+    var description: String {
+        switch self {
+        case .missingFile(let path):
+            return "status file is missing: \(path)"
+        case .read(let message):
+            return "failed to read status: \(message)"
+        case .decode(let message):
+            return "failed to decode status: \(message)"
+        case .invalidSlotCount(let count):
+            return "status has \(count) slots; expected 6"
+        case .invalidTimestamp(let value):
+            return "status has an invalid timestamp: \(value)"
+        case .createDirectory(let message):
+            return "failed to create status directory: \(message)"
+        case .encode(let message):
+            return "failed to encode status: \(message)"
+        case .atomicWrite(let message):
+            return "failed to atomically write status: \(message)"
+        }
+    }
+}
+
+struct StatusRepositorySnapshot: Equatable {
+    let status: DashboardStatus?
+    let freshness: StatusFreshness
+    let lastSuccessfulRead: Date?
+    let error: StatusRepositoryError?
+}
+
+final class StatusRepository {
+    private let statusURL: URL
+    private let freshnessInterval: TimeInterval
+    private let now: () -> Date
+    private let reportError: (String) -> Void
+
+    private(set) var lastSuccessfulRead: Date?
+    private(set) var lastError: StatusRepositoryError?
+
+    init(
+        statusURL: URL,
+        freshnessInterval: TimeInterval = 60,
+        now: @escaping () -> Date = Date.init,
+        reportError: @escaping (String) -> Void = StatusRepository.writeToStandardError
+    ) {
+        self.statusURL = statusURL
+        self.freshnessInterval = freshnessInterval
+        self.now = now
+        self.reportError = reportError
+    }
+
+    func read() -> StatusRepositorySnapshot {
+        let data: Data
+        do {
+            data = try Data(contentsOf: statusURL)
+        } catch {
+            let repositoryError: StatusRepositoryError
+            if (error as NSError).domain == NSCocoaErrorDomain,
+               (error as NSError).code == NSFileReadNoSuchFileError
+            {
+                repositoryError = .missingFile(statusURL.path)
+            } else {
+                repositoryError = .read(error.localizedDescription)
+            }
+            return unavailable(repositoryError)
+        }
+
+        let status: DashboardStatus
+        do {
+            status = try JSONDecoder().decode(DashboardStatus.self, from: data)
+        } catch {
+            return unavailable(.decode(error.localizedDescription))
+        }
+
+        guard status.slots.count == 6 else {
+            return unavailable(.invalidSlotCount(status.slots.count))
+        }
+        guard let payloadDate = Self.parseTimestamp(status.timestamp) else {
+            return unavailable(.invalidTimestamp(status.timestamp))
+        }
+
+        let readAt = now()
+        lastSuccessfulRead = readAt
+        lastError = nil
+        let freshness: StatusFreshness = abs(readAt.timeIntervalSince(payloadDate)) <= freshnessInterval
+            ? .fresh
+            : .stale
+        return StatusRepositorySnapshot(
+            status: status,
+            freshness: freshness,
+            lastSuccessfulRead: readAt,
+            error: nil
+        )
+    }
+
+    @discardableResult
+    func write(_ status: DashboardStatus) -> Bool {
+        do {
+            try FileManager.default.createDirectory(
+                at: statusURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return failWrite(.createDirectory(error.localizedDescription))
+        }
+
+        let data: Data
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            data = try encoder.encode(status)
+        } catch {
+            return failWrite(.encode(error.localizedDescription))
+        }
+
+        do {
+            try data.write(to: statusURL, options: .atomic)
+        } catch {
+            return failWrite(.atomicWrite(error.localizedDescription))
+        }
+
+        lastError = nil
+        return true
+    }
+
+    private func unavailable(_ error: StatusRepositoryError) -> StatusRepositorySnapshot {
+        lastError = error
+        return StatusRepositorySnapshot(
+            status: nil,
+            freshness: .unavailable,
+            lastSuccessfulRead: lastSuccessfulRead,
+            error: error
+        )
+    }
+
+    private func failWrite(_ error: StatusRepositoryError) -> Bool {
+        lastError = error
+        reportError("[joy-harness] \(error.description)")
+        return false
+    }
+
+    private static func parseTimestamp(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
+    }
+
+    private static func writeToStandardError(_ message: String) {
+        FileHandle.standardError.write(Data("\(message)\n".utf8))
+    }
+}
+
 @MainActor
 final class DashboardStore: ObservableObject {
     @Published private(set) var status = DashboardStatus.empty
+    @Published private(set) var freshness = StatusFreshness.unavailable
+    @Published private(set) var lastSuccessfulRead: Date?
+    @Published private(set) var statusError: StatusRepositoryError?
     @Published private(set) var actionMessage = ""
     @Published private(set) var pressedControllerInputs: Set<ControllerInput> = []
 
     var onAction: ((DashboardAction) -> Bool)?
 
-    private let statusURL: URL
+    private let repository: StatusRepository
     private var timer: Timer?
 
     init(statusURL: URL) {
-        self.statusURL = statusURL
+        self.repository = StatusRepository(statusURL: statusURL)
+        reload()
+    }
+
+    init(repository: StatusRepository) {
+        self.repository = repository
         reload()
     }
 
@@ -193,11 +474,17 @@ final class DashboardStore: ObservableObject {
         }
     }
 
+    func stopMonitoring() {
+        timer?.invalidate()
+        timer = nil
+    }
+
     func reload() {
-        guard let data = try? Data(contentsOf: statusURL),
-              let decoded = try? JSONDecoder().decode(DashboardStatus.self, from: data),
-              decoded.slots.count == 6
-        else { return }
+        let snapshot = repository.read()
+        freshness = snapshot.freshness
+        lastSuccessfulRead = snapshot.lastSuccessfulRead
+        statusError = snapshot.error
+        let decoded = snapshot.status ?? .empty
         if decoded != status { status = decoded }
     }
 
@@ -211,6 +498,14 @@ final class DashboardStore: ObservableObject {
 
     func clearControllerInputs() {
         pressedControllerInputs.removeAll()
+    }
+
+    @discardableResult
+    func writeStatus(_ status: DashboardStatus) -> Bool {
+        let succeeded = repository.write(status)
+        statusError = repository.lastError
+        if succeeded { reload() }
+        return succeeded
     }
 
     func perform(_ action: DashboardAction) {

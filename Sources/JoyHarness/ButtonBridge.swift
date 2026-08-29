@@ -134,6 +134,10 @@ final class ButtonBridge {
     private var activeDirectionActions: [ControllerInput: ControllerAction] = [:]
     private var touchpadTracker = TouchpadPointerTracker()
     private var inputSourceGeneration: UInt64 = 0
+    private var controllerObservers: [NSObjectProtocol] = []
+
+    var isRunning: Bool { !controllerObservers.isEmpty }
+    var controllerObserverCount: Int { controllerObservers.count }
 
     private(set) var selectedSlot = 0
     private(set) var operationMode: ControllerOperationMode = .mapping
@@ -196,29 +200,30 @@ final class ButtonBridge {
     }
 
     func start() {
+        guard controllerObservers.isEmpty else { return }
         GCController.shouldMonitorBackgroundEvents = true
         GCController.startWirelessControllerDiscovery(completionHandler: nil)
-        NotificationCenter.default.addObserver(
+        controllerObservers.append(NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             self?.attachPreferredController()
-        }
-        NotificationCenter.default.addObserver(
+        })
+        controllerObservers.append(NotificationCenter.default.addObserver(
             forName: .GCControllerDidBecomeCurrent,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             self?.attachPreferredController()
-        }
-        NotificationCenter.default.addObserver(
+        })
+        controllerObservers.append(NotificationCenter.default.addObserver(
             forName: .GCControllerDidDisconnect,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             self?.attachPreferredController()
-        }
+        })
         attachPreferredController()
     }
 
@@ -233,6 +238,28 @@ final class ButtonBridge {
         let nextMode: ControllerOperationMode = (operationMode == .native ? .mapping : .native)
         setOperationMode(nextMode)
         onToggleOperationMode?()
+    }
+
+    func stop() {
+        guard !controllerObservers.isEmpty || controller != nil || !observedControllers.isEmpty else { return }
+        if !controllerObservers.isEmpty {
+            GCController.stopWirelessControllerDiscovery()
+        }
+        for observer in controllerObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        controllerObservers.removeAll()
+        detachObservedHandlers()
+        resetInputState()
+        controller = nil
+        controllerFamily = .generic
+        joyConControllersByID.removeAll()
+        joyConComposition = joyConCoordinator.reconcile([])
+        joyConHIDShoulderSnapshots.removeAll()
+        onControllerChange?(nil, .generic)
+        onControllerSetChange?([])
+        onJoyConChange?(nil)
+        onAvailableInputsChange?(ControllerInput.availableInputs(for: .generic))
     }
 
     func moveSlot(_ offset: Int) {

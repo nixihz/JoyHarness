@@ -27,6 +27,23 @@ tasks:
       - swift test
       - python3 -m unittest discover -s tests -v
 
+  lint:
+    desc: Lint shell scripts
+    cmds:
+      - shellcheck scripts/*.sh
+
+  ci:
+    desc: Run the same application checks as pull request CI
+    cmds:
+      - task: test
+      - task: lint
+      - task: build
+
+  release-check:
+    desc: Validate versioned release metadata and artifact naming
+    cmds:
+      - python3 scripts/release_check.py {{.CLI_ARGS}}
+
   run:
     desc: Run daemon in foreground
     cmds:

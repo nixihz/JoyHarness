@@ -7,52 +7,25 @@
 
 #include "bsp/board_api.h"
 #include "pico/stdlib.h"
+#include "transport_queue.h"
 #include "tusb.h"
 
 #define REPORT_ID 6
-#define CHANNEL_RPC 2
-#define HID_PAYLOAD_SIZE 61
 #define RPC_BUFFER_SIZE 4096
 #define CDC_LINE_SIZE 128
-#define TX_QUEUE_SIZE 32
 
-typedef struct {
-    uint8_t bytes[63];
-} hid_packet_t;
-
-static hid_packet_t tx_queue[TX_QUEUE_SIZE];
-static uint8_t tx_head;
-static uint8_t tx_tail;
+static transport_queue_t tx_queue;
 static char rpc_buffer[RPC_BUFFER_SIZE];
 static size_t rpc_length;
 static char cdc_line[CDC_LINE_SIZE];
 static size_t cdc_length;
 
-static bool queue_packet(const uint8_t *bytes) {
-    uint8_t next = (uint8_t)((tx_head + 1) % TX_QUEUE_SIZE);
-    if (next == tx_tail) return false;
-    memcpy(tx_queue[tx_head].bytes, bytes, sizeof(tx_queue[tx_head].bytes));
-    tx_head = next;
-    return true;
-}
-
-static void queue_text(const char *text) {
-    size_t length = strlen(text);
-    size_t offset = 0;
-    while (offset < length) {
-        size_t chunk = length - offset;
-        if (chunk > HID_PAYLOAD_SIZE) chunk = HID_PAYLOAD_SIZE;
-        uint8_t packet[63] = {CHANNEL_RPC, (uint8_t)chunk};
-        memcpy(packet + 2, text + offset, chunk);
-        if (!queue_packet(packet)) return;
-        offset += chunk;
-    }
-}
-
 static void flush_hid(void) {
-    if (tx_tail == tx_head || !tud_hid_ready()) return;
-    tud_hid_report(REPORT_ID, tx_queue[tx_tail].bytes, sizeof(tx_queue[tx_tail].bytes));
-    tx_tail = (uint8_t)((tx_tail + 1) % TX_QUEUE_SIZE);
+    const hid_packet_t *packet = transport_queue_peek(&tx_queue);
+    if (packet == NULL || !tud_hid_ready()) return;
+    if (tud_hid_report(REPORT_ID, packet->bytes, sizeof(packet->bytes))) {
+        transport_queue_pop(&tx_queue);
+    }
 }
 
 static bool json_complete(const char *json, size_t length) {
@@ -154,11 +127,11 @@ static void reply_to_rpc(const char *json) {
                  "{\"id\":%d,\"error\":{\"code\":-32601,\"message\":\"Method not implemented\"}}\n",
                  id);
     }
-    queue_text(response);
+    (void)transport_queue_enqueue_text(&tx_queue, response);
 }
 
 static void consume_rpc_chunk(const uint8_t *buffer, uint16_t size) {
-    if (size < 2 || buffer[0] != CHANNEL_RPC) return;
+    if (size < 2 || buffer[0] != TRANSPORT_CHANNEL_RPC) return;
     size_t payload_length = buffer[1];
     if (payload_length > size - 2) payload_length = size - 2;
     if (rpc_length + payload_length >= sizeof(rpc_buffer)) {
@@ -185,7 +158,7 @@ static void notify_key(const char *key, int action, int agent) {
                  "{\"method\":\"v.oai.hid\",\"params\":{\"k\":\"%s\",\"act\":%d}}\n",
                  key, action);
     }
-    queue_text(json);
+    (void)transport_queue_enqueue_text(&tx_queue, json);
 }
 
 static void notify_joystick(int angle, int distance) {
@@ -193,7 +166,7 @@ static void notify_joystick(int angle, int distance) {
     snprintf(json, sizeof(json),
              "{\"method\":\"v.oai.rad\",\"params\":{\"a\":%.3f,\"d\":%.3f}}\n",
              angle / 1000.0, distance / 1000.0);
-    queue_text(json);
+    (void)transport_queue_enqueue_text(&tx_queue, json);
 }
 
 static void handle_cdc_line(char *line) {
@@ -236,6 +209,7 @@ static void read_cdc(void) {
 int main(void) {
     board_init();
     tusb_init();
+    transport_queue_init(&tx_queue);
     while (true) {
         tud_task();
         read_cdc();
