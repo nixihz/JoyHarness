@@ -6,6 +6,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_VERSION = (
+    ROOT / "Sources" / "JoyHarness" / "Resources" / "VERSION"
+).read_text(encoding="utf-8").strip()
 
 
 class ReleaseAutomationTests(unittest.TestCase):
@@ -37,7 +40,7 @@ class ReleaseAutomationTests(unittest.TestCase):
                 shutil.copyfile(source, destination)
             (checkout / "README.md").write_text(
                 (checkout / "README.md").read_text(encoding="utf-8").replace(
-                    "Joy-Harness-v0.4.0-macOS-arm64.dmg",
+                    f"Joy-Harness-v{CURRENT_VERSION}-macOS-arm64.dmg",
                     "Joy-Harness-v9.9.9-macOS-arm64.dmg",
                     1,
                 ),
@@ -60,7 +63,7 @@ class ReleaseAutomationTests(unittest.TestCase):
 
     def test_release_check_validates_optional_tag(self) -> None:
         accepted = subprocess.run(
-            ["python3", "scripts/release_check.py", "v0.4.0"],
+            ["python3", "scripts/release_check.py", f"v{CURRENT_VERSION}"],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -87,7 +90,7 @@ class ReleaseAutomationTests(unittest.TestCase):
     def test_release_check_rejects_executable_metadata_drift(self) -> None:
         mutations = {
             "tests/JoyHarnessTests/JoyHarnessTests.swift": (
-                'AppVersion.current == "0.4.0"',
+                f'AppVersion.current == "{CURRENT_VERSION}"',
                 'AppVersion.current == "9.9.9"',
                 "AppVersion.current expectation",
             ),

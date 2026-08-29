@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [简体中文](CHANGELOG.zh-CN.md)
 
+## [0.5.0] - 2026-08-30
+
+### Added
+- Runtime recovery for the local Codex app-server process, including bounded retries and predictable handling of malformed responses and timeouts.
+- Bounded, atomic buffering for local socket, serial, and RP2040 firmware transport paths.
+- Shared CI and release validation, local protocol documentation, mapping migration coverage, and expanded regression tests.
+
+### Changed
+- Controller pointer updates now use a display-synchronized clock, adapt to display changes, remain independent of main-thread stalls, and preserve delayed movement through bounded catch-up.
+- Runtime lifecycle cleanup, status freshness, controller mapping persistence, local protocols, and firmware transport reliability are more robust.
+
+### Fixed
+- Shortcut modifier flags are cleared on key-up so Command and other modifiers do not leak into subsequent controller-generated mouse clicks.
+
 ## [0.4.0] - 2026-08-28
 
 ### Added
@@ -89,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nixihz/JoyHarness/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nixihz/JoyHarness/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/nixihz/JoyHarness/compare/v0.2.4...v0.2.5

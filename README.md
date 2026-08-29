@@ -23,19 +23,28 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.4.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.5.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.4.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.4.0/Joy-Harness-v0.4.0-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.4.0/Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256)
-- [View the v0.4.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.4.0)
+- [Download Joy-Harness-v0.5.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.5.0/Joy-Harness-v0.5.0-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.5.0/Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256)
+- [View the v0.5.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.5.0)
 
-The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. The v0.4.0 release is signed with Developer ID Application and notarized by Apple.
+The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. The v0.5.0 release is signed with Developer ID Application and notarized by Apple.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256
 ```
+
+## What's New in v0.5.0
+
+- Made controller pointer motion display-synchronized and resilient to main-thread stalls, display changes, and short scheduling delays.
+- Hardened local I/O, Codex process recovery, lifecycle cleanup, status freshness, controller mapping migrations, and RP2040 transport buffering.
+- Fixed shortcut modifier keys remaining active after key release and affecting later controller-generated clicks.
+- Added shared CI and release validation, protocol documentation, and substantially broader regression coverage.
+
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 
 ## What's New in v0.4.0
 
@@ -43,8 +52,6 @@ shasum -a 256 -c Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256
 - Added Native Gamepad Mode (passthrough) with automatic switching for foreground game apps (such as JoyDSH) and PS / Home manual toggle.
 - Added independent Normal, Fast, and Slow pointer sensitivity adjustments in Settings.
 - Added multi-controller concurrent haptics and real-time controller button press feedback on the dashboard.
-
-See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 
 ## What's New in v0.3.0
 
@@ -382,7 +389,7 @@ Dashboard task commands require a connected RP2040. Task names come from Codex a
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.4.0` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.5.0` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Run Joy Harness in the foreground with SwiftPM |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -426,8 +433,8 @@ The script first stops installed Joy Harness/AgentDeck processes to avoid conten
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.4.0
-# Or: bash scripts/package_dmg.sh 0.4.0
+task dmg -- 0.5.0
+# Or: bash scripts/package_dmg.sh 0.5.0
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.

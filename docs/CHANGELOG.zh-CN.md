@@ -7,6 +7,20 @@
 
 [English](CHANGELOG.md)
 
+## [0.5.0] - 2026-08-30
+
+### 新增
+- 新增本地 Codex app-server 进程恢复机制，包括有界重试，以及对异常响应和超时的可预测处理。
+- 为本地 socket、串口与 RP2040 固件传输链路新增有界原子缓冲。
+- 新增 CI 与发布共用校验、本地协议文档、映射迁移覆盖，并扩充回归测试。
+
+### 变更
+- 手柄指针更新改用与显示刷新同步的时钟，可适应显示器变化，不再受主线程阻塞影响，并通过有界追赶保留延迟移动。
+- 强化运行时生命周期清理、状态时效、手柄映射持久化、本地协议和固件传输可靠性。
+
+### 修复
+- 快捷键松开时会清除修饰键标记，避免 Command 等状态泄漏到后续由手柄生成的鼠标点击。
+
 ## [0.4.0] - 2026-08-28
 
 ### 新增
@@ -89,6 +103,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nixihz/JoyHarness/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nixihz/JoyHarness/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/nixihz/JoyHarness/compare/v0.2.4...v0.2.5

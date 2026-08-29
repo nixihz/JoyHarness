@@ -25,19 +25,28 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 ## 下载
 
-当前版本为 **v0.4.0**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
+当前版本为 **v0.5.0**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
 
-- [下载 Joy-Harness-v0.4.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.4.0/Joy-Harness-v0.4.0-macOS-arm64.dmg)
-- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.4.0/Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256)
-- [查看 v0.4.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.4.0)
+- [下载 Joy-Harness-v0.5.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.5.0/Joy-Harness-v0.5.0-macOS-arm64.dmg)
+- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.5.0/Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256)
+- [查看 v0.5.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.5.0)
 
 DMG 只包含可手动启动的 `Joy Harness.app`。如需本地 CLI，或需要构建和刷写 RP2040 固件，
-请使用下方的[源码安装](#从零安装)。当前 v0.4.0 Release 使用 Developer ID Application
+请使用下方的[源码安装](#从零安装)。当前 v0.5.0 Release 使用 Developer ID Application
 签名并已通过 Apple 公证。校验下载文件：
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256
 ```
+
+## v0.5.0 更新
+
+- 手柄指针移动改为与显示刷新同步，并能稳定应对主线程阻塞、显示器切换和短时调度延迟。
+- 强化本地 I/O、Codex 进程恢复、生命周期清理、状态时效、手柄映射迁移和 RP2040 传输缓冲。
+- 修复快捷键松开后修饰键状态残留、影响后续手柄鼠标点击的问题。
+- 新增 CI 与发布共用校验、协议文档，并显著扩充回归测试覆盖。
+
+完整历史版本日志请参见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
 
 ## v0.4.0 更新
 
@@ -45,8 +54,6 @@ shasum -a 256 -c Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256
 - 新增原生手柄模式（Native Mode），支持在前台游戏应用（如 JoyDSH 等）激活时自动切换并暂停映射，支持通过手柄 PS / Home 键快速切换模式。
 - 设置中新增普通、快速和慢速鼠标灵敏度的独立调节滑块与持久化存储。
 - 新增多手柄并发触觉振动反馈支持，并在仪表盘中提供实时手柄按键高亮展示。
-
-完整历史版本日志请参见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
 
 ## v0.3.0 更新
 
@@ -471,7 +478,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程；主�
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.4.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
+| `task dmg -- 0.5.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 用 SwiftPM 在前台运行 Joy Harness |
 | `task install` | 编译、安装并启动应用 |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -520,15 +527,15 @@ Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可
 构建适用于当前 Mac 架构的发布镜像：
 
 ```bash
-task dmg -- 0.4.0
-# 或：bash scripts/package_dmg.sh 0.4.0
+task dmg -- 0.5.0
+# 或：bash scripts/package_dmg.sh 0.5.0
 ```
 
 产物会写入 `dist/`：
 
 ```text
-Joy-Harness-v0.4.0-macOS-arm64.dmg
-Joy-Harness-v0.4.0-macOS-arm64.dmg.sha256
+Joy-Harness-v0.5.0-macOS-arm64.dmg
+Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256
 ```
 
 DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、
