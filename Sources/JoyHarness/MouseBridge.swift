@@ -123,6 +123,28 @@ struct MotionTimeAccumulator {
     }
 }
 
+struct PointerMotionClockWatchdog {
+    private(set) var lastCallbackTime: TimeInterval?
+
+    mutating func recordCallback(at time: TimeInterval) {
+        lastCallbackTime = time
+    }
+
+    mutating func reset() {
+        lastCallbackTime = nil
+    }
+
+    func needsRecovery(
+        at time: TimeInterval,
+        displayLinkRunning: Bool,
+        timeout: TimeInterval = 1
+    ) -> Bool {
+        guard displayLinkRunning, let lastCallbackTime else { return true }
+        let elapsed = time - lastCallbackTime
+        return elapsed < 0 || elapsed > timeout
+    }
+}
+
 private struct PointerDisplay: Sendable {
     let id: CGDirectDisplayID
     let bounds: CGRect
@@ -141,6 +163,7 @@ private final class PointerMotionEngine: @unchecked Sendable {
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
     private var timeAccumulator = MotionTimeAccumulator()
+    private var clockWatchdog = PointerMotionClockWatchdog()
     private var lastTickTime: TimeInterval?
     private var scrolling = false
     private var accessibilityGranted = false
@@ -150,6 +173,7 @@ private final class PointerMotionEngine: @unchecked Sendable {
     func start(at time: TimeInterval) {
         lock.lock()
         lastTickTime = time
+        clockWatchdog.recordCallback(at: time)
         timeAccumulator.reset()
         lock.unlock()
     }
@@ -158,6 +182,7 @@ private final class PointerMotionEngine: @unchecked Sendable {
         lock.lock()
         targetVelocity = .zero
         lastTickTime = nil
+        clockWatchdog.reset()
         resetMotionLocked()
         lock.unlock()
     }
@@ -197,6 +222,15 @@ private final class PointerMotionEngine: @unchecked Sendable {
         lock.unlock()
     }
 
+    func needsClockRecovery(at time: TimeInterval, displayLinkRunning: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return clockWatchdog.needsRecovery(
+            at: time,
+            displayLinkRunning: displayLinkRunning
+        )
+    }
+
     func tickAndPost(
         at now: TimeInterval,
         frameDuration: TimeInterval
@@ -220,6 +254,7 @@ private final class PointerMotionEngine: @unchecked Sendable {
     ) -> PointerMotionFrame? {
         lock.lock()
         defer { lock.unlock() }
+        clockWatchdog.recordCallback(at: now)
         guard let previousTick = lastTickTime else {
             lastTickTime = now
             return nil
@@ -715,18 +750,29 @@ final class MouseBridge: NSObject {
 
     @objc private func handlePermissionTimer() {
         updatePermissionState()
+        recoverMovementClockIfNeeded()
     }
 
     private func handleScreenParametersChange() {
         refreshActiveDisplays()
-        let targetDisplayID = currentPointerDisplayID() ?? CGMainDisplayID()
-        if let displayLink {
-            _ = CVDisplayLinkSetCurrentCGDisplay(displayLink, targetDisplayID)
-            return
-        }
-        fallbackMovementTimer?.cancel()
-        fallbackMovementTimer = nil
+        stopMovementClock()
+        motionEngine.start(at: ProcessInfo.processInfo.systemUptime)
         startMovementClock()
+    }
+
+    private func recoverMovementClockIfNeeded(
+        at now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        guard let displayLink else { return }
+        guard motionEngine.needsClockRecovery(
+            at: now,
+            displayLinkRunning: CVDisplayLinkIsRunning(displayLink)
+        ) else { return }
+
+        stopMovementClock()
+        motionEngine.start(at: now)
+        startFallbackMovementTimer()
+        print("[agent-deck] pointer display clock stalled; switched to fallback timer")
     }
 
     private func refreshActiveDisplays() {

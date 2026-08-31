@@ -1359,6 +1359,19 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func pointerClockWatchdogDetectsMissingCallbacksWhileDisplayLinkReportsRunning() {
+        var watchdog = PointerMotionClockWatchdog()
+        watchdog.recordCallback(at: 10)
+
+        #expect(!watchdog.needsRecovery(at: 10.5, displayLinkRunning: true))
+        #expect(watchdog.needsRecovery(at: 11.1, displayLinkRunning: true))
+        #expect(watchdog.needsRecovery(at: 10.5, displayLinkRunning: false))
+
+        watchdog.reset()
+        #expect(watchdog.needsRecovery(at: 10.5, displayLinkRunning: true))
+    }
+
+    @Test
     func mouseSpeedBoostScalesVelocityWithoutChangingDirection() {
         let normal = MouseBridge.pointerVelocity(x: 0.6, y: -0.3)
         let boosted = MouseBridge.pointerVelocity(
