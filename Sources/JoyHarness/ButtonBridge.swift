@@ -106,6 +106,35 @@ struct TouchpadPointerTracker {
     }
 }
 
+final class JoyConInputRefreshScheduler {
+    typealias Enqueue = (@escaping () -> Void) -> Void
+
+    private let enqueue: Enqueue
+    private let lock = NSLock()
+    private var pendingGenerations: Set<UInt64> = []
+
+    init(enqueue: @escaping Enqueue = { operation in
+        DispatchQueue.main.async(execute: operation)
+    }) {
+        self.enqueue = enqueue
+    }
+
+    func schedule(generation: UInt64, operation: @escaping () -> Void) {
+        lock.lock()
+        let shouldEnqueue = pendingGenerations.insert(generation).inserted
+        lock.unlock()
+        guard shouldEnqueue else { return }
+
+        enqueue { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.pendingGenerations.remove(generation)
+            self.lock.unlock()
+            operation()
+        }
+    }
+}
+
 final class ButtonBridge {
     private weak var controller: GCController?
     private var observedControllers: [GCController] = []
@@ -134,6 +163,7 @@ final class ButtonBridge {
     private var activeDirectionActions: [ControllerInput: ControllerAction] = [:]
     private var touchpadTracker = TouchpadPointerTracker()
     private var inputSourceGeneration: UInt64 = 0
+    private let joyConInputRefreshScheduler = JoyConInputRefreshScheduler()
     private var controllerObservers: [NSObjectProtocol] = []
 
     var isRunning: Bool { !controllerObservers.isEmpty }
@@ -427,7 +457,7 @@ final class ButtonBridge {
                 hasExtendedGamepad: observed.extendedGamepad != nil
             )
             let publishChange = { [weak self] in
-                DispatchQueue.main.async {
+                self?.joyConInputRefreshScheduler.schedule(generation: generation) { [weak self] in
                     guard let self,
                           self.joyConComposition.accepts(
                               endpointID: endpointID,

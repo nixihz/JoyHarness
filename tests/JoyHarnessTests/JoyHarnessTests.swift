@@ -1339,6 +1339,28 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func mousePointerAccelerationReachesTargetWithinTwoFrames() {
+        let frameFactor = MouseBridge.smoothingFactor(
+            deltaTime: 1.0 / 60.0,
+            responseTime: MouseBridge.pointerAccelerationResponseTime
+        )
+        let twoFrameResponse = 1 - pow(1 - frameFactor, 2)
+
+        #expect(twoFrameResponse >= 0.85)
+    }
+
+    @Test
+    func mousePointerReleaseSettlesWithinTwoFrames() {
+        let frameFactor = MouseBridge.smoothingFactor(
+            deltaTime: 1.0 / 60.0,
+            responseTime: MouseBridge.pointerDecelerationResponseTime
+        )
+        let twoFrameRemainder = pow(1 - frameFactor, 2)
+
+        #expect(twoFrameRemainder <= 0.10)
+    }
+
+    @Test
     func mouseMovementPreservesDelayedTimeWithoutOneLargeCatchUpStep() {
         let frameDuration = 1.0 / 60.0
         var accumulator = MotionTimeAccumulator()
@@ -2088,6 +2110,31 @@ struct JoyHarnessTests {
         )
 
         #expect(sources == [.physicalProfile, .microGamepad])
+    }
+
+    @Test
+    func joyConInputRefreshCoalescesAHighFrequencyBurst() {
+        var queued: [() -> Void] = []
+        let scheduler = JoyConInputRefreshScheduler { queued.append($0) }
+        var refreshCount = 0
+
+        for _ in 0..<100 {
+            scheduler.schedule(generation: 7) {
+                refreshCount += 1
+            }
+        }
+
+        #expect(queued.count == 1)
+        queued.forEach { $0() }
+        #expect(refreshCount == 1)
+
+        queued.removeAll()
+        scheduler.schedule(generation: 7) { refreshCount += 1 }
+        scheduler.schedule(generation: 8) { refreshCount += 1 }
+
+        #expect(queued.count == 2)
+        queued.forEach { $0() }
+        #expect(refreshCount == 3)
     }
 
     @Test

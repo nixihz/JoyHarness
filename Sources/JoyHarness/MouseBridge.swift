@@ -274,7 +274,9 @@ private final class PointerMotionEngine: @unchecked Sendable {
             elapsed: now - previousTick,
             frameDuration: frameDuration
         ))
-        let responseTime: CGFloat = targetVelocity == .zero ? 0.028 : 0.05
+        let responseTime = targetVelocity == .zero
+            ? MouseBridge.pointerDecelerationResponseTime
+            : MouseBridge.pointerAccelerationResponseTime
         let smoothing = MouseBridge.smoothingFactor(
             deltaTime: deltaTime,
             responseTime: responseTime
@@ -339,6 +341,8 @@ final class MouseBridge: NSObject {
     /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
     nonisolated static let precisionSpeedMultiplier = PointerSensitivityValues.defaults.slow
     nonisolated static let boostSpeedMultiplier = PointerSensitivityValues.defaults.fast
+    nonisolated static let pointerAccelerationResponseTime: CGFloat = 0.016
+    nonisolated static let pointerDecelerationResponseTime: CGFloat = 0.012
 
     var onPermissionChange: (() -> Void)?
 
