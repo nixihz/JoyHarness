@@ -5,6 +5,15 @@ final class SingleInstanceLock {
     private let fileDescriptor: Int32
 
     init?(path: String) {
+        do {
+            try FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return nil
+        }
+
         let descriptor = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { return nil }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {

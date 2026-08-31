@@ -123,6 +123,20 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func singleInstanceLockCreatesAMissingParentDirectory() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("JoyHarnessTests.\(UUID().uuidString)")
+        let lockPath = root
+            .appendingPathComponent("runtime")
+            .appendingPathComponent("joy-harness.lock")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let lock = try #require(SingleInstanceLock(path: lockPath.path))
+        #expect(FileManager.default.fileExists(atPath: lockPath.path))
+        _ = lock
+    }
+
+    @Test
     func rp2040HandshakeAcceptsCurrentAndLegacyFirmware() {
         #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040 0.1.0"))
         #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040"))
