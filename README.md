@@ -23,19 +23,25 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.5.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.5.1** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.5.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.5.0/Joy-Harness-v0.5.0-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.5.0/Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256)
-- [View the v0.5.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.5.0)
+- [Download Joy-Harness-v0.5.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.5.1/Joy-Harness-v0.5.1-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.5.1/Joy-Harness-v0.5.1-macOS-arm64.dmg.sha256)
+- [View the v0.5.1 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.5.1)
 
-The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. The v0.5.0 release is signed with Developer ID Application and notarized by Apple.
+The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. The v0.5.1 release is signed with Developer ID Application and notarized by Apple.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.5.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.5.1-macOS-arm64.dmg.sha256
 ```
+
+## What's New in v0.5.1
+
+- Automatically recovers controller pointer movement when the display-synchronized clock stalls or the display configuration changes.
+- Makes controller pointer movement more responsive and coalesces redundant Joy-Con input refreshes to reduce paired-controller latency.
+- Fixes first launch when the local runtime directory does not exist yet.
 
 ## What's New in v0.5.0
 
@@ -389,7 +395,7 @@ Dashboard task commands require a connected RP2040. Task names come from Codex a
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.5.0` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.5.1` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Run Joy Harness in the foreground with SwiftPM |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -433,8 +439,8 @@ The script first stops installed Joy Harness/AgentDeck processes to avoid conten
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.5.0
-# Or: bash scripts/package_dmg.sh 0.5.0
+task dmg -- 0.5.1
+# Or: bash scripts/package_dmg.sh 0.5.1
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.

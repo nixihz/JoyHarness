@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [简体中文](CHANGELOG.zh-CN.md)
 
+## [0.5.1] - 2026-09-01
+
+### Fixed
+- Recover controller pointer movement when the display-synchronized clock stalls.
+- Create the local runtime directory before acquiring the single-instance lock.
+
+### Changed
+- Reduce controller pointer latency and coalesce redundant Joy-Con input refreshes.
+
 ## [0.5.0] - 2026-08-30
 
 ### Added
@@ -103,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nixihz/JoyHarness/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nixihz/JoyHarness/compare/v0.2.5...v0.3.0

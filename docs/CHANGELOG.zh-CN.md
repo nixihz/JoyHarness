@@ -7,6 +7,15 @@
 
 [English](CHANGELOG.md)
 
+## [0.5.1] - 2026-09-01
+
+### 修复
+- 当与显示刷新同步的指针时钟停跳时，自动恢复手柄指针移动。
+- 在获取单实例锁之前创建本地运行目录，修复首次启动失败。
+
+### 优化与重构
+- 缩短手柄指针响应时间，并合并重复的 Joy-Con 输入刷新。
+
 ## [0.5.0] - 2026-08-30
 
 ### 新增
@@ -103,6 +112,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nixihz/JoyHarness/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nixihz/JoyHarness/compare/v0.2.5...v0.3.0
