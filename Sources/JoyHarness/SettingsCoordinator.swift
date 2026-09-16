@@ -6,6 +6,7 @@ final class SettingsCoordinator: ObservableObject {
     enum Tab: String, Hashable, CaseIterable, Identifiable {
         case general
         case controllerMapping
+        case slotShortcuts
         case nativeMode
 
         var id: String { rawValue }
@@ -16,6 +17,8 @@ final class SettingsCoordinator: ObservableObject {
                 L10n.text("通用", "General")
             case .controllerMapping:
                 L10n.text("按键映射", "Key Mapping")
+            case .slotShortcuts:
+                L10n.text("槽位快捷键", "Slot Shortcuts")
             case .nativeMode:
                 L10n.text("原生模式", "Native Mode")
             }
@@ -27,6 +30,8 @@ final class SettingsCoordinator: ObservableObject {
                 "gearshape"
             case .controllerMapping:
                 "slider.horizontal.3"
+            case .slotShortcuts:
+                "keyboard"
             case .nativeMode:
                 "gamecontroller.fill"
             }

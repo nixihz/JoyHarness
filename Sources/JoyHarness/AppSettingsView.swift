@@ -8,6 +8,7 @@ struct AppSettingsView: View {
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
     @ObservedObject var nativeModeSettings: NativeGamepadAppSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
+    @ObservedObject var slotShortcutSettings: SlotShortcutSettings
 
     var body: some View {
         HStack(spacing: 0) {
@@ -34,6 +35,8 @@ struct AppSettingsView: View {
                 )
             case .controllerMapping:
                 ControllerMappingSettingsPane(store: mappingStore)
+            case .slotShortcuts:
+                SlotShortcutSettingsPane(settings: slotShortcutSettings)
             case .nativeMode:
                 NativeModeSettingsPane(settings: nativeModeSettings)
             }

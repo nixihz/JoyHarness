@@ -112,6 +112,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 - **Graduated trigger feedback:** DualSense R2 provides a light touch, a resistance wall, and a stronger confirmation after the trigger point. Xbox RT uses Impulse Trigger feedback where supported.
 - **Control macOS:** move and scroll with the left stick; hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
+- **Global keyboard slot shortcuts:** record or clear a shortcut for each slot in Settings → Slot Shortcuts. None are assigned by default; changes are saved and apply immediately, including in the background. Requires the app to be running and an RP2040 connection; a controller is optional.
 - **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
 - **Native Gamepad Mode (Passthrough):** automatically disable simulated mouse and key mappings when switching into specific applications (such as JoyDSH, Steam, or games) so they can directly receive raw controller events. Press the **PS / Home** button anytime to manually toggle between Native Mode and Mapping Mode with haptic feedback.
 - **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
@@ -123,7 +124,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 |---|---|
 | Joy Harness app only | Dashboard and local CLI diagnostics |
 | App + controller | Mouse, scrolling, system keys, slot-confirmation haptics, and manual haptic tests |
-| App + RP2040 | Select or open Codex Micro task slots from the dashboard; controller approval actions are unavailable |
+| App + RP2040 | Select Codex Micro task slots with global keyboard shortcuts, or select/open them from the dashboard; controller approval actions are unavailable |
 | App + controller + RP2040 | Full controller input for Codex, mouse control, push-to-talk, and haptic confirmation |
 
 ## How It Works

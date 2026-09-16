@@ -240,7 +240,7 @@ struct ControllerMappingSettingsPane: View {
     }
 }
 
-private struct ShortcutRecorderButton: NSViewRepresentable {
+struct ShortcutRecorderButton: NSViewRepresentable {
     let shortcut: RecordedKeyboardShortcut?
     @Binding var isRecording: Bool
     let onRecord: (RecordedKeyboardShortcut) -> Void
@@ -358,7 +358,9 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
             guard eventTap == nil else { return }
             let keyDownMask = CGEventMask(1) << CGEventType.keyDown.rawValue
             guard let tap = CGEvent.tapCreate(
-                tap: .cghidEventTap,
+                // Record the session event after macOS / keyboard remapping has
+                // applied modifier state, rather than the earlier raw HID event.
+                tap: .cgSessionEventTap,
                 place: .headInsertEventTap,
                 options: .defaultTap,
                 eventsOfInterest: keyDownMask,

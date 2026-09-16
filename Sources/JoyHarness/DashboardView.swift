@@ -4,71 +4,32 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var store: DashboardStore
     @ObservedObject var mappingStore: ControllerMappingStore
+    @ObservedObject var slotShortcutSettings: SlotShortcutSettings
     @EnvironmentObject private var languageSettings: AppLanguageSettings
 
     var body: some View {
-        VStack(spacing: 0) {
-            StatusFreshnessBanner(store: store)
+        HStack(spacing: 0) {
+            SlotSidebar(store: store, shortcutSettings: slotShortcutSettings)
+                .frame(width: 224)
 
-            HStack(spacing: 0) {
-                SlotSidebar(store: store)
-                    .frame(width: 224)
+            Divider()
 
-                Divider()
+            TaskDetail(store: store, mappingStore: mappingStore)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                TaskDetail(store: store, mappingStore: mappingStore)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
 
-                Divider()
-
-                ConnectionInspector(status: store.status, store: store, mappingStore: mappingStore)
-                    .frame(width: 252)
-            }
+            ConnectionInspector(status: store.status, store: store, mappingStore: mappingStore)
+                .frame(width: 252)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .id(languageSettings.preference)
     }
 }
 
-private struct StatusFreshnessBanner: View {
-    @ObservedObject var store: DashboardStore
-
-    var body: some View {
-        if store.freshness != .fresh {
-            HStack(spacing: 8) {
-                Image(systemName: store.freshness == .stale ? "clock.badge.exclamationmark" : "exclamationmark.triangle")
-                Text(message)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-            }
-            .foregroundStyle(tint)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
-            .frame(maxWidth: .infinity)
-            .background(tint.opacity(0.1))
-            .accessibilityLabel(message)
-        }
-    }
-
-    private var message: String {
-        switch store.freshness {
-        case .fresh:
-            return ""
-        case .stale:
-            return L10n.text("状态数据已过期", "Status data is stale")
-        case .unavailable:
-            return L10n.text("状态暂不可用", "Status is unavailable")
-        }
-    }
-
-    private var tint: Color {
-        store.freshness == .stale ? .orange : .red
-    }
-}
-
 private struct SlotSidebar: View {
     @ObservedObject var store: DashboardStore
+    @ObservedObject var shortcutSettings: SlotShortcutSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -86,6 +47,7 @@ private struct SlotSidebar: View {
                     SlotRow(slot: slot, isSelected: slot.slot == store.status.selectedSlot)
                 }
                 .buttonStyle(.plain)
+                .help(shortcutSettings.shortcuts[slot.slot - 1]?.displayName ?? L10n.text("可在设置中配置槽位快捷键", "Configure slot shortcuts in Settings"))
                 .taskSlotFocusEffectDisabled()
                 .accessibilityLabel(
                     "\(L10n.text("槽位", "Slot")) \(slot.slot), \(slot.displayTitle), \(slot.padState.displayName)"
@@ -93,6 +55,11 @@ private struct SlotSidebar: View {
             }
 
             Spacer(minLength: 12)
+
+            Text(L10n.text("全局快捷键可在设置中配置", "Configure global shortcuts in Settings"))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(12)
         }
         .background(.regularMaterial)
     }
@@ -250,7 +217,7 @@ private struct ControllerMap: View {
                     .help(L10n.text("打开按键映射设置", "Open key mapping settings"))
                 }
 
-                Text("\(mappingStore.controllerFamily.displayName) / Codex Micro")
+                Text("\(mappingStore.controllerFamily.displayName) / \(L10n.text("适配器", "Adapter"))")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
@@ -778,15 +745,15 @@ private struct ConnectionInspector: View {
             )
             Divider().padding(.leading, 16)
             InspectorSection(
-                title: "Codex Micro",
+                title: L10n.text("适配器", "Adapter"),
                 systemImage: "memorychip",
                 connected: status.rp2040,
                 rows: [
-                    ("RP2040", status.rp2040
+                    (L10n.text("连接状态", "Connection"), status.rp2040
                         ? L10n.text("已连接", "Connected") : L10n.text("未连接", "Disconnected")),
                     (L10n.text("模式", "Mode"), status.mode == "legacy-app-server"
                         ? L10n.text("软件兼容", "Software Compatibility")
-                        : L10n.text("物理 Micro", "Physical Micro")),
+                        : L10n.text("适配器连接", "Adapter Connection")),
                 ]
             )
             Divider().padding(.leading, 16)
