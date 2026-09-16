@@ -651,23 +651,21 @@ final class JoyHarnessRuntime {
     }
 
     private func handle(_ command: PadCommand) {
-        if let action = command.action?.lowercased() {
+        if let action = command.action {
             switch action {
-            case "ping":
+            case .ping:
                 print("[agent-deck] pong controller=\(haptics.connectedName) haptics=\(haptics.hasController)")
-            case "status":
+            case .status:
                 print("[agent-deck] state=\(current.rawValue) controller=\(haptics.connectedName)")
                 writeStatus(current, note: command.note ?? "status-request")
-            case "slots-refresh":
+            case .slotsRefresh:
                 _ = perform(.refresh)
-            case "slot-next":
+            case .slotNext:
                 buttons.moveSlot(1)
-            case "slot-previous":
+            case .slotPrevious:
                 buttons.moveSlot(-1)
-            case "slot-open":
+            case .slotOpen:
                 _ = perform(.openThread)
-            default:
-                print("[agent-deck] unknown action=\(action)")
             }
         }
         if let raw = command.state, let state = PadState.parse(raw) {
