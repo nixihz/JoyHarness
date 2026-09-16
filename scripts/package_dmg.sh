@@ -37,7 +37,8 @@ fi
 rm -rf "${APP_BUNDLE}"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources"
 install -m 755 "${BUILT_BINARY}" "${APP_BUNDLE}/Contents/MacOS/JoyHarness"
-/usr/bin/ditto "${RESOURCE_BUNDLE}/" "${APP_BUNDLE}/Contents/Resources/"
+/usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/Contents/Resources/JoyHarness_JoyHarness.bundle"
+install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${APP_BUNDLE}/Contents/Resources/JoyHarness.icns"
 
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -23,9 +23,9 @@ rm -rf "${APP_BUNDLE}"
 mkdir -p "${APP_CONTENTS}/MacOS"
 cp "${BUILT_BINARY}" "${APP_BINARY}"
 chmod +x "${APP_BINARY}"
-RESOURCE_BUNDLE="$(swift build -c debug --show-bin-path)/JoyHarness_JoyHarness.bundle"
 mkdir -p "${APP_CONTENTS}/Resources"
-/usr/bin/ditto "${RESOURCE_BUNDLE}/" "${APP_CONTENTS}/Resources/"
+/usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_CONTENTS}/Resources/JoyHarness_JoyHarness.bundle"
+install -m 644 "${PROJECT_ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${APP_CONTENTS}/Resources/JoyHarness.icns"
 
 cat > "${APP_CONTENTS}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

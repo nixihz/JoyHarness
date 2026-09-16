@@ -7,6 +7,12 @@ VERSION="$(tr -d '[:space:]' < "${ROOT}/Sources/JoyHarness/Resources/VERSION")"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${ROOT}/Sources/JoyHarness/Info.plist")"
 BIN_DIR="${HOME}/.agent-deck/bin"
 APP_DIR="${HOME}/.agent-deck/Joy Harness.app"
+# Update the copy used by Finder/Dock when the app was installed from a DMG.
+if [[ -d "/Applications/Joy Harness.app" ]]; then
+  APP_DIR="/Applications/Joy Harness.app"
+elif [[ -d "${HOME}/Applications/Joy Harness.app" ]]; then
+  APP_DIR="${HOME}/Applications/Joy Harness.app"
+fi
 LEGACY_APP_DIR="${HOME}/.agent-deck/AgentDeck.app"
 APP_CONTENTS="${APP_DIR}/Contents"
 APP_EXE="${APP_CONTENTS}/MacOS/JoyHarness"
@@ -28,7 +34,9 @@ BUILT_DIR="$(swift build -c release --show-bin-path)"
 BUILT="${BUILT_DIR}/JoyHarness"
 RESOURCE_BUNDLE="${BUILT_DIR}/JoyHarness_JoyHarness.bundle"
 install -m 755 "${BUILT}" "${STAGED_APP_EXE}"
-/usr/bin/ditto "${RESOURCE_BUNDLE}/" "${STAGED_CONTENTS}/Resources/"
+/usr/bin/ditto "${RESOURCE_BUNDLE}" "${STAGED_CONTENTS}/Resources/JoyHarness_JoyHarness.bundle"
+# Launch Services reads CFBundleIconFile from the app's resources, not the module bundle.
+install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_CONTENTS}/Resources/JoyHarness.icns"
 cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
