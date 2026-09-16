@@ -123,13 +123,15 @@ struct JoyConHIDShoulderSnapshot: Codable, Equatable {
 }
 
 enum JoyConHIDSnapshotResolver {
-    static func unambiguous<Value>(
+    static func unambiguous<Value: Equatable>(
         for side: JoyConSide,
         candidates: [(side: JoyConSide, snapshot: Value?)]
     ) -> Value? {
-        let matching = candidates.filter { $0.side == side }
-        guard matching.count == 1 else { return nil }
-        return matching[0].snapshot
+        // Ignore missing snapshots; collapse agreeing duplicate interfaces and reject conflicts.
+        let snapshots = candidates.filter { $0.side == side }.compactMap(\.snapshot)
+        guard let first = snapshots.first else { return nil }
+        guard snapshots.dropFirst().allSatisfy({ $0 == first }) else { return nil }
+        return first
     }
 }
 

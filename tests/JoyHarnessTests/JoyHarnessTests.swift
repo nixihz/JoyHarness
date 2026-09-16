@@ -1857,7 +1857,7 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func joyConHIDSnapshotsAreRejectedWhenOneSideHasMultipleEndpoints() {
+    func joyConHIDSnapshotsRejectConflictsButCollapseDuplicateEndpoints() {
         let onePerSide: [(side: JoyConSide, snapshot: Int?)] = [
             (.left, 10),
             (.right, 20),
@@ -1880,6 +1880,21 @@ struct JoyHarnessTests {
             for: .right,
             candidates: ambiguous
         ) == 20)
+
+        // Duplicate HID interfaces for one physical Joy-Con are common. They
+        // should not make the rail/outer shoulder buttons disappear when they
+        // report the same state, and an interface that has not produced a
+        // report yet should not block the live one.
+        let duplicated: [(side: JoyConSide, snapshot: Int?)] = [
+            (.left, 10),
+            (.left, 10),
+            (.left, nil),
+            (.right, 20),
+        ]
+        #expect(JoyConHIDSnapshotResolver.unambiguous(
+            for: .left,
+            candidates: duplicated
+        ) == 10)
     }
 
     @Test
