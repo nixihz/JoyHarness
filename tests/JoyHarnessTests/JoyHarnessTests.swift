@@ -1509,6 +1509,54 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func pointerLocationCanCrossBetweenOffsetAdjacentDisplays() {
+        let secondary = CGRect(x: -1_512, y: 673, width: 1_512, height: 982)
+        let primary = CGRect(x: 0, y: 0, width: 3_008, height: 1_692)
+        let displays = [primary, secondary]
+
+        let enteredSecondary = MouseBridge.nextPointerLocation(
+            from: CGPoint(x: 0, y: 619),
+            delta: CGPoint(x: -10, y: 0),
+            displays: displays
+        )
+        #expect(enteredSecondary == CGPoint(x: -1, y: 673))
+        #expect(
+            MouseBridge.nextPointerLocation(
+                from: enteredSecondary,
+                delta: CGPoint(x: -10, y: 0),
+                displays: displays
+            ) == CGPoint(x: -11, y: 673)
+        )
+    }
+
+    @Test
+    func pointerLocationStillStopsAtTheOuterDesktopEdge() {
+        let display = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+
+        #expect(
+            MouseBridge.nextPointerLocation(
+                from: CGPoint(x: 0, y: 500),
+                delta: CGPoint(x: -10, y: 0),
+                displays: [display]
+            ) == CGPoint(x: 0, y: 500)
+        )
+    }
+
+    @Test
+    func pointerLocationDoesNotJumpToADetachedDisplay() {
+        let primary = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let detached = CGRect(x: -1_920, y: 1_200, width: 1_920, height: 1_080)
+
+        #expect(
+            MouseBridge.nextPointerLocation(
+                from: CGPoint(x: 0, y: 500),
+                delta: CGPoint(x: -10, y: 0),
+                displays: [primary, detached]
+            ) == CGPoint(x: 0, y: 500)
+        )
+    }
+
+    @Test
     func touchpadTrackerIgnoresTheFirstContactAndEmitsRelativeDeltas() {
         var tracker = TouchpadPointerTracker()
 

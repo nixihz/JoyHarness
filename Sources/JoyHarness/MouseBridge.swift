@@ -678,6 +678,93 @@ final class MouseBridge: NSObject {
         return nearest
     }
 
+    /// Resolves a relative pointer move across the visible desktop.
+    ///
+    /// macOS can arrange touching displays with offset edges. A point moving
+    /// straight across such an edge may land in the layout gap rather than the
+    /// adjacent display. In that case, enter the touching display at its nearest
+    /// visible edge instead of pinning every subsequent move to the old display.
+    nonisolated static func nextPointerLocation(
+        from point: CGPoint,
+        delta: CGPoint,
+        displays: [CGRect]
+    ) -> CGPoint {
+        let location = clampPointerLocation(point, displays: displays)
+        let proposed = CGPoint(x: location.x + delta.x, y: location.y + delta.y)
+        guard !displays.contains(where: { $0.contains(proposed) }),
+              let currentDisplay = displays.first(where: { $0.contains(location) }) else {
+            return clampPointerLocation(proposed, displays: displays)
+        }
+
+        return adjacentDisplayEntry(
+            for: proposed,
+            leaving: currentDisplay,
+            displays: displays
+        ) ?? clampPointerLocation(proposed, displays: displays)
+    }
+
+    private nonisolated static func adjacentDisplayEntry(
+        for proposed: CGPoint,
+        leaving currentDisplay: CGRect,
+        displays: [CGRect]
+    ) -> CGPoint? {
+        let adjacencyTolerance: CGFloat = 0.5
+        var entries: [CGPoint] = []
+        for candidate in displays where candidate != currentDisplay {
+            let verticalOverlap = max(candidate.minY, currentDisplay.minY)
+                < min(candidate.maxY, currentDisplay.maxY)
+            let horizontalOverlap = max(candidate.minX, currentDisplay.minX)
+                < min(candidate.maxX, currentDisplay.maxX)
+
+            if proposed.x < currentDisplay.minX,
+               abs(candidate.maxX - currentDisplay.minX) <= adjacencyTolerance,
+               verticalOverlap {
+                entries.append(CGPoint(
+                    x: max(candidate.minX, candidate.maxX - 1),
+                    y: clamped(proposed.y, to: candidate.minY ... candidate.maxY - 1)
+                ))
+            }
+            if proposed.x >= currentDisplay.maxX,
+               abs(candidate.minX - currentDisplay.maxX) <= adjacencyTolerance,
+               verticalOverlap {
+                entries.append(CGPoint(
+                    x: candidate.minX,
+                    y: clamped(proposed.y, to: candidate.minY ... candidate.maxY - 1)
+                ))
+            }
+            if proposed.y < currentDisplay.minY,
+               abs(candidate.maxY - currentDisplay.minY) <= adjacencyTolerance,
+               horizontalOverlap {
+                entries.append(CGPoint(
+                    x: clamped(proposed.x, to: candidate.minX ... candidate.maxX - 1),
+                    y: max(candidate.minY, candidate.maxY - 1)
+                ))
+            }
+            if proposed.y >= currentDisplay.maxY,
+               abs(candidate.minY - currentDisplay.maxY) <= adjacencyTolerance,
+               horizontalOverlap {
+                entries.append(CGPoint(
+                    x: clamped(proposed.x, to: candidate.minX ... candidate.maxX - 1),
+                    y: candidate.minY
+                ))
+            }
+        }
+        return entries.min { lhs, rhs in
+            let lhsDelta = CGPoint(x: lhs.x - proposed.x, y: lhs.y - proposed.y)
+            let rhsDelta = CGPoint(x: rhs.x - proposed.x, y: rhs.y - proposed.y)
+            let lhsDistance = lhsDelta.x * lhsDelta.x + lhsDelta.y * lhsDelta.y
+            let rhsDistance = rhsDelta.x * rhsDelta.x + rhsDelta.y * rhsDelta.y
+            return lhsDistance < rhsDistance
+        }
+    }
+
+    private nonisolated static func clamped(
+        _ value: CGFloat,
+        to range: ClosedRange<CGFloat>
+    ) -> CGFloat {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
     private func startMovementClock() {
         guard !startDisplayLink() else { return }
         startFallbackMovementTimer()
@@ -804,9 +891,9 @@ final class MouseBridge: NSObject {
         displays: [CGRect]
     ) -> CGPoint? {
         guard let rawLocation = CGEvent(source: nil)?.location else { return nil }
-        let location = Self.clampPointerLocation(rawLocation, displays: displays)
-        let nextLocation = Self.clampPointerLocation(
-            CGPoint(x: location.x + delta.x, y: location.y + delta.y),
+        let nextLocation = Self.nextPointerLocation(
+            from: rawLocation,
+            delta: delta,
             displays: displays
         )
         let drag: (CGEventType, CGMouseButton)
