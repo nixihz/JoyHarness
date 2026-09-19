@@ -8,7 +8,7 @@ let package = Package(
         .executableTarget(
             name: "JoyHarness",
             path: "Sources/JoyHarness",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "DashboardPrototype"],
             resources: [
                 .process("Resources"),
             ],
