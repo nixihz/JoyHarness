@@ -7,6 +7,22 @@
 
 [English](CHANGELOG.md)
 
+## [0.6.0] - 2026-09-19
+
+### 新增
+- 支持小米蓝牙遥控器 2 Pro（RC003-MS），提供通过内置虚拟麦克风组件实现的语音输入和音量控制。
+- 六个任务槽均可配置全局快捷键。
+
+### 变更
+- 重做控制器 Dashboard，采用固定 744 × 600 布局，展示设备图、实时输入反馈、逐项按键映射和可展开的连接详情。
+- 震动测试改为有限反馈，不再改变任务状态。
+
+### 修复
+- 修复错位排列显示器之间的指针移动。
+- 合并重复的 Joy-Con HID 快照。
+- 修复类型化控制器动作的处理。
+- 修复 macOS 应用打包时的资源放置。
+
 ## [0.5.1] - 2026-09-01
 
 ### 修复
@@ -112,6 +128,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nixihz/JoyHarness/compare/v0.3.0...v0.4.0

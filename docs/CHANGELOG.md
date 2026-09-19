@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [简体中文](CHANGELOG.zh-CN.md)
 
+## [0.6.0] - 2026-09-19
+
+### Added
+- Support for Xiaomi Bluetooth Remote 2 Pro (RC003-MS), with voice input through a bundled virtual microphone component and volume controls.
+- Configurable global shortcuts for all six task slots.
+
+### Changed
+- Redesigned the controller dashboard with a fixed 744 × 600 layout, device artwork, live input feedback, per-button mappings, and expandable connection details.
+- Haptic tests now produce finite feedback without changing task state.
+
+### Fixed
+- Pointer movement across displays with offset positions.
+- Duplicate Joy-Con HID snapshots.
+- Handling of typed controller actions.
+- Resource staging in packaged macOS apps.
+
 ## [0.5.1] - 2026-09-01
 
 ### Fixed
@@ -112,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nixihz/JoyHarness/compare/v0.3.0...v0.4.0

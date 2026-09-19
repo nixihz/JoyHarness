@@ -23,19 +23,26 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.5.1** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.6.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.5.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.5.1/Joy-Harness-v0.5.1-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.5.1/Joy-Harness-v0.5.1-macOS-arm64.dmg.sha256)
-- [View the v0.5.1 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.5.1)
+- [Download Joy-Harness-v0.6.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.6.0/Joy-Harness-v0.6.0-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.6.0/Joy-Harness-v0.6.0-macOS-arm64.dmg.sha256)
+- [View the v0.6.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.6.0)
 
-The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. The v0.5.1 release is signed with Developer ID Application and notarized by Apple.
+The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. See the release notes for signing and notarization details.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.5.1-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.6.0-macOS-arm64.dmg.sha256
 ```
+
+## What's New in v0.6.0
+
+- Redesigned the controller dashboard with a compact 744 × 600 layout, device artwork, live input feedback, per-button mappings, and expandable connection details.
+- Added Xiaomi Bluetooth Remote 2 Pro (RC003-MS) support, including voice input through the bundled microphone component and volume controls.
+- Added configurable global shortcuts for all six task slots.
+- Fixed pointer movement across offset displays, duplicate Joy-Con HID snapshots, typed controller actions, and app resource packaging.
 
 ## What's New in v0.5.1
 
@@ -409,7 +416,7 @@ Run this audit separately from the full test suite: native view rendering occupi
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.5.1` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.6.0` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Build and launch the canonical signed app |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -453,8 +460,8 @@ The script first builds a signed app, stops installed Joy Harness/AgentDeck proc
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.5.1
-# Or: bash scripts/package_dmg.sh 0.5.1
+task dmg -- 0.6.0
+# Or: bash scripts/package_dmg.sh 0.6.0
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.
