@@ -129,6 +129,8 @@ shasum -a 256 -c Joy-Harness-v0.5.1-macOS-arm64.dmg.sha256
 - **原生手柄模式（直通模式）**：切换到指定应用（如 JoyDSH、Steam 或独立游戏）时自动暂停 Joy Harness 模拟鼠标与按键映射，让目标应用直接接收原生手柄事件，离开时自动恢复；也可随时按手柄上的 **PS / Home** 键手动进出原生/映射模式，并伴有触觉反馈。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
+- **小米 RC003-MS 遥控器**：通过 macOS IOHID 直接识别 Xiaomi Bluetooth Remote 2 Pro，
+  支持确认、返回、菜单、语音、主页、十字键、音量和自定义键；控制台使用专用遥控器图并实时高亮按键。
 - **中英文界面**：默认跟随 macOS 首选语言，中文系统显示简体中文，其他语言显示英语；
   也可在应用“设置”中手动固定为简体中文或 English，选择会自动保存。
 - **后台运行**：可在设置中启用登录时启动；应用运行期间，手柄或 RP2040 中途断开、
@@ -204,9 +206,9 @@ xcode-select --install
 任务槽、审批和按住说话，则需要完整硬件链路。
 
 - 一台运行 macOS 的 Mac。
-- 一只可被 macOS `GameController` 框架识别的手柄。项目原生适配 PS5 DualSense、
-  PS4 DualShock 4、Xbox Series，并实验性支持初代 Joy-Con L/R；其他手柄可使用标准按键、
-  摇杆与十字键，具体能力取决于 macOS 暴露的输入与震动接口。
+- 一只可被 macOS `GameController` 框架识别的手柄，或一只已经配对为 HID 设备的 Xiaomi
+  Bluetooth Remote 2 Pro（`RC003-MS`）。项目原生适配 PS5 DualSense、PS4 DualShock 4、
+  Xbox Series、初代 Joy-Con L/R 和 RC003-MS；其他手柄可使用标准按键、摇杆与十字键，具体能力取决于 macOS 暴露的输入与震动接口。
 - 一块 RP2040 开发板，例如 Raspberry Pi Pico 或兼容板。
 - 一根**支持数据传输**的 USB 线。只能充电的线无法刷写固件或创建串口/HID 设备。
 
@@ -219,6 +221,19 @@ xcode-select --install
 不受该方向设置影响。左 Joy-Con 竖握的实机轨迹已经确定当前变换使用的 Apple 轴基准；修正后的
 鼠标输出、右单支、横握和双支仍待最终真机验收，因此暂时保留实验性标记。震动和 motion 仅在
 macOS 实际暴露时可用。
+
+RC003-MS 在 **系统设置 → 蓝牙** 中配对后，启动 Joy Harness 并观察控制台是否显示“小米蓝牙遥控器”。
+默认十字键对应键盘上/下/左/右，确认回车、返回退格、主页 Esc，音量 −/+ 切换任务槽位，
+语音键发送右侧 Command 供 Spokenly 按住录音，自定义键飞书截图。菜单键切换原生/映射模式。
+可在“设置 → 自定义按键 → 恢复默认映射”应用完整布局，详见 [`DESIGN.md`](../DESIGN.md)。
+如果使用 Karabiner-Elements，请在 Devices 中关闭这只遥控器的 Modify events，避免其独占 HID。
+Joy Harness 需要“输入监控”授权；`./scripts/build_and_run.sh --logs` 可查看每次按下、松开对应的遥控器事件。
+内置麦克风通过 ATVV 蓝牙语音协议直接接入 Joy Harness。在“设置 → 通用 → 遥控器麦克风”
+启用应用自带组件，再选择为系统语音输入；无需另装语音桥软件。首次安装需要管理员验证，
+音频服务重载时声音会短暂中断。详见[遥控器麦克风说明](xiaomi-remote-voice.md)。
+映射模式下，12 个已适配按键只执行 Joy Harness 映射，避免方向键、菜单和系统音量双重响应；其他键盘不受影响。
+切换到原生模式或退出应用后恢复原有系统按键行为。可运行 `python3 scripts/verify_xiaomi_remote_volume.py`
+按提示进行实机回归，自动检查按键事件和系统音量。
 
 保持刚构建的 App 正在运行，然后按实际硬件场景执行对应的摇杆到鼠标方向验证：
 
@@ -486,7 +501,7 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程；主�
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
 | `task dmg -- 0.5.1` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
-| `task run` | 用 SwiftPM 在前台运行 Joy Harness |
+| `task run` | 构建并启动固定路径的签名应用 |
 | `task install` | 编译、安装并启动应用 |
 | `task firmware` | 构建 RP2040 UF2 固件 |
 | `task flash` | 将固件复制到处于 BOOTSEL 模式的 RP2040 |
@@ -522,9 +537,9 @@ python3 bin/joy-harness-send error --note manual-test
 ./scripts/build_and_run.sh --debug
 ```
 
-注意：该脚本会先停止已安装的 Joy Harness / AgentDeck 进程，以避免多个实例争用同一个
-Unix socket 或 RP2040 串口。调试结束后可再次运行 `task install`
-恢复已安装应用。
+该脚本会构建签名应用，停止已有的 Joy Harness / AgentDeck 进程，并原地更新唯一测试路径
+`~/.agent-deck/Joy Harness.app`；启动前会打印完整路径和签名身份。所有真机测试都从这个
+路径启动，不要打开 `dist/` 中由 DMG 打包任务留下的副本。
 
 Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可以直接使用项目的
 **Run** 操作构建并打开控制台。
@@ -556,7 +571,8 @@ Developer ID 签名并通过 Apple 公证。
 
 | 路径 | 内容 |
 |---|---|
-| `~/.agent-deck/Joy Harness.app` | 临时签名的 Joy Harness 应用 |
+| `~/.agent-deck/Joy Harness.app` | 测试和源码安装共用的 Developer ID 签名应用 |
+| `~/.agent-deck/signing-identity` | 首次本机签名成功后锁定的证书身份 |
 | `~/.agent-deck/bin/` | 应用入口和 CLI |
 | `~/.local/bin/joy-harness-send` | 指向已安装 CLI 的符号链接 |
 | `~/.agent-deck/status.json` | 当前连接、权限、槽位和状态快照 |
@@ -614,9 +630,11 @@ AGENT_DECK_RP2040_PORT=/dev/cu.usbmodemXXXX task run
 在“系统设置 → 隐私与安全性 → 辅助功能”中允许 Joy Harness，然后重新启动应用。该权限只
 影响鼠标与回车、复制、粘贴、截图等系统快捷键，不影响通过 RP2040 发送的 Codex Micro 操作。
 
-开发和安装脚本会在最终 `.app` 组装完成后统一签名，避免重新构建时辅助功能开关自动失效。
-脚本优先使用钥匙串中已有的 Apple Development 身份；没有开发身份时使用固定 requirement
-的 ad-hoc 签名。签名策略改变后，macOS 可能要求重新授权一次，后续重建不会重复丢失权限。
+开发和安装脚本会在最终 `.app` 组装完成后统一使用同一个 Developer ID 身份签名，并固定更新
+`~/.agent-deck/Joy Harness.app`。本机首次签名成功后会锁定证书身份，后续身份变化会直接报错。
+请给这个路径授予“输入监控”和“辅助功能”权限；固定路径和签名要求有助于保留重建后的权限。
+从旧签名切换到 Developer ID 时，macOS 可能要求重新授权一次，实际权限以应用中的状态为准。
+“设置 → 通用 → 当前应用”会显示实际运行路径，并可在 Finder 中定位，避免选错同名副本。
 
 ### Codex 收不到任务槽或审批按键
 

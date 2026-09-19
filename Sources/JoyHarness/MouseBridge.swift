@@ -30,6 +30,14 @@ extension RecordedKeyboardShortcut {
 extension SystemKey {
     func eventDescriptor(pressed: Bool) -> SystemKeyEventDescriptor {
         switch self {
+        case .arrowUp:
+            return SystemKeyEventDescriptor(keyCode: 0x7E, flags: [])
+        case .arrowDown:
+            return SystemKeyEventDescriptor(keyCode: 0x7D, flags: [])
+        case .arrowLeft:
+            return SystemKeyEventDescriptor(keyCode: 0x7B, flags: [])
+        case .arrowRight:
+            return SystemKeyEventDescriptor(keyCode: 0x7C, flags: [])
         case .enter:
             return SystemKeyEventDescriptor(keyCode: 0x24, flags: [])
         case .backspace:
@@ -333,8 +341,14 @@ final class MouseBridge: NSObject {
     private var pressedMouseButtons: Set<MouseButton> = []
     private var mouseClickSequence = MouseClickSequenceTracker()
     private var pressedSystemKeys: Set<SystemKey> = []
-    private var keyRepeatDelayTimer: Timer?
-    private var keyRepeatTimer: Timer?
+    private lazy var keyRepeater: SystemKeyRepeater = SystemKeyRepeater { [weak self] key in
+        guard let self else { return }
+        guard self.pressedSystemKeys.contains(key), self.isAccessibilityGranted else {
+            self.keyRepeater.stop(key)
+            return
+        }
+        self.postSystemKey(key, pressed: true, isRepeat: true)
+    }
     private var lastPermissionState = false
     private var activeDisplays: [PointerDisplay] = []
 
@@ -385,10 +399,7 @@ final class MouseBridge: NSObject {
             NotificationCenter.default.removeObserver(screenParametersObserver)
             self.screenParametersObserver = nil
         }
-        keyRepeatDelayTimer?.invalidate()
-        keyRepeatDelayTimer = nil
-        keyRepeatTimer?.invalidate()
-        keyRepeatTimer = nil
+        keyRepeater.stopAll()
         for button in Array(pressedMouseButtons) {
             setMouseButton(button, pressed: false)
         }
@@ -527,17 +538,17 @@ final class MouseBridge: NSObject {
         guard pressed != pressedSystemKeys.contains(key) else { return }
         guard isAccessibilityGranted else {
             pressedSystemKeys.remove(key)
-            stopKeyRepeat(for: key)
+            keyRepeater.stop(key)
             requestAccessibilityPermission()
             return
         }
         postSystemKey(key, pressed: pressed)
         if pressed {
             pressedSystemKeys.insert(key)
-            if key == .backspace { startKeyRepeat(for: key) }
+            keyRepeater.start(key)
         } else {
             pressedSystemKeys.remove(key)
-            stopKeyRepeat(for: key)
+            keyRepeater.stop(key)
         }
     }
 
@@ -678,6 +689,93 @@ final class MouseBridge: NSObject {
         return nearest
     }
 
+    /// Resolves a relative pointer move across the visible desktop.
+    ///
+    /// macOS can arrange touching displays with offset edges. A point moving
+    /// straight across such an edge may land in the layout gap rather than the
+    /// adjacent display. In that case, enter the touching display at its nearest
+    /// visible edge instead of pinning every subsequent move to the old display.
+    nonisolated static func nextPointerLocation(
+        from point: CGPoint,
+        delta: CGPoint,
+        displays: [CGRect]
+    ) -> CGPoint {
+        let location = clampPointerLocation(point, displays: displays)
+        let proposed = CGPoint(x: location.x + delta.x, y: location.y + delta.y)
+        guard !displays.contains(where: { $0.contains(proposed) }),
+              let currentDisplay = displays.first(where: { $0.contains(location) }) else {
+            return clampPointerLocation(proposed, displays: displays)
+        }
+
+        return adjacentDisplayEntry(
+            for: proposed,
+            leaving: currentDisplay,
+            displays: displays
+        ) ?? clampPointerLocation(proposed, displays: displays)
+    }
+
+    private nonisolated static func adjacentDisplayEntry(
+        for proposed: CGPoint,
+        leaving currentDisplay: CGRect,
+        displays: [CGRect]
+    ) -> CGPoint? {
+        let adjacencyTolerance: CGFloat = 0.5
+        var entries: [CGPoint] = []
+        for candidate in displays where candidate != currentDisplay {
+            let verticalOverlap = max(candidate.minY, currentDisplay.minY)
+                < min(candidate.maxY, currentDisplay.maxY)
+            let horizontalOverlap = max(candidate.minX, currentDisplay.minX)
+                < min(candidate.maxX, currentDisplay.maxX)
+
+            if proposed.x < currentDisplay.minX,
+               abs(candidate.maxX - currentDisplay.minX) <= adjacencyTolerance,
+               verticalOverlap {
+                entries.append(CGPoint(
+                    x: max(candidate.minX, candidate.maxX - 1),
+                    y: clamped(proposed.y, to: candidate.minY ... candidate.maxY - 1)
+                ))
+            }
+            if proposed.x >= currentDisplay.maxX,
+               abs(candidate.minX - currentDisplay.maxX) <= adjacencyTolerance,
+               verticalOverlap {
+                entries.append(CGPoint(
+                    x: candidate.minX,
+                    y: clamped(proposed.y, to: candidate.minY ... candidate.maxY - 1)
+                ))
+            }
+            if proposed.y < currentDisplay.minY,
+               abs(candidate.maxY - currentDisplay.minY) <= adjacencyTolerance,
+               horizontalOverlap {
+                entries.append(CGPoint(
+                    x: clamped(proposed.x, to: candidate.minX ... candidate.maxX - 1),
+                    y: max(candidate.minY, candidate.maxY - 1)
+                ))
+            }
+            if proposed.y >= currentDisplay.maxY,
+               abs(candidate.minY - currentDisplay.maxY) <= adjacencyTolerance,
+               horizontalOverlap {
+                entries.append(CGPoint(
+                    x: clamped(proposed.x, to: candidate.minX ... candidate.maxX - 1),
+                    y: candidate.minY
+                ))
+            }
+        }
+        return entries.min { lhs, rhs in
+            let lhsDelta = CGPoint(x: lhs.x - proposed.x, y: lhs.y - proposed.y)
+            let rhsDelta = CGPoint(x: rhs.x - proposed.x, y: rhs.y - proposed.y)
+            let lhsDistance = lhsDelta.x * lhsDelta.x + lhsDelta.y * lhsDelta.y
+            let rhsDistance = rhsDelta.x * rhsDelta.x + rhsDelta.y * rhsDelta.y
+            return lhsDistance < rhsDistance
+        }
+    }
+
+    private nonisolated static func clamped(
+        _ value: CGFloat,
+        to range: ClosedRange<CGFloat>
+    ) -> CGFloat {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
     private func startMovementClock() {
         guard !startDisplayLink() else { return }
         startFallbackMovementTimer()
@@ -804,9 +902,9 @@ final class MouseBridge: NSObject {
         displays: [CGRect]
     ) -> CGPoint? {
         guard let rawLocation = CGEvent(source: nil)?.location else { return nil }
-        let location = Self.clampPointerLocation(rawLocation, displays: displays)
-        let nextLocation = Self.clampPointerLocation(
-            CGPoint(x: location.x + delta.x, y: location.y + delta.y),
+        let nextLocation = Self.nextPointerLocation(
+            from: rawLocation,
+            delta: delta,
             displays: displays
         )
         let drag: (CGEventType, CGMouseButton)
@@ -859,45 +957,25 @@ final class MouseBridge: NSObject {
     }
 
     private func postSystemKey(_ key: SystemKey, pressed: Bool, isRepeat: Bool = false) {
+        Self.makeSystemKeyEvent(key, pressed: pressed, isRepeat: isRepeat)?.post(tap: .cghidEventTap)
+    }
+
+    nonisolated static func makeSystemKeyEvent(_ key: SystemKey, pressed: Bool, isRepeat: Bool = false) -> CGEvent? {
         let descriptor = key.eventDescriptor(pressed: pressed)
         let eventSource = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
             keyboardEventSource: eventSource,
             virtualKey: descriptor.keyCode,
             keyDown: pressed
-        ) else { return }
+        ) else { return nil }
+        // Modifier-only shortcuts (including Spokenly hold-to-talk) observe
+        // flagsChanged, just as they do for a physical Command key.
+        if key == .rightCommand { event.type = .flagsChanged }
         event.flags = descriptor.flags
         if isRepeat {
             event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
         }
-        event.post(tap: .cghidEventTap)
-    }
-
-    private func startKeyRepeat(for key: SystemKey) {
-        stopKeyRepeat(for: key)
-        let delayTimer = Timer(timeInterval: 0.45, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.pressedSystemKeys.contains(key) else { return }
-                let repeatTimer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.pressedSystemKeys.contains(key) else { return }
-                        self.postSystemKey(key, pressed: true, isRepeat: true)
-                    }
-                }
-                RunLoop.main.add(repeatTimer, forMode: .common)
-                self.keyRepeatTimer = repeatTimer
-            }
-        }
-        RunLoop.main.add(delayTimer, forMode: .common)
-        keyRepeatDelayTimer = delayTimer
-    }
-
-    private func stopKeyRepeat(for key: SystemKey) {
-        guard key == .backspace else { return }
-        keyRepeatDelayTimer?.invalidate()
-        keyRepeatDelayTimer = nil
-        keyRepeatTimer?.invalidate()
-        keyRepeatTimer = nil
+        return event
     }
 
     private func resetMotion() {

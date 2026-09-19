@@ -46,6 +46,7 @@ struct AppSettingsView: View {
 }
 
 private struct GeneralSettingsView: View {
+    @State private var remoteVoiceMessage: String?
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
@@ -53,6 +54,48 @@ private struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
+            Section(L10n.text("遥控器麦克风", "Remote Microphone")) {
+                Text(L10n.text(
+                    "使用 RC003-MS 内置麦克风说话。首次使用时启用 Joy Harness 自带的麦克风组件，之后选择为语音输入。只在按住语音键时接收，不保存录音。",
+                    "Use the RC003-MS built-in microphone. Enable the microphone component included with Joy Harness, then select it as your voice input. Audio is received while the voice key is held and is not saved."
+                ))
+                .font(.caption)
+                Button(L10n.text("使用遥控器作为系统麦克风", "Use Remote as System Microphone")) {
+                    do {
+                        try RemoteMicrophoneOutput.selectAsDefaultInput()
+                        remoteVoiceMessage = L10n.text("已选择 Joy Harness 遥控器麦克风；请在语音应用中使用系统默认输入。", "Selected Joy Harness Remote Microphone; use the system default input in your voice app.")
+                    } catch { remoteVoiceMessage = error.localizedDescription }
+                }
+                Text(remoteVoiceMessage ?? (RemoteMicrophoneOutput.installed
+                    ? L10n.text("这会切换系统默认输入；可在系统声音设置中切回其他麦克风。", "This changes the default input. Switch back in System Sound settings.")
+                    : L10n.text("麦克风组件尚未启用；首次安装需要管理员验证。", "Enable the microphone component first; installation requires administrator authentication.")))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L10n.text("启用 Joy Harness 麦克风组件", "Enable Joy Harness Microphone")) {
+                    guard let installer = Bundle.main.url(forResource: "JoyHarnessMicrophone", withExtension: "pkg") else {
+                        remoteVoiceMessage = L10n.text("当前构建缺少麦克风组件，请重新构建应用。", "This build is missing its microphone component. Rebuild the app.")
+                        return
+                    }
+                    NSWorkspace.shared.open(installer)
+                }
+            }
+
+            Section(L10n.text("当前应用", "Current App")) {
+                LabeledContent(L10n.text("版本", "Version"), value: AppVersion.current)
+                Text(Bundle.main.bundleURL.path)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                Button(L10n.text("在 Finder 中显示当前应用", "Show Current App in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                }
+                Text(L10n.text(
+                    "系统设置中的辅助功能和输入监控权限，请授权给这个应用。",
+                    "Grant Accessibility and Input Monitoring to this app in System Settings."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             Section(L10n.text("通用", "General")) {
                 Toggle(
                     L10n.text("登录时启动 Joy Harness", "Launch Joy Harness at Login"),

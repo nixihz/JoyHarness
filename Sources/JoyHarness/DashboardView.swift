@@ -280,7 +280,12 @@ private struct ControllerMap: View {
                     if mappingStore.controllerFamily == .dualSense || mappingStore.controllerFamily == .dualShock {
                         MappingLabel(key: key(for: .touchpadButton), title: title(for: .touchpadButton))
                     }
-                    if mappingStore.availableInputs.contains(.dpadUp) {
+                    if mappingStore.controllerFamily == .xiaomiRemote {
+                        inputLabel(.dpadUp)
+                        inputLabel(.dpadDown)
+                        inputLabel(.dpadLeft)
+                        inputLabel(.dpadRight)
+                    } else if mappingStore.availableInputs.contains(.dpadUp) {
                         MappingLabel(key: "D-Pad", title: dpadSummary)
                     }
                     inputLabel(.leftTrigger)
@@ -296,7 +301,11 @@ private struct ControllerMap: View {
                         orientation: mappingStore.joyConOrientation,
                         pressedInputs: pressedInputs
                     )
-                        .frame(minWidth: 220, maxWidth: 390, maxHeight: 270)
+                        .frame(
+                            minWidth: 220,
+                            maxWidth: mappingStore.controllerFamily == .xiaomiRemote ? 420 : 390,
+                            maxHeight: mappingStore.controllerFamily == .xiaomiRemote ? 440 : 270
+                        )
                         .accessibilityHidden(true)
                         .frame(minWidth: 220, maxWidth: .infinity)
                 } else if usesControllerSymbol {
@@ -367,7 +376,8 @@ private struct ControllerMap: View {
     private var usesControllerSymbol: Bool {
         mappingStore.controllerFamily == .dualSense ||
             mappingStore.controllerFamily == .dualShock ||
-            mappingStore.controllerFamily.isJoyCon
+            mappingStore.controllerFamily.isJoyCon ||
+            mappingStore.controllerFamily == .xiaomiRemote
     }
 
     private var isSingleJoyCon: Bool {
@@ -432,16 +442,13 @@ private struct ControllerArtwork: View {
                 ForEach(activeHighlights) { highlight in
                     ControllerInputHighlight(highlight: highlight)
                         .scaleEffect(min(proxy.size.width / 390, 1))
-                        .position(
-                            x: highlight.center.x * proxy.size.width,
-                            y: highlight.center.y * proxy.size.height
-                        )
+                        .position(markerPosition(for: highlight, in: proxy.size))
                         .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
             }
             .animation(.easeOut(duration: 0.12), value: activeHighlights)
         }
-        .aspectRatio(3 / 2, contentMode: .fit)
+        .aspectRatio(family == .xiaomiRemote ? 1 : 3 / 2, contentMode: .fit)
     }
 
     private var activeHighlights: [ControllerInputHighlightModel] {
@@ -449,6 +456,27 @@ private struct ControllerArtwork: View {
         return physicalInputs.compactMap { input in
             ControllerInputHighlightModel.layout(for: family, orientation: orientation)[input]
         }.sorted { $0.input.rawValue < $1.input.rawValue }
+    }
+
+    private func markerPosition(
+        for highlight: ControllerInputHighlightModel,
+        in size: CGSize
+    ) -> CGPoint {
+        guard family == .xiaomiRemote, let image = items.first?.image else {
+            return CGPoint(
+                x: highlight.center.x * size.width,
+                y: highlight.center.y * size.height
+            )
+        }
+
+        // The remote artwork is a narrow portrait image centered inside the
+        // wider dashboard slot. Map highlight coordinates to that image width.
+        let imageAspectRatio = image.size.width / image.size.height
+        let imageWidth = min(size.width, size.height * imageAspectRatio)
+        return CGPoint(
+            x: size.width / 2 + (highlight.center.x - 0.5) * imageWidth,
+            y: highlight.center.y * size.height
+        )
     }
 }
 
@@ -487,6 +515,7 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
         switch family {
         case .dualSense, .dualShock: playStationLayout
         case .xbox, .generic: xboxLayout
+        case .xiaomiRemote: xiaomiRemoteLayout
         case .joyConPair: joyConPairLayout
         case .joyConLeft:
             orientation == .horizontal ? joyConLeftHorizontalLayout : joyConLeftVerticalLayout
@@ -494,6 +523,21 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
             orientation == .horizontal ? joyConRightHorizontalLayout : joyConRightVerticalLayout
         }
     }
+
+    private static let xiaomiRemoteLayout: [ControllerInput: Self] = Dictionary(uniqueKeysWithValues: [
+        marker(.options, 0.76, 0.075, size: CGSize(width: 28, height: 28), cornerRadius: 14),
+        marker(.buttonA, 0.50, 0.235, size: CGSize(width: 38, height: 38), cornerRadius: 19),
+        marker(.dpadUp, 0.50, 0.15, size: CGSize(width: 38, height: 18), cornerRadius: 7),
+        marker(.dpadDown, 0.50, 0.31, size: CGSize(width: 38, height: 18), cornerRadius: 7),
+        marker(.dpadLeft, 0.20, 0.235, size: CGSize(width: 18, height: 38), cornerRadius: 7),
+        marker(.dpadRight, 0.80, 0.235, size: CGSize(width: 18, height: 38), cornerRadius: 7),
+        marker(.buttonB, 0.28, 0.39, size: CGSize(width: 30, height: 30), cornerRadius: 15),
+        marker(.rightShoulder, 0.72, 0.39, size: CGSize(width: 30, height: 30), cornerRadius: 15),
+        marker(.home, 0.28, 0.495, size: CGSize(width: 30, height: 30), cornerRadius: 15),
+        marker(.leftShoulder, 0.72, 0.495, size: CGSize(width: 30, height: 30), cornerRadius: 15),
+        marker(.menu, 0.28, 0.60, size: CGSize(width: 30, height: 30), cornerRadius: 15),
+        marker(.buttonY, 0.72, 0.60, size: CGSize(width: 30, height: 30), cornerRadius: 15),
+    ].map { ($0.input, $0) })
 
     private static func marker(
         _ input: ControllerInput,
@@ -938,6 +982,10 @@ private struct ConnectionInspector: View {
     }
 
     private var voiceInputDescription: String {
+        if status.controllerFamily == ControllerFamily.xiaomiRemote.rawValue,
+           let remoteStatus = status.remoteVoiceStatus {
+            return remoteStatus
+        }
         guard status.microphone, let name = status.voiceInput, !name.isEmpty else {
             guard let defaultInput = status.defaultVoiceInput, !defaultInput.isEmpty else {
                 return status.controllerFamily == ControllerFamily.dualSense.rawValue

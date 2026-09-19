@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>tech.keli.joyharness.microphone</string>
+  <key>CFBundleExecutable</key><string>JoyHarnessMicrophone</string>
+  <key>CFBundleName</key><string>Joy Harness Microphone</string>
+  <key>CFBundlePackageType</key><string>BNDL</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFPlugInDynamicRegistration</key><false/>
+  <key>CFPlugInFactories</key><dict>
+    <key>6BF0F742-2E88-4D2B-AB18-6FD5E4EDE414</key><string>JoyHarnessMicrophoneFactory</string>
+  </dict>
+  <key>CFPlugInTypes</key><dict>
+    <key>443ABAB8-E7B3-491A-B985-BEB9187030DB</key><array><string>6BF0F742-2E88-4D2B-AB18-6FD5E4EDE414</string></array>
+  </dict>
+</dict></plist>

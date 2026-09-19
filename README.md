@@ -116,6 +116,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 - **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
 - **Native Gamepad Mode (Passthrough):** automatically disable simulated mouse and key mappings when switching into specific applications (such as JoyDSH, Steam, or games) so they can directly receive raw controller events. Press the **PS / Home** button anytime to manually toggle between Native Mode and Mapping Mode with haptic feedback.
 - **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
+- **Xiaomi RC003-MS:** Xiaomi Bluetooth Remote 2 Pro is detected directly through macOS IOHID. OK, Back, Menu, Voice, Home, D-pad, volume, and custom keys are available in the mapping editor; the Dashboard shows the remote-specific artwork and live highlights.
 - **Run in the background:** launch at login can be enabled in Settings, and disconnected controllers or RP2040 boards are detected again while the app is running.
 
 ### Capabilities by Hardware
@@ -185,13 +186,18 @@ xcode-select --install
 The RP2040 is optional for mouse control, system shortcuts, the dashboard, and manual haptic tests. Codex Micro task slots, approvals, and push-to-talk require the complete hardware path:
 
 - A Mac running macOS.
-- A gamepad recognized by macOS `GameController`. Joy Harness directly supports PS5 DualSense, PS4 DualShock 4, Xbox Series controllers, and experimental first-generation Joy-Con L/R input. Other controllers depend on the inputs and haptics exposed by macOS.
+- A gamepad recognized by macOS `GameController`, or a Xiaomi Bluetooth Remote 2 Pro (`RC003-MS`) paired as a HID device. Joy Harness directly supports PS5 DualSense, PS4 DualShock 4, Xbox Series controllers, first-generation Joy-Con L/R input, and RC003-MS. Other controllers depend on the inputs and haptics exposed by macOS.
 - A Raspberry Pi Pico or compatible RP2040 development board.
 - A data-capable USB cable. Charge-only cables cannot flash firmware or expose serial/HID devices.
 
 Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
 
 First-generation Joy-Con connect individually over Bluetooth. Joy Harness supports an L/R pair as one logical controller and either side alone. For a single Joy-Con, choose **Horizontal** or **Vertical** in the main controller-mapping panel; left and right preferences persist independently, while paired mode ignores them. A Joy-Con (L) vertical trace established the Apple axis basis used by the current transform. The corrected pointer output, right-only, horizontal, and paired modes still require final hardware validation before removing the experimental label; haptics and motion remain conditional on what macOS exposes.
+
+The Xiaomi RC003-MS pairs through **System Settings > Bluetooth** and presents button events through IOHID rather than `GameController`. Start Joy Harness before pressing buttons; the Dashboard should change to `小米蓝牙遥控器` and show the remote artwork. Defaults target voice coding: the D-pad sends matching keyboard arrows, OK sends Enter, Back sends Backspace, Home sends Esc, Volume −/+ selects previous/next task slots, Voice holds Right Command for Spokenly, and Custom triggers Feishu Screenshot. Menu toggles native/mapping mode. Apply this layout with **Settings > Customize Buttons > Restore Default Mappings**; existing custom mappings are preserved on upgrade.
+If Karabiner-Elements is installed, disable **Modify events** for this remote in its Devices settings so it releases the HID device. Grant Joy Harness Input Monitoring; `./scripts/build_and_run.sh --logs` shows remote button presses and releases.
+The remote's built-in microphone connects directly over ATVV BLE. Enable the bundled microphone component in **Settings > General > Remote Microphone**, then select it as your input. No separate voice bridge is required. First-time installation needs administrator authentication and briefly restarts audio. See the [microphone implementation and validation notes](docs/xiaomi-remote-voice.md).
+In mapping mode, the remote's 12 supported keys trigger only Joy Harness mappings, without also sending native arrows, menu commands, or volume changes. Other keyboards are unaffected. Native mode and app exit restore the original system mappings; a helper also restores them if the app crashes. Run `python3 scripts/verify_xiaomi_remote_volume.py` for the physical volume regression check.
 
 With the freshly built app running, verify the physical stick-to-pointer directions using the matching hardware scenario:
 
@@ -397,7 +403,7 @@ Dashboard task commands require a connected RP2040. Task names come from Codex a
 |---|---|
 | `task build` | Build the release macOS executable |
 | `task dmg -- 0.5.1` | Build a versioned macOS DMG and SHA-256 checksum |
-| `task run` | Run Joy Harness in the foreground with SwiftPM |
+| `task run` | Build and launch the canonical signed app |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
 | `task flash` | Copy firmware to an RP2040 in BOOTSEL mode |
@@ -435,7 +441,7 @@ Additional modes:
 ./scripts/build_and_run.sh --debug
 ```
 
-The script first stops installed Joy Harness/AgentDeck processes to avoid contention for the Unix socket or RP2040 serial port. Run `task install` afterward to restore the installed app.
+The script first builds a signed app, stops installed Joy Harness/AgentDeck processes, and replaces the canonical test app at `~/.agent-deck/Joy Harness.app`. It prints that exact path and signing identity before launch. Use this app for every hardware test; do not open the `.app` left under `dist/` by the DMG packaging task.
 
 Create a release image for the current Mac architecture with:
 
@@ -457,6 +463,8 @@ Artifacts are written to `dist/`. The package script verifies the app signature,
 | `~/.local/bin/joy-harness-send` | Symlink to the installed CLI |
 | `~/.agent-deck/status.json` | Connection, permission, slot, and state snapshot |
 | `~/.agent-deck/pad.sock` | Local CLI/app Unix socket with `0600` permissions |
+
+The development and install commands require Developer ID and use the same canonical app path. The first successful local signature pins the identity in `~/.agent-deck/signing-identity`; later identity changes fail instead of silently changing trust. Grant **Input Monitoring** and **Accessibility** to `~/.agent-deck/Joy Harness.app`. Keeping the path and signing requirement stable helps preserve macOS authorization across rebuilds; migrating from an older signature may require reauthorization. Settings > General shows the current app's path and a button to reveal it in Finder.
 
 When upgrading an older hooks/`notify` installation, the installer backs up the affected configuration before removing obsolete Joy Harness entries. New installations do not write to `~/.codex/hooks.json` or Codex `notify` configuration. Legacy `agent-deck-send`, `AgentDeck`, and `~/.agent-deck` names remain for upgrade compatibility.
 

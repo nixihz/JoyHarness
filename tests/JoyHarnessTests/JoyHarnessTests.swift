@@ -42,6 +42,20 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func rightCommandProducesModifierTransitionsForHoldToTalk() throws {
+        let down = try #require(MouseBridge.makeSystemKeyEvent(.rightCommand, pressed: true))
+        let up = try #require(MouseBridge.makeSystemKeyEvent(.rightCommand, pressed: false))
+        #expect(down.type == .flagsChanged)
+        #expect(up.type == .flagsChanged)
+        #expect(down.getIntegerValueField(.keyboardEventKeycode) == 0x36)
+        #expect(down.flags.contains(.maskCommand))
+        #expect(down.flags.rawValue & 0x10 != 0)
+        #expect(up.flags.isEmpty)
+        #expect(MouseBridge.makeSystemKeyEvent(.enter, pressed: true)?.type == .keyDown)
+        #expect(MouseBridge.makeSystemKeyEvent(.enter, pressed: false)?.type == .keyUp)
+    }
+
+    @Test
     func clipboardAndScreenshotDescriptorsUseMacShortcuts() {
         let copy = SystemKey.copy.eventDescriptor(pressed: true)
         let paste = SystemKey.paste.eventDescriptor(pressed: true)
@@ -1509,6 +1523,54 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func pointerLocationCanCrossBetweenOffsetAdjacentDisplays() {
+        let secondary = CGRect(x: -1_512, y: 673, width: 1_512, height: 982)
+        let primary = CGRect(x: 0, y: 0, width: 3_008, height: 1_692)
+        let displays = [primary, secondary]
+
+        let enteredSecondary = MouseBridge.nextPointerLocation(
+            from: CGPoint(x: 0, y: 619),
+            delta: CGPoint(x: -10, y: 0),
+            displays: displays
+        )
+        #expect(enteredSecondary == CGPoint(x: -1, y: 673))
+        #expect(
+            MouseBridge.nextPointerLocation(
+                from: enteredSecondary,
+                delta: CGPoint(x: -10, y: 0),
+                displays: displays
+            ) == CGPoint(x: -11, y: 673)
+        )
+    }
+
+    @Test
+    func pointerLocationStillStopsAtTheOuterDesktopEdge() {
+        let display = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+
+        #expect(
+            MouseBridge.nextPointerLocation(
+                from: CGPoint(x: 0, y: 500),
+                delta: CGPoint(x: -10, y: 0),
+                displays: [display]
+            ) == CGPoint(x: 0, y: 500)
+        )
+    }
+
+    @Test
+    func pointerLocationDoesNotJumpToADetachedDisplay() {
+        let primary = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let detached = CGRect(x: -1_920, y: 1_200, width: 1_920, height: 1_080)
+
+        #expect(
+            MouseBridge.nextPointerLocation(
+                from: CGPoint(x: 0, y: 500),
+                delta: CGPoint(x: -10, y: 0),
+                displays: [primary, detached]
+            ) == CGPoint(x: 0, y: 500)
+        )
+    }
+
+    @Test
     func touchpadTrackerIgnoresTheFirstContactAndEmitsRelativeDeltas() {
         var tracker = TouchpadPointerTracker()
 
@@ -1809,7 +1871,7 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func joyConHIDSnapshotsAreRejectedWhenOneSideHasMultipleEndpoints() {
+    func joyConHIDSnapshotsRejectConflictsButCollapseDuplicateEndpoints() {
         let onePerSide: [(side: JoyConSide, snapshot: Int?)] = [
             (.left, 10),
             (.right, 20),
@@ -1832,6 +1894,21 @@ struct JoyHarnessTests {
             for: .right,
             candidates: ambiguous
         ) == 20)
+
+        // Duplicate HID interfaces for one physical Joy-Con are common. They
+        // should not make the rail/outer shoulder buttons disappear when they
+        // report the same state, and an interface that has not produced a
+        // report yet should not block the live one.
+        let duplicated: [(side: JoyConSide, snapshot: Int?)] = [
+            (.left, 10),
+            (.left, 10),
+            (.left, nil),
+            (.right, 20),
+        ]
+        #expect(JoyConHIDSnapshotResolver.unambiguous(
+            for: .left,
+            candidates: duplicated
+        ) == 10)
     }
 
     @Test

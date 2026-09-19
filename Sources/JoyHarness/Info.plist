@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>连接小米遥控器内置麦克风，在按住语音键时接收声音。</string>
   <key>CFBundleIdentifier</key>
   <string>tech.keli.joyharness</string>
   <key>CFBundleName</key>

@@ -40,6 +40,8 @@ class InstallationTests(unittest.TestCase):
 
         self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
         self.assertIn('pgrep -f -x "${APP_BINARY}"', script)
+        self.assertIn('APP_BUNDLE="${HOME}/.agent-deck/${DISPLAY_NAME}.app"', script)
+        self.assertIn('codesign -dvvv "${APP_BUNDLE}"', script)
 
     def test_joycon_pointer_verifier_has_passing_self_test(self) -> None:
         result = subprocess.run(
@@ -149,6 +151,26 @@ class InstallationTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+
+    def test_local_signing_does_not_fall_back_to_ad_hoc(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            app = Path(temporary_directory) / "Untouched.app"
+            app.mkdir()
+            marker = app / "marker"
+            marker.write_text("previous build", encoding="utf-8")
+            environment = os.environ.copy()
+            environment["JOY_HARNESS_SIGNING_IDENTITY"] = "-"
+            result = subprocess.run(
+                [str(ROOT / "scripts/sign_macos_app.sh"), str(app),
+                 "tech.joyharness.fixture", "local"],
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("trust", result.stderr)
+            self.assertEqual(list(app.iterdir()), [marker])
+            self.assertEqual(marker.read_text(encoding="utf-8"), "previous build")
 
 
 if __name__ == "__main__":

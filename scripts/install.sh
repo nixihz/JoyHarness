@@ -28,7 +28,11 @@ BUILT_DIR="$(swift build -c release --show-bin-path)"
 BUILT="${BUILT_DIR}/JoyHarness"
 RESOURCE_BUNDLE="${BUILT_DIR}/JoyHarness_JoyHarness.bundle"
 install -m 755 "${BUILT}" "${STAGED_APP_EXE}"
-/usr/bin/ditto "${RESOURCE_BUNDLE}/" "${STAGED_CONTENTS}/Resources/"
+/usr/bin/ditto "${RESOURCE_BUNDLE}" "${STAGED_CONTENTS}/Resources/JoyHarness_JoyHarness.bundle"
+# Launch Services reads CFBundleIconFile from the app's resources, not the module bundle.
+install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_CONTENTS}/Resources/JoyHarness.icns"
+"${ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
+install -m 644 "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.pkg" "${STAGED_CONTENTS}/Resources/JoyHarnessMicrophone.pkg"
 cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -52,13 +56,17 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
   <string>13.0</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>连接小米遥控器内置麦克风，在按住语音键时接收声音。</string>
 </dict>
 </plist>
 EOF
-"${ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_DIR}" "${BUNDLE_ID}"
+"${ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_DIR}" "${BUNDLE_ID}" local
 "${ROOT}/scripts/stop_joy_harness_instances.sh"
-rm -rf "${APP_DIR}" "${LEGACY_APP_DIR}"
-mv "${STAGED_APP_DIR}" "${APP_DIR}"
+mkdir -p "${APP_CONTENTS}"
+/usr/bin/rsync -a --delete "${STAGED_CONTENTS}/" "${APP_CONTENTS}/"
+codesign --verify --deep --strict "${APP_DIR}"
+rm -rf "${LEGACY_APP_DIR}"
 # Drop download/quarantine markers so the local source build is not treated as
 # an untrusted first-run payload by Gatekeeper/XProtect.
 xattr -cr "${APP_DIR}" 2>/dev/null || true
@@ -250,6 +258,7 @@ done
 
 echo
 echo "Installed."
+codesign -dvvv "${APP_DIR}" 2>&1 | awk '/^Authority=|^TeamIdentifier=|^Identifier=/'
 echo "  app:     ${APP_DIR}"
 echo "  binary:  ${APP_EXE}"
 echo "  send:    ${BIN_DIR}/joy-harness-send"

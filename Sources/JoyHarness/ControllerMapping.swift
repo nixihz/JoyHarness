@@ -61,6 +61,9 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         for family: ControllerFamily = .xbox,
         joyConOrientation: JoyConOrientation = .horizontal
     ) -> String {
+        if family == .xiaomiRemote {
+            return xiaomiRemoteDisplayName()
+        }
         let playStation = family == .dualSense || family == .dualShock
         if family.isJoyCon {
             return joyConDisplayName(for: family, orientation: joyConOrientation)
@@ -182,8 +185,32 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    private func xiaomiRemoteDisplayName() -> String {
+        switch self {
+        case .buttonA: L10n.text("确认", "OK")
+        case .buttonB: L10n.text("返回", "Back")
+        case .menu: L10n.text("菜单", "Menu")
+        case .options: L10n.text("语音", "Voice")
+        case .home: L10n.text("主页", "Home")
+        case .dpadUp: L10n.text("方向键 上", "D-Pad Up")
+        case .dpadDown: L10n.text("方向键 下", "D-Pad Down")
+        case .dpadLeft: L10n.text("方向键 左", "D-Pad Left")
+        case .dpadRight: L10n.text("方向键 右", "D-Pad Right")
+        case .leftShoulder: L10n.text("音量 -", "Volume -")
+        case .rightShoulder: L10n.text("音量 +", "Volume +")
+        case .buttonY: L10n.text("自定义键", "Custom")
+        default: displayName(for: .xbox)
+        }
+    }
+
     static func availableInputs(for family: ControllerFamily) -> Set<ControllerInput> {
         switch family {
+        case .xiaomiRemote:
+            return [
+                .buttonA, .buttonB, .menu, .options, .home,
+                .dpadUp, .dpadDown, .dpadLeft, .dpadRight,
+                .leftShoulder, .rightShoulder, .buttonY,
+            ]
         case .joyConLeft, .joyConRight:
             return [
                 .buttonA, .buttonB, .buttonX, .buttonY,
@@ -242,6 +269,10 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case mouseLeft
     case mouseRight
     case mouseMiddle
+    case arrowUp
+    case arrowDown
+    case arrowLeft
+    case arrowRight
     case enter
     case backspace
     case escape
@@ -283,6 +314,10 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseLeft: L10n.text("鼠标左键", "Left Mouse Button")
         case .mouseRight: L10n.text("鼠标右键", "Right Mouse Button")
         case .mouseMiddle: L10n.text("鼠标中键", "Middle Mouse Button")
+        case .arrowUp: L10n.text("↑ 上方向键", "↑ Up Arrow")
+        case .arrowDown: L10n.text("↓ 下方向键", "↓ Down Arrow")
+        case .arrowLeft: L10n.text("← 左方向键", "← Left Arrow")
+        case .arrowRight: L10n.text("→ 右方向键", "→ Right Arrow")
         case .enter: L10n.text("回车", "Enter")
         case .backspace: L10n.text("退格", "Backspace")
         case .escape: "Esc"
@@ -322,6 +357,10 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mouseLeft: .mouseButton(.left)
         case .mouseRight: .mouseButton(.right)
         case .mouseMiddle: .mouseButton(.middle)
+        case .arrowUp: .systemKey(.arrowUp)
+        case .arrowDown: .systemKey(.arrowDown)
+        case .arrowLeft: .systemKey(.arrowLeft)
+        case .arrowRight: .systemKey(.arrowRight)
         case .enter: .systemKey(.enter)
         case .backspace: .systemKey(.backspace)
         case .escape: .systemKey(.escape)
@@ -490,6 +529,25 @@ final class ControllerMappingStore: ObservableObject {
     static let defaultMappings = defaultMappings(for: .xbox)
 
     static func defaultMappings(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        if family == .xiaomiRemote {
+            var defaults: [ControllerInput: ControllerMappedAction] = [:]
+            for input in ControllerInput.allCases {
+                defaults[input] = .disabled
+            }
+            defaults[.buttonA] = .enter
+            defaults[.buttonB] = .backspace
+            defaults[.menu] = .toggleOperationMode
+            defaults[.options] = .rightCommand
+            defaults[.home] = .escape
+            defaults[.dpadUp] = .arrowUp
+            defaults[.dpadDown] = .arrowDown
+            defaults[.dpadLeft] = .arrowLeft
+            defaults[.dpadRight] = .arrowRight
+            defaults[.leftShoulder] = .previousSlot
+            defaults[.rightShoulder] = .nextSlot
+            defaults[.buttonY] = .screenshotTool
+            return defaults
+        }
         guard family == .joyConLeft || family == .joyConRight else { return baseDefaultMappings }
         var defaults = baseDefaultMappings
         let available = ControllerInput.availableInputs(for: family)
@@ -546,7 +604,7 @@ final class ControllerMappingStore: ObservableObject {
             from: userDefaults,
             key: "\(activeStorageKey).recordedShortcuts"
         )
-        if !storedFamily.isJoyCon {
+        if !storedFamily.isJoyCon && storedFamily != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
         }
     }

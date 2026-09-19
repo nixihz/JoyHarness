@@ -3,6 +3,16 @@ import Foundation
 import SwiftUI
 
 @main
+enum JoyHarnessEntryPoint {
+    @MainActor static func main() {
+        if CommandLine.arguments.contains("--remote-volume-guard") {
+            RemoteVolumeGuardWorker.run()
+        } else {
+            JoyHarnessApp.main()
+        }
+    }
+}
+
 struct JoyHarnessApp: App {
     @NSApplicationDelegateAdaptor(JoyHarnessAppDelegate.self) private var appDelegate
     @StateObject private var languageSettings = AppLanguageSettings()
@@ -106,6 +116,9 @@ final class JoyHarnessRuntime {
     private let rp2040 = RP2040Bridge()
     private let slotHotkeys = SlotHotkeys()
     private let joyConMotion = JoyConHIDMotionManager()
+    private let xiaomiRemote = XiaomiRemoteHIDManager()
+    private let xiaomiVoice = XiaomiRemoteVoice()
+    private let remoteMicrophoneOutput = RemoteMicrophoneOutput()
     private var current: PadState = .idle
     private var controllerFamily: ControllerFamily = .generic
     private var joyConSnapshot: JoyConControllerSnapshot?
@@ -174,6 +187,7 @@ final class JoyHarnessRuntime {
         }
 
         mouse.start()
+        xiaomiRemote.start()
         buttons.start()
         joyConMotion.start()
         startBatteryMonitoring()
@@ -216,6 +230,9 @@ final class JoyHarnessRuntime {
 
     func stopHotkeys() {
         slotHotkeys.stop()
+        xiaomiVoice.stop()
+        remoteMicrophoneOutput.stop()
+        xiaomiRemote.stop()
     }
 
     @discardableResult
@@ -340,6 +357,42 @@ final class JoyHarnessRuntime {
         joyConMotion.onShoulderChange = { [weak self] side, snapshot in
             self?.buttons.updateJoyConHIDShoulders(side: side, snapshot: snapshot)
         }
+        xiaomiRemote.onConnectionChange = { [weak self] isConnected in
+            guard let self else { return }
+            if isConnected { self.xiaomiVoice.start() }
+            else { self.xiaomiVoice.stop() }
+            self.buttons.setRemoteControllerActive(isConnected)
+            self.writeStatus(self.current, note: isConnected ? "xiaomi-remote-connected" : "xiaomi-remote-disconnected")
+        }
+        xiaomiRemote.onButtonInput = { [weak self] input, isPressed in
+            guard let self else { return }
+            if input == .options {
+                if isPressed {
+                    self.remoteMicrophoneOutput.finishPreviousSessionIfDraining()
+                } else {
+                    // Let the last PCM buffers reach the virtual microphone
+                    // before releasing the configured dictation shortcut.
+                    self.remoteMicrophoneOutput.end { [weak self] in
+                        self?.buttons.handleRemoteButton(input, isPressed: false)
+                    }
+                    return
+                }
+            }
+            self.buttons.handleRemoteButton(input, isPressed: isPressed)
+        }
+        xiaomiVoice.onStatus = { [weak self] in
+            guard let self else { return }
+            self.writeStatus(self.current, note: "xiaomi-voice")
+        }
+        xiaomiVoice.onStreamChange = { [weak self] active in
+            guard let self else { return }
+            if active { self.remoteMicrophoneOutput.begin() }
+            else { self.remoteMicrophoneOutput.end() }
+            self.writeStatus(self.current, note: "xiaomi-voice-stream")
+        }
+        xiaomiVoice.onSamples = { [weak self] samples in
+            self?.remoteMicrophoneOutput.append(samples)
+        }
         buttons.onAvailableInputsChange = { [weak self] inputs in
             self?.mappings.setAvailableInputs(inputs)
         }
@@ -423,6 +476,8 @@ final class JoyHarnessRuntime {
         guard mode != operationMode else { return }
         let previousMode = operationMode
         operationMode = mode
+        xiaomiRemote.setOperationMode(mode)
+        xiaomiVoice.enabled = mode == .mapping
         if previousMode == .native && mode == .mapping {
             unfocusFrontmostNativeAppIfNeeded()
         }
@@ -434,6 +489,8 @@ final class JoyHarnessRuntime {
         guard mode != operationMode else { return }
         let previousMode = operationMode
         operationMode = mode
+        xiaomiRemote.setOperationMode(mode)
+        xiaomiVoice.enabled = mode == .mapping
         buttons.setOperationMode(mode)
         if previousMode == .native && mode == .mapping && note.contains("manual") {
             unfocusFrontmostNativeAppIfNeeded()
@@ -467,7 +524,22 @@ final class JoyHarnessRuntime {
     private func writeStatus(_ state: PadState, note: String?) {
         let selectedSlot = buttons.selectedSlot
         let audio = ControllerAudioSupport.snapshot(for: controllerFamily)
-        let voiceInput = audio.controllerInput
+        let remoteMicrophoneAvailable = controllerFamily == .xiaomiRemote && xiaomiVoice.isReady && RemoteMicrophoneOutput.installed
+        let voiceInput = remoteMicrophoneAvailable
+            ? ControllerVoiceInput(name: RemoteMicrophoneOutput.deviceName, isDefault: RemoteMicrophoneOutput.selected, transport: "BLE")
+            : audio.controllerInput
+        let remoteVoiceStatus: String
+        if !xiaomiVoice.isReady {
+            remoteVoiceStatus = xiaomiVoice.status
+        } else if let failure = remoteMicrophoneOutput.failure {
+            remoteVoiceStatus = failure
+        } else if !RemoteMicrophoneOutput.installed {
+            remoteVoiceStatus = "遥控器麦克风已连接；请在设置中启用麦克风组件"
+        } else if !RemoteMicrophoneOutput.selected {
+            remoteVoiceStatus = "遥控器麦克风已连接；请在设置中选择语音输入"
+        } else {
+            remoteVoiceStatus = xiaomiVoice.status + "（Joy Harness）"
+        }
         let battery = buttons.batterySnapshot
         let slotPayload: [[String: Any]] = (0..<6).map { index in
             let thread = slotThreads[index]
@@ -479,12 +551,18 @@ final class JoyHarnessRuntime {
                 "state": slotStates[index].rawValue,
             ]
         }
+        let isRemoteConnected = controllerFamily == .xiaomiRemote && xiaomiRemote.isConnected
+        let controllerConnected = haptics.connectedName != "none" || isRemoteConnected
+        let controllerName = isRemoteConnected ? controllerFamily.displayName : haptics.connectedName
         var payload: [String: Any] = [
+            "app_path": Bundle.main.bundleURL.path,
+            "app_version": AppVersion.current,
+            "app_pid": ProcessInfo.processInfo.processIdentifier,
             "state": state.rawValue,
             "selected_slot": selectedSlot + 1,
             "slots": slotPayload,
-            "controller": haptics.connectedName,
-            "controller_connected": haptics.connectedName != "none",
+            "controller": controllerName,
+            "controller_connected": controllerConnected,
             "controller_family": controllerFamily.rawValue,
             "controller_touchpad": controllerFamily == .dualSense || controllerFamily == .dualShock,
             "haptics": haptics.hasController,
@@ -495,6 +573,7 @@ final class JoyHarnessRuntime {
             "voice_input_default": voiceInput?.isDefault ?? false,
             "voice_input_transport": voiceInput?.transport ?? "",
             "default_voice_input": audio.defaultInputName ?? "",
+            "remote_voice_status": remoteVoiceStatus,
             "rp2040": rp2040.isConnected,
             "mode": "physical-codex-micro",
             "operation_mode": operationMode.rawValue,
@@ -506,6 +585,10 @@ final class JoyHarnessRuntime {
         if let battery {
             payload["controller_battery_level"] = battery.level
             payload["controller_battery_state"] = battery.state.rawValue
+        }
+        if controllerFamily == .xiaomiRemote, let level = xiaomiVoice.batteryLevel {
+            payload["controller_battery_level"] = level
+            payload["controller_battery_state"] = "unknown"
         }
         if let joyConSnapshot {
             payload["joycon_mode"] = joyConSnapshot.mode.rawValue
@@ -651,23 +734,21 @@ final class JoyHarnessRuntime {
     }
 
     private func handle(_ command: PadCommand) {
-        if let action = command.action?.lowercased() {
+        if let action = command.action {
             switch action {
-            case "ping":
+            case .ping:
                 print("[agent-deck] pong controller=\(haptics.connectedName) haptics=\(haptics.hasController)")
-            case "status":
+            case .status:
                 print("[agent-deck] state=\(current.rawValue) controller=\(haptics.connectedName)")
                 writeStatus(current, note: command.note ?? "status-request")
-            case "slots-refresh":
+            case .slotsRefresh:
                 _ = perform(.refresh)
-            case "slot-next":
+            case .slotNext:
                 buttons.moveSlot(1)
-            case "slot-previous":
+            case .slotPrevious:
                 buttons.moveSlot(-1)
-            case "slot-open":
+            case .slotOpen:
                 _ = perform(.openThread)
-            default:
-                print("[agent-deck] unknown action=\(action)")
             }
         }
         if let raw = command.state, let state = PadState.parse(raw) {
