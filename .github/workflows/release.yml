@@ -82,6 +82,8 @@ jobs:
         env:
           CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          INSTALLER_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_INSTALLER_CERTIFICATE_BASE64 }}
+          INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD }}
           API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
@@ -90,6 +92,8 @@ jobs:
           VALUES=(
             "${CERTIFICATE_BASE64}"
             "${CERTIFICATE_PASSWORD}"
+            "${INSTALLER_CERTIFICATE_BASE64}"
+            "${INSTALLER_CERTIFICATE_PASSWORD}"
             "${API_KEY_BASE64}"
             "${API_KEY_ID}"
             "${API_ISSUER_ID}"
@@ -105,7 +109,7 @@ jobs:
             echo "RELEASE_MODE=unnotarized" >> "${GITHUB_ENV}"
             echo "JOY_HARNESS_SIGNING_IDENTITY=-" >> "${GITHUB_ENV}"
           elif [[ "${CONFIGURED}" -ne "${#VALUES[@]}" ]]; then
-            echo "Signing/notarization secrets are only partially configured." >&2
+            echo "Signing/notarization secrets are only partially configured. Both Developer ID Application and Developer ID Installer certificates are required." >&2
             exit 1
           else
             echo "RELEASE_MODE=notarized" >> "${GITHUB_ENV}"
@@ -122,18 +126,28 @@ jobs:
         env:
           CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          INSTALLER_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_INSTALLER_CERTIFICATE_BASE64 }}
+          INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
           CERTIFICATE_PATH="${RUNNER_TEMP}/developer-id.p12"
+          INSTALLER_CERTIFICATE_PATH="${RUNNER_TEMP}/developer-id-installer.p12"
           KEYCHAIN_PATH="${RUNNER_TEMP}/release-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
 
           printf '%s' "${CERTIFICATE_BASE64}" | base64 --decode -o "${CERTIFICATE_PATH}"
+          printf '%s' "${INSTALLER_CERTIFICATE_BASE64}" | base64 --decode -o "${INSTALLER_CERTIFICATE_PATH}"
           security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
           security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
           security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
           security import "${CERTIFICATE_PATH}" \
             -P "${CERTIFICATE_PASSWORD}" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "${KEYCHAIN_PATH}"
+          security import "${INSTALLER_CERTIFICATE_PATH}" \
+            -P "${INSTALLER_CERTIFICATE_PASSWORD}" \
             -A \
             -t cert \
             -f pkcs12 \
@@ -153,6 +167,15 @@ jobs:
             exit 1
           fi
           echo "JOY_HARNESS_SIGNING_IDENTITY=${SIGNING_IDENTITY}" >> "${GITHUB_ENV}"
+          INSTALLER_SIGNING_IDENTITY="$({
+            security find-identity -v -p basic "${KEYCHAIN_PATH}" \
+              | sed -n 's/.*"\(Developer ID Installer:[^"]*\)"/\1/p'
+          } | head -n 1)"
+          if [[ -z "${INSTALLER_SIGNING_IDENTITY}" ]]; then
+            echo "No Developer ID Installer identity was imported." >&2
+            exit 1
+          fi
+          echo "JOY_HARNESS_INSTALLER_SIGNING_IDENTITY=${INSTALLER_SIGNING_IDENTITY}" >> "${GITHUB_ENV}"
 
       - name: Build DMG
         run: bash scripts/package_dmg.sh "${VERSION}"
