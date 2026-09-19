@@ -367,7 +367,8 @@ private struct ControllerMap: View {
     private var usesControllerSymbol: Bool {
         mappingStore.controllerFamily == .dualSense ||
             mappingStore.controllerFamily == .dualShock ||
-            mappingStore.controllerFamily.isJoyCon
+            mappingStore.controllerFamily.isJoyCon ||
+            mappingStore.controllerFamily == .xiaomiRemote
     }
 
     private var isSingleJoyCon: Bool {
@@ -487,6 +488,7 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
         switch family {
         case .dualSense, .dualShock: playStationLayout
         case .xbox, .generic: xboxLayout
+        case .xiaomiRemote: xiaomiRemoteLayout
         case .joyConPair: joyConPairLayout
         case .joyConLeft:
             orientation == .horizontal ? joyConLeftHorizontalLayout : joyConLeftVerticalLayout
@@ -494,6 +496,20 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
             orientation == .horizontal ? joyConRightHorizontalLayout : joyConRightVerticalLayout
         }
     }
+
+    private static let xiaomiRemoteLayout: [ControllerInput: Self] = Dictionary(uniqueKeysWithValues: [
+        marker(.options, 0.50, 0.22, size: CGSize(width: 28, height: 28), cornerRadius: 14),
+        marker(.buttonA, 0.50, 0.40, size: CGSize(width: 32, height: 32), cornerRadius: 16),
+        marker(.dpadUp, 0.50, 0.31, size: CGSize(width: 34, height: 18), cornerRadius: 6),
+        marker(.dpadDown, 0.50, 0.49, size: CGSize(width: 34, height: 18), cornerRadius: 6),
+        marker(.dpadLeft, 0.43, 0.40, size: CGSize(width: 18, height: 34), cornerRadius: 6),
+        marker(.dpadRight, 0.57, 0.40, size: CGSize(width: 18, height: 34), cornerRadius: 6),
+        marker(.buttonB, 0.44, 0.58, size: CGSize(width: 26, height: 26), cornerRadius: 13),
+        marker(.home, 0.56, 0.58, size: CGSize(width: 26, height: 26), cornerRadius: 13),
+        marker(.leftShoulder, 0.44, 0.68, size: CGSize(width: 26, height: 26), cornerRadius: 8),
+        marker(.rightShoulder, 0.56, 0.68, size: CGSize(width: 26, height: 26), cornerRadius: 8),
+        marker(.buttonY, 0.50, 0.78, size: CGSize(width: 34, height: 22), cornerRadius: 8),
+    ].map { ($0.input, $0) })
 
     private static func marker(
         _ input: ControllerInput,

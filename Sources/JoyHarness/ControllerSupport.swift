@@ -14,6 +14,7 @@ enum ControllerFamily: String {
     case joyConPair = "joycon-pair"
     case joyConLeft = "joycon-left"
     case joyConRight = "joycon-right"
+    case xiaomiRemote = "xiaomi-remote"
     case generic = "generic"
 
     var joyConMode: JoyConMode? {
@@ -26,6 +27,7 @@ enum ControllerFamily: String {
     }
 
     var isJoyCon: Bool { joyConMode != nil }
+    var isXiaomiRemote: Bool { self == .xiaomiRemote }
 
     var displayName: String {
         switch self {
@@ -35,6 +37,7 @@ enum ControllerFamily: String {
         case .joyConPair: "Nintendo Joy-Con L + R"
         case .joyConLeft: "Nintendo Joy-Con (L)"
         case .joyConRight: "Nintendo Joy-Con (R)"
+        case .xiaomiRemote: L10n.text("小米蓝牙遥控器", "Xiaomi Remote")
         case .generic: L10n.text("通用手柄", "Generic Controller")
         }
     }
@@ -50,6 +53,8 @@ enum ControllerFamily: String {
             )]
         case .xbox, .generic:
             [ControllerArtworkDescriptor(resource: "controller-dashboard", rotationDegrees: 0)]
+        case .xiaomiRemote:
+            [ControllerArtworkDescriptor(resource: "controller-dashboard-xiaomi-remote", rotationDegrees: 0)]
         case .joyConPair:
             [
                 ControllerArtworkDescriptor(resource: "controller-dashboard-joycon-left", rotationDegrees: 0),
@@ -250,4 +255,9 @@ enum ControllerAudioSupport {
         ) == noErr else { return nil }
         return device
     }
+}
+
+enum XiaomiRemoteConstants {
+    static let vendorID: Int = 0x2717
+    static let productID: Int = 0x32B8
 }

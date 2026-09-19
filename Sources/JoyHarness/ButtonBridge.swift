@@ -1313,4 +1313,37 @@ final class ButtonBridge {
         publishedInputs.removeAll()
         leftStickHandler?(0, 0, false)
     }
+
+    func setRemoteControllerActive(_ active: Bool) {
+        if active {
+            detachObservedHandlers()
+            resetInputState()
+            controller = nil
+            controllerFamily = .xiaomiRemote
+            onControllerChange?(nil, .xiaomiRemote)
+            onControllerSetChange?([])
+            onAvailableInputsChange?(ControllerInput.availableInputs(for: .xiaomiRemote))
+            print("[agent-deck] controller switched to xiaomi-remote")
+        } else {
+            if controllerFamily == .xiaomiRemote {
+                resetInputState()
+                attachPreferredController()
+            }
+        }
+    }
+
+    func handleRemoteButton(_ input: ControllerInput, isPressed: Bool) {
+        publishInput(input, pressed: isPressed)
+        if input == .home {
+            handleHomeButton(isPressed: isPressed)
+            return
+        }
+        if operationMode == .native {
+            if isPressed, mappingProvider(input) == .toggleOperationMode {
+                toggleOperationMode()
+            }
+            return
+        }
+        handleMappedDirection(input, isPressed: isPressed)
+    }
 }

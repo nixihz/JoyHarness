@@ -106,6 +106,7 @@ final class JoyHarnessRuntime {
     private let rp2040 = RP2040Bridge()
     private let slotHotkeys = SlotHotkeys()
     private let joyConMotion = JoyConHIDMotionManager()
+    private let xiaomiRemote = XiaomiRemoteHIDManager()
     private var current: PadState = .idle
     private var controllerFamily: ControllerFamily = .generic
     private var joyConSnapshot: JoyConControllerSnapshot?
@@ -176,6 +177,7 @@ final class JoyHarnessRuntime {
         mouse.start()
         buttons.start()
         joyConMotion.start()
+        xiaomiRemote.start()
         startBatteryMonitoring()
         rp2040.start()
         threads.start()
@@ -340,6 +342,14 @@ final class JoyHarnessRuntime {
         joyConMotion.onShoulderChange = { [weak self] side, snapshot in
             self?.buttons.updateJoyConHIDShoulders(side: side, snapshot: snapshot)
         }
+        xiaomiRemote.onConnectionChange = { [weak self] isConnected in
+            guard let self else { return }
+            self.buttons.setRemoteControllerActive(isConnected)
+            self.writeStatus(self.current, note: isConnected ? "xiaomi-remote-connected" : "xiaomi-remote-disconnected")
+        }
+        xiaomiRemote.onButtonInput = { [weak self] input, isPressed in
+            self?.buttons.handleRemoteButton(input, isPressed: isPressed)
+        }
         buttons.onAvailableInputsChange = { [weak self] inputs in
             self?.mappings.setAvailableInputs(inputs)
         }
@@ -479,12 +489,15 @@ final class JoyHarnessRuntime {
                 "state": slotStates[index].rawValue,
             ]
         }
+        let isRemoteConnected = controllerFamily == .xiaomiRemote && xiaomiRemote.isConnected
+        let controllerConnected = haptics.connectedName != "none" || isRemoteConnected
+        let controllerName = isRemoteConnected ? controllerFamily.displayName : haptics.connectedName
         var payload: [String: Any] = [
             "state": state.rawValue,
             "selected_slot": selectedSlot + 1,
             "slots": slotPayload,
-            "controller": haptics.connectedName,
-            "controller_connected": haptics.connectedName != "none",
+            "controller": controllerName,
+            "controller_connected": controllerConnected,
             "controller_family": controllerFamily.rawValue,
             "controller_touchpad": controllerFamily == .dualSense || controllerFamily == .dualShock,
             "haptics": haptics.hasController,
