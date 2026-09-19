@@ -16,7 +16,7 @@ Joy Harness is a physical control system for Codex Desktop on macOS. It connects
 
 The system has two parts:
 
-1. **Joy Harness for macOS** reads controller input, controls the mouse, plays haptic feedback, and provides a six-slot dashboard.
+1. **Joy Harness for macOS** reads controller input, controls the mouse, plays haptic feedback, and provides a controller and input dashboard.
 2. **RP2040 firmware** turns a Raspberry Pi Pico-compatible board into a `Codex Micro` device recognized by Codex Desktop and receives controller actions from Joy Harness over serial.
 
 Both the controller and RP2040 connect to the Mac; no wiring is required between them. Joy Harness starts a read-only Codex app-server subprocess to retrieve task names and ordering. It does not proxy Codex actions or emulate Codex Micro with keyboard events. Slot selection, approvals, and push-to-talk reach Codex Desktop through the RP2040's native Vendor HID interface. Mouse actions and system shortcuts are sent directly to the foreground macOS application.
@@ -113,7 +113,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 - **Control macOS:** move and scroll with the left stick; hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
 - **Global keyboard slot shortcuts:** record or clear a shortcut for each slot in Settings → Slot Shortcuts. None are assigned by default; changes are saved and apply immediately, including in the background. Requires the app to be running and an RP2040 connection; a controller is optional.
-- **Diagnose locally:** inspect the active slot, controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
+- **Diagnose locally:** inspect controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
 - **Native Gamepad Mode (Passthrough):** automatically disable simulated mouse and key mappings when switching into specific applications (such as JoyDSH, Steam, or games) so they can directly receive raw controller events. Press the **PS / Home** button anytime to manually toggle between Native Mode and Mapping Mode with haptic feedback.
 - **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
 - **Xiaomi RC003-MS:** Xiaomi Bluetooth Remote 2 Pro is detected directly through macOS IOHID. OK, Back, Menu, Voice, Home, D-pad, volume, and custom keys are available in the mapping editor; the Dashboard shows the remote-specific artwork and live highlights.
@@ -125,7 +125,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 |---|---|
 | Joy Harness app only | Dashboard and local CLI diagnostics |
 | App + controller | Mouse, scrolling, system keys, slot-confirmation haptics, and manual haptic tests |
-| App + RP2040 | Select Codex Micro task slots with global keyboard shortcuts, or select/open them from the dashboard; controller approval actions are unavailable |
+| App + RP2040 | Select Codex Micro task slots with global keyboard shortcuts, controller approval actions are unavailable |
 | App + controller + RP2040 | Full controller input for Codex, mouse control, push-to-talk, and haptic confirmation |
 
 ## How It Works
@@ -388,14 +388,21 @@ Joy Harness does not subscribe to the Codex task lifecycle and does not automati
 
 ## Dashboard
 
-Joy Harness is a background app with a window. Closing the window does not quit the process; explicitly quitting the app stops it without an automatic restart. The dashboard shows:
+Joy Harness is a background app with a window. Closing the window does not quit the process; explicitly quitting the app stops it without an automatic restart.
 
-- Six task slots, the active slot, and the full controller mapping.
-- Controller name, haptic availability, RP2040 connection, and physical Codex Micro mode.
-- Accessibility and voice-input diagnostics.
-- Controls to open the active task and test haptic states.
+The dashboard places the current input device beside its individual button mappings. It adapts to Xiaomi remotes, DualSense, DualShock, Xbox, single or paired Joy-Con, and generic controllers. Single Joy-Con has a native horizontal/vertical grip picker. The main window has a fixed 744 × 600 pt content area, with vertical scrolling for additional content.
 
-Dashboard task commands require a connected RP2040. Task names come from Codex app-server, with first-message summaries used for unnamed tasks.
+Connection details are expanded by default and can be collapsed. They retain device capabilities, Joy-Con endpoints, battery, adapter connection, operating mode, Accessibility and Input Monitoring permissions, voice input, recording ownership, and four finite haptic tests. Unknown or stale data is labeled explicitly. Native gamepad mode pauses mappings while retaining physical input feedback.
+
+Tasks remain in the target application. The dashboard has no task list, slot cards, task titles, state banners, or task navigation. Slot names can still appear as configurable mapping actions. Haptic tests do not change task state.
+
+See [DESIGN.md](DESIGN.md) and [implementation notes](docs/design/controller-dashboard.md). For an isolated visual audit of all eight device families, run:
+
+```bash
+DASHBOARD_RENDER_DIR=/tmp/joy-dashboard-renders swift test --filter DashboardRenderingTests
+```
+
+Run this audit separately from the full test suite: native view rendering occupies the main thread and would interfere with real-time socket and key-repeat tests. It uses temporary status fixtures and isolated preferences, with no simulated device mode in the shipped app.
 
 ## Commands
 

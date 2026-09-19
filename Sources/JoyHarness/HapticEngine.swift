@@ -15,6 +15,7 @@ final class HapticEngine {
     private var engine: CHHapticEngine? { engines.first }
 
     var hasController: Bool { !engines.isEmpty }
+    var hasRightTriggerFeedback: Bool { rightTriggerEngine != nil }
     var connectedName: String { controllerName }
 
     func attach(_ controller: GCController?) {
@@ -217,18 +218,36 @@ final class HapticEngine {
         }
     }
 
-    private func playBurst(events: [(TimeInterval, Float, Float, TimeInterval)]) {
-        guard !engines.isEmpty else {
-            print("[agent-deck] burst skipped (no haptic engine)")
-            return
-        }
-        for engine in engines { playBurst(events: events, on: engine) }
+    // Finite preview only: never changes domain state or starts the repeating state timer.
+    func testFeedback(_ state: PadState) -> Bool {
+        playBurst(events: Self.testEvents(for: state))
     }
 
+    static func testEvents(for state: PadState) -> [(TimeInterval, Float, Float, TimeInterval)] {
+        switch state {
+        case .idle: return [(0, 0.2, 0.3, 0.1)]
+        case .busy: return [(0, 0.25, 0.3, 0.12), (0.3, 0.25, 0.3, 0.12), (0.6, 0.25, 0.3, 0.12)]
+        case .waiting: return [(0, 0.5, 0.6, 0.18), (0.4, 0.5, 0.6, 0.18)]
+        case .done: return [(0, 0.4, 0.6, 0.12), (0.18, 0.7, 0.8, 0.18)]
+        case .error: return [(0, 0.8, 0.9, 0.12), (0.2, 0.8, 0.9, 0.12), (0.4, 0.8, 0.9, 0.12)]
+        }
+    }
+
+    @discardableResult
+    private func playBurst(events: [(TimeInterval, Float, Float, TimeInterval)]) -> Bool {
+        guard !engines.isEmpty else {
+            print("[agent-deck] burst skipped (no haptic engine)")
+            return false
+        }
+        let results = engines.map { playBurst(events: events, on: $0) }
+        return results.contains(true)
+    }
+
+    @discardableResult
     private func playBurst(
         events: [(TimeInterval, Float, Float, TimeInterval)],
         on engine: CHHapticEngine
-    ) {
+    ) -> Bool {
         do {
             let hapticEvents: [CHHapticEvent] = events.map { start, intensity, sharpness, duration in
                 CHHapticEvent(
@@ -246,8 +265,10 @@ final class HapticEngine {
             let totalDuration = events.map { $0.0 + $0.3 }.max() ?? 0
             retain(player, for: totalDuration)
             try player.start(atTime: 0)
+            return true
         } catch {
             print("[agent-deck] burst failed: \(error)")
+            return false
         }
     }
 

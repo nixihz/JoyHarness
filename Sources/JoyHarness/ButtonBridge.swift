@@ -310,6 +310,11 @@ final class ButtonBridge {
         }
     }
 
+    func rescanControllers() {
+        GCController.startWirelessControllerDiscovery(completionHandler: nil)
+        attachPreferredController()
+    }
+
     private func attachPreferredController() {
         guard !isRemoteControllerActive else { return }
         let allControllers = GCController.controllers()
@@ -626,6 +631,7 @@ final class ButtonBridge {
             for input in allInputs {
                 let wasPressed = previous.buttons[input] == true
                 let isPressed = next.buttons[input] == true
+                if wasPressed != isPressed { publishInput(input, pressed: isPressed) }
                 guard !wasPressed && isPressed else { continue }
                 if input == .home || mappingProvider(input) == .toggleOperationMode {
                     toggleOperationMode()
@@ -740,6 +746,14 @@ final class ButtonBridge {
             return
         }
         if operationMode == .native {
+            if let input = inputForElement(changedElement, in: gamepad),
+               let button = changedElement as? GCControllerButtonInput {
+                publishInput(input, pressed: button.isPressed)
+            }
+            for (input, button) in [
+                (ControllerInput.dpadUp, gamepad.dpad.up), (.dpadDown, gamepad.dpad.down),
+                (.dpadLeft, gamepad.dpad.left), (.dpadRight, gamepad.dpad.right),
+            ] { publishInput(input, pressed: button.isPressed) }
             if let buttonInput = changedElement as? GCControllerButtonInput, buttonInput.isPressed {
                 if let input = inputForElement(changedElement, in: gamepad),
                    mappingProvider(input) == .toggleOperationMode {

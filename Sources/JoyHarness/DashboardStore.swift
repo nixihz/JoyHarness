@@ -8,7 +8,8 @@ enum DashboardAction: Equatable {
     case deny
     case toggleFastMode
     case openThread
-    case testState(PadState)
+    case testHaptics(PadState)
+    case rescanControllers
 }
 
 struct DashboardSlot: Codable, Identifiable, Equatable {
@@ -74,6 +75,8 @@ struct DashboardStatus: Codable, Equatable {
     let voiceInputTransport: String?
     let defaultVoiceInput: String?
     var remoteVoiceStatus: String? = nil
+    var controllerAdaptiveTrigger: Bool? = nil
+    var controllerImpulseTrigger: Bool? = nil
     let rp2040: Bool
     let mode: String
     let operationMode: String?
@@ -124,6 +127,8 @@ struct DashboardStatus: Codable, Equatable {
         case voiceInputTransport = "voice_input_transport"
         case defaultVoiceInput = "default_voice_input"
         case remoteVoiceStatus = "remote_voice_status"
+        case controllerAdaptiveTrigger = "controller_adaptive_trigger"
+        case controllerImpulseTrigger = "controller_impulse_trigger"
         case selectedSlot = "selected_slot"
         case timestamp = "ts"
     }
@@ -452,6 +457,7 @@ final class DashboardStore: ObservableObject {
     @Published private(set) var statusError: StatusRepositoryError?
     @Published private(set) var actionMessage = ""
     @Published private(set) var pressedControllerInputs: Set<ControllerInput> = []
+    @Published private(set) var lastControllerInputs: Set<ControllerInput> = []
 
     var onAction: ((DashboardAction) -> Bool)?
 
@@ -487,12 +493,17 @@ final class DashboardStore: ObservableObject {
         lastSuccessfulRead = snapshot.lastSuccessfulRead
         statusError = snapshot.error
         let decoded = snapshot.status ?? .empty
+        if snapshot.freshness != .fresh || decoded.controllerConnected != true ||
+            decoded.controllerFamily != status.controllerFamily || decoded.operationMode != status.operationMode {
+            clearControllerInputs()
+        }
         if decoded != status { status = decoded }
     }
 
     func setControllerInput(_ input: ControllerInput, pressed: Bool) {
         if pressed {
             pressedControllerInputs.insert(input)
+            lastControllerInputs = pressedControllerInputs
         } else {
             pressedControllerInputs.remove(input)
         }
@@ -500,6 +511,7 @@ final class DashboardStore: ObservableObject {
 
     func clearControllerInputs() {
         pressedControllerInputs.removeAll()
+        lastControllerInputs.removeAll()
     }
 
     @discardableResult
@@ -531,8 +543,9 @@ final class DashboardStore: ObservableObject {
         case .deny: return L10n.text("已发送拒绝", "Denial sent")
         case .toggleFastMode: return L10n.text("已切换 Fast 模式", "Fast Mode toggled")
         case .openThread: return L10n.text("正在打开任务", "Opening task")
-        case .testState(let state):
-            return L10n.text("已测试 \(state.displayName) 反馈", "Tested \(state.displayName) feedback")
+        case .testHaptics(let state):
+            return L10n.text("已启动 \(state.displayName) 震动测试", "Started \(state.displayName) haptic test")
+        case .rescanControllers: return L10n.text("已开始搜索控制器", "Controller discovery started")
         }
     }
 }
