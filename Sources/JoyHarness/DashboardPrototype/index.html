@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- THROWAWAY: Three Dashboard layouts on /dashboard?variant=A|B|C.
+     Question: how much mapping information should stay beside the controller?
+     This is a browser study of the existing SwiftUI page, not a production web route. -->
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Joy Harness · Dashboard 设计原型</title>
+  <link rel="stylesheet" href="/prototype.css">
+  <script src="/prototype.js" defer></script>
+</head>
+<body>
+  <header class="studio">
+    <div class="studio-title"><strong>Joy Harness</strong><span>Dashboard / 设计原型</span></div>
+    <div class="preview-controls">
+      <label>设备<select id="device"><option value="remote">小米遥控器</option><option value="dualsense">DualSense</option></select></label>
+      <label>场景<select id="scenario"><option value="ready">已连接</option><option value="native">原生模式</option><option value="permission">权限受限</option><option value="offline">未连接</option><option value="connecting">正在连接</option><option value="error">读取失败</option><option value="unknown">能力未知</option></select></label>
+      <label>外观<select id="theme"><option value="dark">深色</option><option value="light">亮色</option><option value="contrast">高对比</option></select></label>
+      <label>语言<select id="language"><option value="zh">中文</option><option value="en">English</option></select></label>
+    </div>
+  </header>
+  <main>
+    <div class="design-caption"><span id="variant-kicker"></span><h1 id="variant-title"></h1><p id="variant-description"></p></div>
+    <section id="window" class="app-window" aria-label="Joy Harness 页面预览"></section>
+    <p class="source-note">只读原型 · 小米映射取自本次运行界面，DualSense 使用代码默认映射。连接场景与按键点击均为模拟，不发送真实操作。</p>
+    <details class="state-inspector"><summary>查看原型状态</summary><pre id="state-output"></pre></details>
+  </main>
+  <nav class="prototype-switcher" aria-label="原型方案切换">
+    <button id="previous" aria-label="上一个方案">←</button>
+    <span id="variant-label"></span>
+    <button id="next" aria-label="下一个方案">→</button>
+  </nav>
+  <dialog id="dialog" aria-label="预览详情"></dialog>
+</body>
+</html>
