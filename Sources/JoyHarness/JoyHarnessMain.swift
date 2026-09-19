@@ -23,22 +23,14 @@ struct JoyHarnessApp: App {
         WindowGroup("Joy Harness", id: "main") {
             DashboardView(
                 store: appDelegate.runtime.dashboard,
-                mappingStore: appDelegate.runtime.mappings,
-                slotShortcutSettings: appDelegate.runtime.slotShortcutSettings
+                mappingStore: appDelegate.runtime.mappings
             )
                 .environmentObject(languageSettings)
                 .environmentObject(settingsCoordinator)
                 .environment(\.locale, languageSettings.locale)
-                .frame(
-                    minWidth: 980,
-                    idealWidth: 1240,
-                    maxWidth: 1440,
-                    minHeight: 680,
-                    idealHeight: 820,
-                    maxHeight: 920
-                )
+                .frame(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
         }
-        .defaultSize(width: 1240, height: 820)
+        .defaultSize(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .appSettings) {}
@@ -48,11 +40,6 @@ struct JoyHarnessApp: App {
                     appDelegate.runtime.dashboard.perform(.refresh)
                 }
                 .keyboardShortcut("r", modifiers: .command)
-
-                Button(L10n.text("打开当前任务", "Open Current Task")) {
-                    appDelegate.runtime.dashboard.perform(.openThread)
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
 
@@ -80,6 +67,19 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         runtime.start()
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { self.applyCompactDashboardSizeIfNeeded() }
+    }
+
+    private func applyCompactDashboardSizeIfNeeded() {
+        let defaults = UserDefaults.standard
+        let migrationKey = "dashboardCompactWindow.applied"
+        guard !defaults.bool(forKey: migrationKey),
+              let window = NSApp.windows.first(where: { $0.title == "Joy Harness" }) else { return }
+        // SwiftUI restoration can override defaultSize. Apply once after the
+        // main window exists, then let subsequent launches restore it normally.
+        window.setContentSize(NSSize(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight))
+        window.saveFrame(usingName: "main-AppWindow-1")
+        defaults.set(true, forKey: migrationKey)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -256,8 +256,11 @@ final class JoyHarnessRuntime {
             guard rp2040.isConnected else { return false }
             buttons.openSelectedSlot()
             return true
-        case .testState(let state):
-            apply(state, note: "dashboard-test")
+        case .testHaptics(let state):
+            return haptics.testFeedback(state)
+        case .rescanControllers:
+            buttons.rescanControllers()
+            writeStatus(current, note: "controller-discovery-started")
             return true
         }
     }
@@ -332,6 +335,7 @@ final class JoyHarnessRuntime {
         }
         buttons.onControllerChange = { [weak self] controller, family in
             guard let self else { return }
+            self.dashboard.clearControllerInputs()
             self.lastBatterySnapshot = nil
             self.lastJoyConBatterySnapshots.removeAll()
             self.controllerFamily = family
@@ -564,6 +568,8 @@ final class JoyHarnessRuntime {
             "controller": controllerName,
             "controller_connected": controllerConnected,
             "controller_family": controllerFamily.rawValue,
+            "controller_adaptive_trigger": adaptiveTrigger.isAvailable,
+            "controller_impulse_trigger": haptics.hasRightTriggerFeedback,
             "controller_touchpad": controllerFamily == .dualSense || controllerFamily == .dualShock,
             "haptics": haptics.hasController,
             "accessibility": mouse.isAccessibilityGranted,
