@@ -2,7 +2,7 @@ version: "3"
 
 tasks:
   prototype:
-    desc: Preview three throwaway Dashboard designs at http://localhost:8769/dashboard?variant=A
+    desc: Preview three throwaway Dashboard designs at http://localhost:8769/dashboard?variant=B
     cmds:
       - python3 Sources/JoyHarness/DashboardPrototype/serve.py
 

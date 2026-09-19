@@ -13,6 +13,9 @@ FILES = {
     "/prototype.js": ROOT / "prototype.js",
     "/assets/remote.png": RESOURCES / "controller-dashboard-xiaomi-remote.png",
     "/assets/dualsense.png": RESOURCES / "controller-dashboard-dualsense-transparent.png",
+    "/assets/xbox.png": RESOURCES / "controller-dashboard.png",
+    "/assets/joyconLeft.png": RESOURCES / "controller-dashboard-joycon-left.png",
+    "/assets/joyconRight.png": RESOURCES / "controller-dashboard-joycon-right.png",
 }
 
 
@@ -32,5 +35,5 @@ class PreviewHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Dashboard 原型 → http://localhost:8769/dashboard?variant=A", flush=True)
+    print("Dashboard 原型 → http://localhost:8769/dashboard?variant=B", flush=True)
     ThreadingHTTPServer(("127.0.0.1", 8769), PreviewHandler).serve_forever()
