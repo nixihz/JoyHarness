@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,41 @@ CURRENT_VERSION = (
 
 
 class ReleaseAutomationTests(unittest.TestCase):
+    def test_notarization_rejection_prints_report_and_stops_before_stapling(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        block = workflow.split('          NOTARY_RESULT=', 1)[1]
+        block = '          NOTARY_RESULT=' + block.split('          xcrun stapler staple', 1)[0]
+        for status in ("Accepted", "Invalid"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                script = '''set -euo pipefail
+RUNNER_TEMP="$1"
+DMG_PATH=release.dmg
+API_KEY_PATH=unused
+API_KEY_ID=unused
+API_ISSUER_ID=unused
+xcrun() {
+  if [[ "$2" == submit ]]; then
+    printf '{"id":"submission-id","status":"%s"}\\n' "$STATUS"
+  elif [[ "$2" == log ]]; then
+    echo 'notarization rejection details'
+  else
+    return 99
+  fi
+}
+'''
+                result = subprocess.run(
+                    ["bash", "-c", f'STATUS={status}\n' + script + textwrap.dedent(block) + '\necho ready-to-staple\n', "test", directory],
+                    capture_output=True,
+                    text=True,
+                )
+                if status == "Accepted":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("ready-to-staple", result.stdout)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("notarization rejection details", result.stdout)
+                    self.assertNotIn("ready-to-staple", result.stdout)
+
     def test_release_check_accepts_consistent_repository_metadata(self) -> None:
         result = subprocess.run(
             ["python3", "scripts/release_check.py"],

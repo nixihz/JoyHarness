@@ -168,11 +168,23 @@ jobs:
           API_KEY_PATH="${RUNNER_TEMP}/AuthKey_${API_KEY_ID}.p8"
           printf '%s' "${API_KEY_BASE64}" | base64 --decode -o "${API_KEY_PATH}"
 
+          NOTARY_RESULT="${RUNNER_TEMP}/notarization-result.json"
           xcrun notarytool submit "${DMG_PATH}" \
             --key "${API_KEY_PATH}" \
             --key-id "${API_KEY_ID}" \
             --issuer "${API_ISSUER_ID}" \
-            --wait
+            --wait --output-format json > "${NOTARY_RESULT}"
+          cat "${NOTARY_RESULT}"
+          SUBMISSION_ID="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["id"])' "${NOTARY_RESULT}")"
+          NOTARY_STATUS="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "${NOTARY_RESULT}")"
+          if [[ "${NOTARY_STATUS}" != "Accepted" ]]; then
+            xcrun notarytool log "${SUBMISSION_ID}" \
+              --key "${API_KEY_PATH}" \
+              --key-id "${API_KEY_ID}" \
+              --issuer "${API_ISSUER_ID}"
+            echo "Apple notarization failed: ${NOTARY_STATUS}" >&2
+            exit 1
+          fi
           xcrun stapler staple "${DMG_PATH}"
           xcrun stapler validate "${DMG_PATH}"
           spctl --assess \
