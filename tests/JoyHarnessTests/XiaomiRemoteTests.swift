@@ -19,6 +19,7 @@ struct XiaomiRemoteTests {
         let available = ControllerInput.availableInputs(for: .xiaomiRemote)
         #expect(available.contains(.buttonA))
         #expect(available.contains(.buttonB))
+        #expect(available.contains(.menu))
         #expect(available.contains(.options))
         #expect(available.contains(.home))
         #expect(available.contains(.dpadUp))
@@ -33,14 +34,17 @@ struct XiaomiRemoteTests {
         #expect(!available.contains(.touchpadButton))
 
         let defaults = ControllerMappingStore.defaultMappings(for: .xiaomiRemote)
-        #expect(defaults[.buttonA] == .approve)
-        #expect(defaults[.buttonB] == .deny)
-        #expect(defaults[.options] == .pushToTalk)
-        #expect(defaults[.home] == .toggleOperationMode)
-        #expect(defaults[.dpadUp] == .previousSlot)
-        #expect(defaults[.dpadDown] == .nextSlot)
-        #expect(defaults[.dpadLeft] == .slot1)
-        #expect(defaults[.dpadRight] == .slot2)
+        #expect(defaults[.buttonA] == .enter)
+        #expect(defaults[.buttonB] == .backspace)
+        #expect(defaults[.menu] == .toggleOperationMode)
+        #expect(defaults[.options] == .rightCommand)
+        #expect(defaults[.home] == .escape)
+        #expect(defaults[.dpadUp] == .arrowUp)
+        #expect(defaults[.dpadDown] == .arrowDown)
+        #expect(defaults[.dpadLeft] == .arrowLeft)
+        #expect(defaults[.dpadRight] == .arrowRight)
+        #expect(defaults[.leftShoulder] == .previousSlot)
+        #expect(defaults[.rightShoulder] == .nextSlot)
         #expect(defaults[.buttonY] == .screenshotTool)
     }
 
@@ -57,6 +61,12 @@ struct XiaomiRemoteTests {
         // Back (Consumer 0x224)
         let backPress = parser.parse(usagePage: 0x0C, usage: 0x224, value: 1)
         #expect(backPress == [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: true)])
+
+        let menuPress = parser.parse(usagePage: 0x0C, usage: 0x40, value: 1)
+        #expect(menuPress == [XiaomiRemoteParsedEvent(input: .menu, isPressed: true)])
+
+        let powerPress = parser.parse(usagePage: 0x0C, usage: 0x30, value: 1)
+        #expect(powerPress == [XiaomiRemoteParsedEvent(input: .home, isPressed: true)])
 
         // Voice Command (Consumer 0xCF)
         let voicePress = parser.parse(usagePage: 0x0C, usage: 0xCF, value: 1)
@@ -79,6 +89,29 @@ struct XiaomiRemoteTests {
     }
 
     @Test
+    func capturedRC003KeyboardSequenceIncludesPressesAndReleases() {
+        // Physical RC003-MS traces, including the second round of button capture.
+        // The remote reports Back on the nonstandard Keyboard usage 0xF1.
+        let observed: [(UInt32, ControllerInput)] = [
+            (0x52, .dpadUp), (0x4F, .dpadRight), (0x51, .dpadDown),
+            (0x50, .dpadLeft), (0x28, .buttonA), (0xF1, .buttonB), (0x65, .menu),
+            (0x81, .leftShoulder), (0x80, .rightShoulder), (0x35, .buttonY), (0x4A, .home),
+            (0x3E, .options),
+        ]
+        let parser = XiaomiRemoteHIDParser()
+        for (usage, input) in observed {
+            #expect(parser.parse(usagePage: 0x07, usage: UInt32.max, value: Int(usage)).isEmpty)
+            #expect(parser.parse(usagePage: 0x07, usage: 0x01, value: 0).isEmpty)
+            #expect(parser.parse(usagePage: 0x07, usage: usage, value: 1) == [
+                XiaomiRemoteParsedEvent(input: input, isPressed: true),
+            ])
+            #expect(parser.parse(usagePage: 0x07, usage: usage, value: 0) == [
+                XiaomiRemoteParsedEvent(input: input, isPressed: false),
+            ])
+        }
+    }
+
+    @Test
     func buttonBridgeRoutesXiaomiRemoteInputs() throws {
         let suiteName = "XiaomiRemoteTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -93,29 +126,78 @@ struct XiaomiRemoteTests {
             publishedStates[input] = pressed
         }
 
-        var tappedKeys: [(String, Int)] = []
-        bridge.keyHandler = { key, action in
-            tappedKeys.append((key, action))
-            return true
+        var tappedKeys: [(SystemKey, Bool)] = []
+        bridge.systemKeyHandler = { key, pressed in
+            tappedKeys.append((key, pressed))
         }
 
         bridge.setRemoteControllerActive(true)
 
-        // Test Voice -> Push to Talk (ACT10)
-        bridge.handleRemoteButton(.options, isPressed: true)
+        // Replay the physical RC003-MS Voice usage through parser and bridge.
+        let parser = XiaomiRemoteHIDParser()
+        for event in parser.parse(usagePage: 0x07, usage: 0x3E, value: 1) {
+            bridge.handleRemoteButton(event.input, isPressed: event.isPressed)
+        }
         #expect(publishedStates[.options] == true)
-        #expect(tappedKeys.contains(where: { $0.0 == "ACT10" && $0.1 == 1 }))
+        #expect(tappedKeys.contains(where: { $0.0 == .rightCommand && $0.1 }))
 
-        bridge.handleRemoteButton(.options, isPressed: false)
+        for event in parser.parse(usagePage: 0x07, usage: 0x3E, value: 0) {
+            bridge.handleRemoteButton(event.input, isPressed: event.isPressed)
+        }
         #expect(publishedStates[.options] == false)
-        #expect(tappedKeys.contains(where: { $0.0 == "ACT10" && $0.1 == 0 }))
+        #expect(tappedKeys.map { $0.0 } == [.rightCommand, .rightCommand])
+        #expect(tappedKeys.map { $0.1 } == [true, false])
 
-        // Test OK -> Approve (ACT07)
+        // The default confirmation key works in ordinary text fields.
         bridge.handleRemoteButton(.buttonA, isPressed: true)
         #expect(publishedStates[.buttonA] == true)
-        #expect(tappedKeys.contains(where: { $0.0 == "ACT07" && $0.1 == 1 }))
+        #expect(tappedKeys.contains(where: { $0.0 == .enter && $0.1 }))
 
         bridge.handleRemoteButton(.buttonA, isPressed: false)
         #expect(publishedStates[.buttonA] == false)
+
+        bridge.handleRemoteButton(.menu, isPressed: true)
+        bridge.handleRemoteButton(.menu, isPressed: false)
+        #expect(bridge.operationMode == .native)
+        bridge.handleRemoteButton(.menu, isPressed: true)
+        bridge.handleRemoteButton(.menu, isPressed: false)
+        #expect(bridge.operationMode == .mapping)
+    }
+
+    @Test
+    func reconnectReleasesRemoteHomeState() throws {
+        let suiteName = "XiaomiRemoteTests.HomeReset.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("xiaomi-remote", forKey: "controllerMappings.v1.controllerFamily")
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setAction(.toggleOperationMode, for: .home)
+        let bridge = ButtonBridge(mappingProvider: { store.action(for: $0) })
+        var modeChanges = 0
+        bridge.onOperationModeChange = { _ in modeChanges += 1 }
+
+        bridge.setRemoteControllerActive(true)
+        bridge.handleRemoteButton(.home, isPressed: true)
+        bridge.resetInputState()
+        bridge.handleRemoteButton(.home, isPressed: true)
+
+        #expect(modeChanges == 2)
+    }
+
+    @Test
+    @MainActor
+    func connectedRemoteSurvivesGameControllerDiscoveryStartup() {
+        let bridge = ButtonBridge()
+        var family: ControllerFamily = .generic
+        bridge.onControllerChange = { _, nextFamily in family = nextFamily }
+        defer { bridge.stop() }
+
+        bridge.setRemoteControllerActive(true)
+        bridge.start()
+        #expect(family == .xiaomiRemote)
+
+        bridge.setRemoteControllerActive(false)
+        #expect(family != .xiaomiRemote)
     }
 }

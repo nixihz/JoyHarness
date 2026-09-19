@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+# HAL discovers new user-space drivers when its service restarts. This is part
+# of the administrator-authorized component installation, not each app launch.
+if /usr/bin/pgrep -x coreaudiod >/dev/null; then
+    /usr/bin/killall -TERM coreaudiod
+fi
+exit 0

@@ -8,6 +8,10 @@ enum MouseButton: Hashable {
 }
 
 enum SystemKey: Hashable {
+    case arrowUp
+    case arrowDown
+    case arrowLeft
+    case arrowRight
     case enter
     case backspace
     case escape
@@ -154,6 +158,7 @@ final class ButtonBridge {
     private var mouseSpeedBoostPressed = false
     private var mousePrecisionPressed = false
     private var controllerFamily: ControllerFamily = .generic
+    private var isRemoteControllerActive = false
     private var rightTriggerPressState = AnalogButtonPressState(
         pressPoint: RightTriggerPressState.releasePoint,
         resetPoint: RightTriggerPressState.resetPoint
@@ -271,7 +276,7 @@ final class ButtonBridge {
     }
 
     func stop() {
-        guard !controllerObservers.isEmpty || controller != nil || !observedControllers.isEmpty else { return }
+        guard !controllerObservers.isEmpty || controller != nil || !observedControllers.isEmpty || isRemoteControllerActive else { return }
         if !controllerObservers.isEmpty {
             GCController.stopWirelessControllerDiscovery()
         }
@@ -283,6 +288,7 @@ final class ButtonBridge {
         resetInputState()
         controller = nil
         controllerFamily = .generic
+        isRemoteControllerActive = false
         joyConControllersByID.removeAll()
         joyConComposition = joyConCoordinator.reconcile([])
         joyConHIDShoulderSnapshots.removeAll()
@@ -305,6 +311,7 @@ final class ButtonBridge {
     }
 
     private func attachPreferredController() {
+        guard !isRemoteControllerActive else { return }
         let allControllers = GCController.controllers()
         let joyConControllers = allControllers.filter { $0.joyConHardwareKind != nil }
         let nonJoyConControllers = allControllers.filter {
@@ -908,7 +915,7 @@ final class ButtonBridge {
         controllerInputsByButton[fakeID] = .home
         publishInput(.home, pressed: true)
         guard let action = resolvedAction(for: .home) else { return }
-        print("[agent-deck] direct DualSense PS button -> action=\(action)")
+        print("[agent-deck] direct Home button -> action=\(action)")
         if pressedButtons.insert(fakeID).inserted {
             if begin(action) {
                 activeControllerActions[fakeID] = action
@@ -1300,6 +1307,7 @@ final class ButtonBridge {
         mouseSpeedBoostPressed = false
         mousePrecisionPressed = false
         activeFunctionRightStickDirection = nil
+        isHomeButtonPressed = false
         joyConActiveInputs.removeAll()
         joyConInputSnapshot = .neutral
         touchpadTracker.reset()
@@ -1315,6 +1323,7 @@ final class ButtonBridge {
     }
 
     func setRemoteControllerActive(_ active: Bool) {
+        isRemoteControllerActive = active
         if active {
             detachObservedHandlers()
             resetInputState()

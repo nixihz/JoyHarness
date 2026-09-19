@@ -73,6 +73,7 @@ struct DashboardStatus: Codable, Equatable {
     let voiceInputDefault: Bool?
     let voiceInputTransport: String?
     let defaultVoiceInput: String?
+    var remoteVoiceStatus: String? = nil
     let rp2040: Bool
     let mode: String
     let operationMode: String?
@@ -122,6 +123,7 @@ struct DashboardStatus: Codable, Equatable {
         case voiceInputDefault = "voice_input_default"
         case voiceInputTransport = "voice_input_transport"
         case defaultVoiceInput = "default_voice_input"
+        case remoteVoiceStatus = "remote_voice_status"
         case selectedSlot = "selected_slot"
         case timestamp = "ts"
     }

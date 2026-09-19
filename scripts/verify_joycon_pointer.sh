@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_BINARY="${PROJECT_ROOT}/dist/Joy Harness.app/Contents/MacOS/JoyHarness"
+APP_BINARY="${HOME}/.agent-deck/Joy Harness.app/Contents/MacOS/JoyHarness"
 STATUS_PATH="${AGENT_DECK_STATUS_PATH:-${HOME}/.agent-deck/status.json}"
 MIN_DELTA="${JOYCON_VERIFY_MIN_DELTA:-30}"
 STICK_THRESHOLD="${JOYCON_VERIFY_STICK_THRESHOLD:-0.35}"

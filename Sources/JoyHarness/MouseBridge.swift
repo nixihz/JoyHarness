@@ -30,6 +30,14 @@ extension RecordedKeyboardShortcut {
 extension SystemKey {
     func eventDescriptor(pressed: Bool) -> SystemKeyEventDescriptor {
         switch self {
+        case .arrowUp:
+            return SystemKeyEventDescriptor(keyCode: 0x7E, flags: [])
+        case .arrowDown:
+            return SystemKeyEventDescriptor(keyCode: 0x7D, flags: [])
+        case .arrowLeft:
+            return SystemKeyEventDescriptor(keyCode: 0x7B, flags: [])
+        case .arrowRight:
+            return SystemKeyEventDescriptor(keyCode: 0x7C, flags: [])
         case .enter:
             return SystemKeyEventDescriptor(keyCode: 0x24, flags: [])
         case .backspace:
@@ -333,8 +341,14 @@ final class MouseBridge: NSObject {
     private var pressedMouseButtons: Set<MouseButton> = []
     private var mouseClickSequence = MouseClickSequenceTracker()
     private var pressedSystemKeys: Set<SystemKey> = []
-    private var keyRepeatDelayTimer: Timer?
-    private var keyRepeatTimer: Timer?
+    private lazy var keyRepeater: SystemKeyRepeater = SystemKeyRepeater { [weak self] key in
+        guard let self else { return }
+        guard self.pressedSystemKeys.contains(key), self.isAccessibilityGranted else {
+            self.keyRepeater.stop(key)
+            return
+        }
+        self.postSystemKey(key, pressed: true, isRepeat: true)
+    }
     private var lastPermissionState = false
     private var activeDisplays: [PointerDisplay] = []
 
@@ -385,10 +399,7 @@ final class MouseBridge: NSObject {
             NotificationCenter.default.removeObserver(screenParametersObserver)
             self.screenParametersObserver = nil
         }
-        keyRepeatDelayTimer?.invalidate()
-        keyRepeatDelayTimer = nil
-        keyRepeatTimer?.invalidate()
-        keyRepeatTimer = nil
+        keyRepeater.stopAll()
         for button in Array(pressedMouseButtons) {
             setMouseButton(button, pressed: false)
         }
@@ -527,17 +538,17 @@ final class MouseBridge: NSObject {
         guard pressed != pressedSystemKeys.contains(key) else { return }
         guard isAccessibilityGranted else {
             pressedSystemKeys.remove(key)
-            stopKeyRepeat(for: key)
+            keyRepeater.stop(key)
             requestAccessibilityPermission()
             return
         }
         postSystemKey(key, pressed: pressed)
         if pressed {
             pressedSystemKeys.insert(key)
-            if key == .backspace { startKeyRepeat(for: key) }
+            keyRepeater.start(key)
         } else {
             pressedSystemKeys.remove(key)
-            stopKeyRepeat(for: key)
+            keyRepeater.stop(key)
         }
     }
 
@@ -946,45 +957,25 @@ final class MouseBridge: NSObject {
     }
 
     private func postSystemKey(_ key: SystemKey, pressed: Bool, isRepeat: Bool = false) {
+        Self.makeSystemKeyEvent(key, pressed: pressed, isRepeat: isRepeat)?.post(tap: .cghidEventTap)
+    }
+
+    nonisolated static func makeSystemKeyEvent(_ key: SystemKey, pressed: Bool, isRepeat: Bool = false) -> CGEvent? {
         let descriptor = key.eventDescriptor(pressed: pressed)
         let eventSource = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
             keyboardEventSource: eventSource,
             virtualKey: descriptor.keyCode,
             keyDown: pressed
-        ) else { return }
+        ) else { return nil }
+        // Modifier-only shortcuts (including Spokenly hold-to-talk) observe
+        // flagsChanged, just as they do for a physical Command key.
+        if key == .rightCommand { event.type = .flagsChanged }
         event.flags = descriptor.flags
         if isRepeat {
             event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
         }
-        event.post(tap: .cghidEventTap)
-    }
-
-    private func startKeyRepeat(for key: SystemKey) {
-        stopKeyRepeat(for: key)
-        let delayTimer = Timer(timeInterval: 0.45, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.pressedSystemKeys.contains(key) else { return }
-                let repeatTimer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.pressedSystemKeys.contains(key) else { return }
-                        self.postSystemKey(key, pressed: true, isRepeat: true)
-                    }
-                }
-                RunLoop.main.add(repeatTimer, forMode: .common)
-                self.keyRepeatTimer = repeatTimer
-            }
-        }
-        RunLoop.main.add(delayTimer, forMode: .common)
-        keyRepeatDelayTimer = delayTimer
-    }
-
-    private func stopKeyRepeat(for key: SystemKey) {
-        guard key == .backspace else { return }
-        keyRepeatDelayTimer?.invalidate()
-        keyRepeatDelayTimer = nil
-        keyRepeatTimer?.invalidate()
-        keyRepeatTimer = nil
+        return event
     }
 
     private func resetMotion() {

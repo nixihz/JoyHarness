@@ -15,6 +15,12 @@ final class XiaomiRemoteHIDParser {
         // 1. Generic Desktop Page (0x01)
         if usagePage == 0x01 {
             switch usage {
+            case 0x84, 0x86: // System Context/App Menu
+                return [XiaomiRemoteParsedEvent(input: .menu, isPressed: isPressed)]
+            case 0x88: // System Menu Exit
+                return [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: isPressed)]
+            case 0x89: // System Menu Select
+                return [XiaomiRemoteParsedEvent(input: .buttonA, isPressed: isPressed)]
             case 0x90:
                 return [XiaomiRemoteParsedEvent(input: .dpadUp, isPressed: isPressed)]
             case 0x91:
@@ -35,13 +41,19 @@ final class XiaomiRemoteHIDParser {
         // 2. Consumer Page (0x0C)
         if usagePage == 0x0C {
             switch usage {
+            case 0x30: // Power
+                return [XiaomiRemoteParsedEvent(input: .home, isPressed: isPressed)]
+            case 0x40: // Menu
+                return [XiaomiRemoteParsedEvent(input: .menu, isPressed: isPressed)]
             case 0x41, 0xCD: // Menu Pick / Select / Play-Pause -> OK
                 return [XiaomiRemoteParsedEvent(input: .buttonA, isPressed: isPressed)]
+            case 0x42: // Menu Escape
+                return [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: isPressed)]
             case 0x224: // AC Back
                 return [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: isPressed)]
             case 0x223: // AC Home
                 return [XiaomiRemoteParsedEvent(input: .home, isPressed: isPressed)]
-            case 0xCF, 0x42: // Voice Command / Speech / Options -> Mic
+            case 0xCF: // Voice Command -> Mic
                 return [XiaomiRemoteParsedEvent(input: .options, isPressed: isPressed)]
             case 0xE9: // Volume Increment
                 return [XiaomiRemoteParsedEvent(input: .rightShoulder, isPressed: isPressed)]
@@ -67,8 +79,24 @@ final class XiaomiRemoteHIDParser {
                 return [XiaomiRemoteParsedEvent(input: .dpadRight, isPressed: isPressed)]
             case 0x28: // Return / Enter
                 return [XiaomiRemoteParsedEvent(input: .buttonA, isPressed: isPressed)]
-            case 0x29, 0x2A: // Escape / Backspace
+            case 0x29: // Escape
                 return [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: isPressed)]
+            case 0x2A: // Backspace
+                return [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: isPressed)]
+            case 0xF1: // RC003-MS Back (captured on the physical remote)
+                return [XiaomiRemoteParsedEvent(input: .buttonB, isPressed: isPressed)]
+            case 0x65: // Keyboard Application / RC003-MS Menu
+                return [XiaomiRemoteParsedEvent(input: .menu, isPressed: isPressed)]
+            case 0x81: // Keyboard Volume Down
+                return [XiaomiRemoteParsedEvent(input: .leftShoulder, isPressed: isPressed)]
+            case 0x80: // Keyboard Volume Up
+                return [XiaomiRemoteParsedEvent(input: .rightShoulder, isPressed: isPressed)]
+            case 0x35: // RC003-MS custom key (Keyboard Grave)
+                return [XiaomiRemoteParsedEvent(input: .buttonY, isPressed: isPressed)]
+            case 0x4A: // Keyboard Home / RC003-MS Home
+                return [XiaomiRemoteParsedEvent(input: .home, isPressed: isPressed)]
+            case 0x3E: // RC003-MS Voice (Keyboard F5, confirmed by a controlled trace)
+                return [XiaomiRemoteParsedEvent(input: .options, isPressed: isPressed)]
             default:
                 break
             }
@@ -133,6 +161,13 @@ final class XiaomiRemoteHIDManager {
     private let parser = XiaomiRemoteHIDParser()
     private(set) var isConnected = false
     private var connectedDevices: Set<ObjectIdentifier> = []
+    private let volumeGuard = RemoteVolumeGuard()
+    private var operationMode: ControllerOperationMode = .mapping
+
+    func setOperationMode(_ mode: ControllerOperationMode) {
+        operationMode = mode
+        volumeGuard.update(mapping: isConnected && mode == .mapping)
+    }
 
     var onConnectionChange: ((Bool) -> Void)?
     var onButtonInput: ((ControllerInput, Bool) -> Void)?
@@ -151,6 +186,9 @@ final class XiaomiRemoteHIDManager {
         IOHIDManagerRegisterDeviceMatchingCallback(manager, xiaomiRemoteDeviceMatched, context)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, xiaomiRemoteDeviceRemoved, context)
         IOHIDManagerRegisterInputValueCallback(manager, xiaomiRemoteInputValueChanged, context)
+        if ProcessInfo.processInfo.environment["JOY_HARNESS_REMOTE_TRACE"] == "1" {
+            IOHIDManagerRegisterInputReportCallback(manager, xiaomiRemoteInputReportReceived, context)
+        }
 
         IOHIDManagerScheduleWithRunLoop(
             manager,
@@ -158,6 +196,8 @@ final class XiaomiRemoteHIDManager {
             CFRunLoopMode.defaultMode.rawValue
         )
 
+        // Monitor this keyboard/consumer device using Input Monitoring consent.
+        // Seizing it can fail with kIOReturnNotPrivileged even after consent.
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
             IOHIDManagerUnscheduleFromRunLoop(
@@ -165,19 +205,30 @@ final class XiaomiRemoteHIDManager {
                 CFRunLoopGetMain(),
                 CFRunLoopMode.defaultMode.rawValue
             )
-            print("[agent-deck] Xiaomi Remote HID manager open failed: \(result)")
+            let code = String(format: "0x%08x", UInt32(bitPattern: result))
+            print("[agent-deck] Xiaomi Remote HID manager open failed: \(result) (\(code))")
             return
         }
 
         self.manager = manager
+        // IOHIDManager may not replay a matching callback for devices that were
+        // already connected before the manager was opened. Register those
+        // devices explicitly so launch order does not affect detection.
+        if let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> {
+            for device in devices {
+                deviceMatched(device)
+            }
+        }
         print("[agent-deck] Xiaomi Remote HID discovery started")
     }
 
     func stop() {
+        volumeGuard.stop()
         guard let manager else { return }
         IOHIDManagerRegisterDeviceMatchingCallback(manager, nil, nil)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, nil, nil)
         IOHIDManagerRegisterInputValueCallback(manager, nil, nil)
+        IOHIDManagerRegisterInputReportCallback(manager, nil, nil)
         IOHIDManagerUnscheduleFromRunLoop(
             manager,
             CFRunLoopGetMain(),
@@ -194,7 +245,13 @@ final class XiaomiRemoteHIDManager {
 
     fileprivate func deviceMatched(_ device: IOHIDDevice) {
         let id = ObjectIdentifier(device)
-        connectedDevices.insert(id)
+        guard connectedDevices.insert(id).inserted else { return }
+        volumeGuard.update(mapping: operationMode == .mapping)
+        // The event service can appear shortly after the raw HID device.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.isConnected else { return }
+            self.volumeGuard.update(mapping: self.operationMode == .mapping)
+        }
         if !isConnected {
             isConnected = true
             print("[agent-deck] Xiaomi Remote connected")
@@ -206,6 +263,7 @@ final class XiaomiRemoteHIDManager {
         let id = ObjectIdentifier(device)
         connectedDevices.remove(id)
         if connectedDevices.isEmpty && isConnected {
+            volumeGuard.update(mapping: false)
             isConnected = false
             print("[agent-deck] Xiaomi Remote disconnected")
             let resetEvents = parser.reset()
@@ -223,6 +281,13 @@ final class XiaomiRemoteHIDManager {
         let intVal = IOHIDValueGetIntegerValue(value)
 
         let events = parser.parse(usagePage: usagePage, usage: usage, value: intVal)
+        // Keyboard array payloads and rollover elements duplicate the individual
+        // key values. Keep diagnostics focused on actual button usages.
+        if usage != UInt32.max && !(usagePage == 0x07 && usage <= 0x03) {
+            let usageDescription = String(format: "page=0x%02x usage=0x%02x", usagePage, usage)
+            let mappedInputs = events.map { "\($0.input.rawValue):\($0.isPressed ? "down" : "up")" }.joined(separator: ",")
+            print("[agent-deck] Xiaomi Remote \(usageDescription) value=\(intVal) mapped=\(mappedInputs)")
+        }
         for event in events {
             onButtonInput?(event.input, event.isPressed)
         }
@@ -260,4 +325,19 @@ private func xiaomiRemoteInputValueChanged(
     guard let context else { return }
     let manager = Unmanaged<XiaomiRemoteHIDManager>.fromOpaque(context).takeUnretainedValue()
     manager.handleValue(value)
+}
+
+private func xiaomiRemoteInputReportReceived(
+    context: UnsafeMutableRawPointer?,
+    result: IOReturn,
+    sender: UnsafeMutableRawPointer?,
+    type: IOHIDReportType,
+    reportID: UInt32,
+    report: UnsafeMutablePointer<UInt8>,
+    reportLength: CFIndex
+) {
+    guard result == kIOReturnSuccess, reportLength > 0 else { return }
+    let prefix = UnsafeBufferPointer(start: report, count: min(reportLength, 16))
+        .map { String(format: "%02x", $0) }.joined(separator: " ")
+    print("[agent-deck] Xiaomi Remote report id=\(reportID) length=\(reportLength) prefix=\(prefix)")
 }

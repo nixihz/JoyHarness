@@ -25,6 +25,7 @@ tasks:
     desc: Test the Swift bridge and installation migrations
     cmds:
       - swift test
+      - bash scripts/test_microphone_driver.sh
       - python3 -m unittest discover -s tests -v
 
   lint:
@@ -45,9 +46,9 @@ tasks:
       - python3 scripts/release_check.py {{.CLI_ARGS}}
 
   run:
-    desc: Run daemon in foreground
+    desc: Build and launch the canonical signed app
     cmds:
-      - swift run JoyHarness
+      - bash scripts/build_and_run.sh {{.CLI_ARGS}}
 
   send:
     desc: "Send a state: task send -- waiting"

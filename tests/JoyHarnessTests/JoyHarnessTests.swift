@@ -42,6 +42,20 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func rightCommandProducesModifierTransitionsForHoldToTalk() throws {
+        let down = try #require(MouseBridge.makeSystemKeyEvent(.rightCommand, pressed: true))
+        let up = try #require(MouseBridge.makeSystemKeyEvent(.rightCommand, pressed: false))
+        #expect(down.type == .flagsChanged)
+        #expect(up.type == .flagsChanged)
+        #expect(down.getIntegerValueField(.keyboardEventKeycode) == 0x36)
+        #expect(down.flags.contains(.maskCommand))
+        #expect(down.flags.rawValue & 0x10 != 0)
+        #expect(up.flags.isEmpty)
+        #expect(MouseBridge.makeSystemKeyEvent(.enter, pressed: true)?.type == .keyDown)
+        #expect(MouseBridge.makeSystemKeyEvent(.enter, pressed: false)?.type == .keyUp)
+    }
+
+    @Test
     func clipboardAndScreenshotDescriptorsUseMacShortcuts() {
         let copy = SystemKey.copy.eventDescriptor(pressed: true)
         let paste = SystemKey.paste.eventDescriptor(pressed: true)
