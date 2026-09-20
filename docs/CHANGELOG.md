@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-21
+
+### Added
+- Support simultaneous standard game controller and Xiaomi remote sessions with a connected-device picker and independent mapping profiles.
+- Add an on-demand connection inspector, fixed dashboard workspace, and System, Light, and Dark appearance preferences.
+
 ### Fixed
-- Prevent Xiaomi remote mappings from also emitting the native backquote or F5 key by correctly matching Bluetooth services; restore native keys in native mode and on exit.
+- Prevent Xiaomi remote mappings from also emitting the native backquote or F5 key by correctly matching Bluetooth services; restore native keys in Native Mode and on exit.
 - Keep retrying native key suppression when the remote's HID event service appears late; stop retrying after success or when leaving mapping mode.
 - Store Xiaomi mappings, application targets, and recorded shortcuts separately from gamepads, preserving existing remote settings across reconnects and upgrades.
-- Accept the final BLE audio after the voice key is released and wait for playback before releasing the recording shortcut; immediately cancel audio on disconnect, disable, or native mode.
+- Accept the final BLE audio after the voice key is released and wait for playback before releasing the recording shortcut; immediately cancel audio on disconnect, disable, or Native Mode.
 - Retry Xiaomi HID discovery from the Dashboard's rescan action after an initial open failure.
 
 ## [0.6.1] - 2026-09-20
@@ -144,6 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1

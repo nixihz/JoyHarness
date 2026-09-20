@@ -10,8 +10,8 @@ import Testing
 struct JoyHarnessTests {
     @Test
     func appVersionLoadsFromTheBundledVersionResource() {
-        #expect(AppVersion.current == "0.6.1")
-        #expect(AppVersion.displayName == "Joy Harness v0.6.1")
+        #expect(AppVersion.current == "0.7.0")
+        #expect(AppVersion.displayName == "Joy Harness v0.7.0")
     }
 
     @Test

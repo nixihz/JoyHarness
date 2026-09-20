@@ -23,19 +23,27 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.6.1** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.7.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.6.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.6.1/Joy-Harness-v0.6.1-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.6.1/Joy-Harness-v0.6.1-macOS-arm64.dmg.sha256)
-- [View the v0.6.1 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.6.1)
+- [Download Joy-Harness-v0.7.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256)
+- [View the v0.7.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.7.0)
 
 The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. See the release notes for signing and notarization details.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.6.1-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
 ```
+
+## What's New in v0.7.0
+
+- Keeps standard game controllers and the Xiaomi RC003-MS remote connected at the same time with independent input sessions and selectable mapping profiles.
+- Adds a fixed 744 x 600 dashboard workspace, an on-demand connection inspector, and System, Light, and Dark appearance preferences.
+- Prevents mapped Xiaomi buttons from leaking native backquote or F5 events and keeps suppression healthy across delayed discovery, reconnects, and Native Mode transitions.
+- Preserves Xiaomi mappings, application targets, and recorded shortcuts independently from standard gamepads across reconnects and upgrades.
+- Completes buffered voice audio before releasing push-to-talk, while cleaning up immediately on disconnect, disable, or Native Mode.
 
 ## What's New in v0.6.1
 
@@ -428,7 +436,7 @@ Run this audit separately from the full test suite: native view rendering occupi
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.6.1` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.7.0` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Build and launch the canonical signed app |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -472,8 +480,8 @@ The script first builds a signed app, stops installed Joy Harness/AgentDeck proc
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.6.1
-# Or: bash scripts/package_dmg.sh 0.6.1
+task dmg -- 0.7.0
+# Or: bash scripts/package_dmg.sh 0.7.0
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.

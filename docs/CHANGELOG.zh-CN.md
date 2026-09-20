@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-21
+
+### 新增
+- 标准游戏手柄与小米遥控器可同时保持连接，提供在线设备选择器和彼此独立的映射配置。
+- 新增按需展开的连接详情侧栏、固定 Dashboard 工作区，以及跟随系统、日间和夜间三种外观设置。
+
 ### 修复
 - 修复小米遥控器在映射模式下同时输出自定义按键与原始反引号或 F5 的问题；正确匹配蓝牙设备并在原生模式或退出时恢复原始按键。
 - 遥控器 HID 事件服务延迟出现时持续重试原生按键屏蔽，成功或离开映射模式后停止重试。
@@ -144,6 +150,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1
