@@ -1,10 +1,21 @@
+import AppKit
 import SwiftUI
 
 struct DashboardView: View {
     @ObservedObject var store: DashboardStore
     @ObservedObject var mappingStore: ControllerMappingStore
     @EnvironmentObject private var languageSettings: AppLanguageSettings
-    @State private var detailsExpanded = true
+    @State private var detailsPresented = false
+
+    init(
+        store: DashboardStore,
+        mappingStore: ControllerMappingStore,
+        detailsPresented: Bool = false
+    ) {
+        self.store = store
+        self.mappingStore = mappingStore
+        _detailsPresented = State(initialValue: detailsPresented)
+    }
 
     private var presentation: DashboardPresentation {
         DashboardPresentation(status: store.status, freshness: store.freshness, orientation: mappingStore.joyConOrientation)
@@ -12,33 +23,89 @@ struct DashboardView: View {
 
     var body: some View {
         let _ = languageSettings.preference
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: DashboardStyle.Space.section) {
-                    header
-                    notices
-                    DashboardControllerView(store: store, mappingStore: mappingStore,
-                        compact: geometry.size.width < DashboardStyle.compactBreakpoint)
-                    Divider()
-                    DisclosureGroup(isExpanded: $detailsExpanded) {
-                        DashboardConnectionDetails(store: store, mappingStore: mappingStore,
-                            compact: geometry.size.width < DashboardStyle.compactBreakpoint)
-                            .padding(.top, DashboardStyle.Space.inset)
-                    } label: {
-                        Label(L10n.text("连接详情", "Connection Details"), systemImage: "point.3.connected.trianglepath.dotted")
-                            .font(.headline)
-                    }
-                    Divider()
-                    HStack {
-                        DashboardSettingsButton(tab: .general).buttonStyle(.borderless)
-                        Spacer()
-                        Text(AppVersion.displayName).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(DashboardStyle.Space.section)
+        HStack(spacing: 0) {
+            mainContent
+            if detailsPresented {
+                Divider()
+                detailsInspector
+                    .frame(width: DashboardStyle.detailsColumnWidth, height: DashboardStyle.windowHeight)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
         }
+        .fixedSize()
+        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DashboardWindowVisibilityBridge(detailsPresented: detailsPresented))
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                detailsButton
+            }
+        }
+    }
+
+    private var mainContent: some View {
+        VStack(alignment: .leading, spacing: DashboardStyle.Space.inset) {
+            header
+            notices
+            DashboardControllerView(store: store, mappingStore: mappingStore, compact: false)
+                .frame(maxHeight: .infinity)
+            Divider()
+            HStack {
+                DashboardSettingsButton(tab: .general).buttonStyle(.borderless)
+                Spacer()
+                Text(AppVersion.displayName).font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+        }
+        .padding(DashboardStyle.Space.section)
+        .frame(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
+    }
+
+    private var detailsButton: some View {
+        Button {
+            detailsPresented.toggle()
+        } label: {
+            Label(
+                detailsPresented
+                    ? L10n.text("隐藏连接详情", "Hide Connection Details")
+                    : L10n.text("显示连接详情", "Show Connection Details"),
+                systemImage: "sidebar.trailing"
+            )
+        }
+        .labelStyle(.iconOnly)
+        .foregroundStyle(detailsPresented ? Color.accentColor : Color.primary)
+        .keyboardShortcut("i", modifiers: [.command, .option])
+        .help(detailsPresented
+            ? L10n.text("隐藏连接详情", "Hide Connection Details")
+            : L10n.text("显示连接详情", "Show Connection Details"))
+        .accessibilityValue(detailsPresented
+            ? L10n.text("已展开", "Expanded")
+            : L10n.text("已收起", "Collapsed"))
+    }
+
+    private var detailsInspector: some View {
+        VStack(spacing: 0) {
+            Label(
+                L10n.text("连接详情", "Connection Details"),
+                systemImage: "point.3.connected.trianglepath.dotted"
+            )
+            .font(.headline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DashboardStyle.Space.inset)
+            .padding(.vertical, DashboardStyle.Space.medium)
+
+            Divider()
+
+            ViewThatFits(in: .vertical) {
+                connectionDetails.fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    connectionDetails
+                }
+            }
+            .padding(DashboardStyle.Space.inset)
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    private var connectionDetails: some View {
+        DashboardConnectionDetails(store: store, mappingStore: mappingStore)
     }
 
     private var header: some View {
@@ -68,7 +135,13 @@ struct DashboardView: View {
         }
     }
 
-    @ViewBuilder private var notices: some View {
+    private var notices: some View {
+        VStack(spacing: DashboardStyle.Space.small) {
+            noticeItems
+        }
+    }
+
+    @ViewBuilder private var noticeItems: some View {
         if !presentation.isFresh {
             notice("exclamationmark.triangle", L10n.text("设备状态尚未更新。刷新状态以重新读取连接与权限信息。", "Device status is unavailable or out of date. Refresh to read connections and permissions.")) {
                 Button(L10n.text("刷新状态", "Refresh Status")) { store.perform(.refresh) }
@@ -88,7 +161,18 @@ struct DashboardView: View {
             }
             if store.status.inputMonitoring == false {
                 notice("keyboard", L10n.text("输入监控未授权，后台手柄输入受限。", "Input Monitoring is not authorized. Background controller input is limited.")) {
-                    Button(L10n.text("开启权限", "Open Permissions")) { DashboardSystemSettings.open(.inputMonitoring) }
+                    VStack(alignment: .trailing, spacing: DashboardStyle.Space.small) {
+                        Button {
+                            DashboardSystemSettings.open(.inputMonitoring)
+                        } label: {
+                            Label(L10n.text("打开输入监控设置", "Open Input Monitoring"), systemImage: "gearshape")
+                        }
+                        Button {
+                            CurrentApplication.revealInFinder()
+                        } label: {
+                            Label(L10n.text("在 Finder 中显示当前应用", "Show Current App in Finder"), systemImage: "folder")
+                        }
+                    }
                 }
             }
             if !store.status.rp2040 {
@@ -108,5 +192,30 @@ struct DashboardView: View {
         }
         .padding(DashboardStyle.Space.medium)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DashboardStyle.cornerRadius))
+    }
+}
+
+private struct DashboardWindowVisibilityBridge: NSViewRepresentable {
+    let detailsPresented: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard detailsPresented else { return }
+        DispatchQueue.main.async { [weak nsView] in
+            guard let window = nsView?.window, let screen = window.screen else { return }
+            let frame = window.frame
+            let visibleFrame = screen.visibleFrame
+            let maximumX = max(visibleFrame.minX, visibleFrame.maxX - frame.width)
+            let maximumY = max(visibleFrame.minY, visibleFrame.maxY - frame.height)
+            let origin = NSPoint(
+                x: min(max(frame.minX, visibleFrame.minX), maximumX),
+                y: min(max(frame.minY, visibleFrame.minY), maximumY)
+            )
+            guard origin != frame.origin else { return }
+            window.setFrameOrigin(origin)
+        }
     }
 }

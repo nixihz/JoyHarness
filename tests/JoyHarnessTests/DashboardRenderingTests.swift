@@ -31,7 +31,7 @@ struct DashboardRenderingTests {
                 json["controller_family"] = family.rawValue
                 json["controller_connected"] = true
                 json["accessibility"] = true
-                json["input_monitoring"] = true
+                json["input_monitoring"] = index != 7
                 json["rp2040"] = true
                 json["haptics"] = family != .xiaomiRemote
                 json["ts"] = ISO8601DateFormatter().string(from: Date())
@@ -53,8 +53,12 @@ struct DashboardRenderingTests {
                 try JSONSerialization.data(withJSONObject: json).write(to: statusURL)
                 let store = DashboardStore(statusURL: statusURL)
                 store.setControllerInput(.buttonA, pressed: true)
-                let size = NSSize(width: compact ? DashboardStyle.windowMinimumWidth : DashboardStyle.windowWidth, height: compact ? 1500 : 1100)
-                let view = DashboardView(store: store, mappingStore: mapping)
+                let showsDetails = compact && index == 0
+                let size = NSSize(
+                    width: DashboardStyle.windowWidth + (showsDetails ? DashboardStyle.detailsColumnWidth + 1 : 0),
+                    height: DashboardStyle.windowHeight
+                )
+                let view = DashboardView(store: store, mappingStore: mapping, detailsPresented: showsDetails)
                     .environmentObject(language).environmentObject(coordinator)
                     .environment(\.colorScheme, compact ? .dark : .light)
                     .frame(width: size.width, height: size.height)
@@ -65,7 +69,7 @@ struct DashboardRenderingTests {
                 let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
                 host.cacheDisplay(in: host.bounds, to: bitmap)
                 let png = try #require(bitmap.representation(using: .png, properties: [:]))
-                let name = index == 8 ? "disconnected" : index == 9 ? "stale" : family.rawValue
+                let name = showsDetails ? "xiaomi-remote-details" : index == 7 ? "input-monitoring-required" : index == 8 ? "disconnected" : index == 9 ? "stale" : family.rawValue
                 try png.write(to: directory.appendingPathComponent("\(name)-\(compact ? "compact-dark-en" : "wide-light-zh").png"))
             }
         }

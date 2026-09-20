@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppSettingsView: View {
     @ObservedObject var mappingStore: ControllerMappingStore
+    @ObservedObject var appearanceSettings: AppearanceSettings
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
@@ -28,6 +29,7 @@ struct AppSettingsView: View {
             switch settingsCoordinator.selectedTab {
             case .general:
                 GeneralSettingsView(
+                    appearanceSettings: appearanceSettings,
                     languageSettings: languageSettings,
                     launchAtLogin: launchAtLogin,
                     scrollDirectionSettings: scrollDirectionSettings,
@@ -48,6 +50,7 @@ struct AppSettingsView: View {
 private struct GeneralSettingsView: View {
     @State private var remoteVoiceMessage: String?
     @State private var installingMicrophone = false
+    @ObservedObject var appearanceSettings: AppearanceSettings
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
@@ -96,12 +99,9 @@ private struct GeneralSettingsView: View {
 
             Section(L10n.text("当前应用", "Current App")) {
                 LabeledContent(L10n.text("版本", "Version"), value: AppVersion.current)
-                Text(Bundle.main.bundleURL.path)
+                Text(CurrentApplication.bundleURL.path)
                     .font(.caption)
                     .textSelection(.enabled)
-                Button(L10n.text("在 Finder 中显示当前应用", "Show Current App in Finder")) {
-                    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
-                }
                 Text(L10n.text(
                     "系统设置中的辅助功能和输入监控权限，请授权给这个应用。",
                     "Grant Accessibility and Input Monitoring to this app in System Settings."
@@ -215,6 +215,18 @@ private struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
             } header: {
                 Text(L10n.text("滚动", "Scrolling"))
+            }
+
+            Section(L10n.text("外观", "Appearance")) {
+                Picker(
+                    L10n.text("主题", "Theme"),
+                    selection: $appearanceSettings.preference
+                ) {
+                    ForEach(AppAppearancePreference.allCases) { preference in
+                        Text(preference.displayName).tag(preference)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
 
             Section(L10n.text("语言", "Language")) {

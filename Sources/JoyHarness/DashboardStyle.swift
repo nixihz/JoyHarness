@@ -18,11 +18,9 @@ enum DashboardStyle {
     static let minimumTarget: CGFloat = 24
     static let iconSize: CGFloat = 18
     static let emptyIconSize: CGFloat = 64
-    static let windowMinimumWidth: CGFloat = 620
     static let windowWidth: CGFloat = 744
-    static let windowMinimumHeight: CGFloat = 520
     static let windowHeight: CGFloat = 600
-    static let compactBreakpoint: CGFloat = 700
+    static let detailsColumnWidth: CGFloat = 380
     static let artworkWidth: CGFloat = 320
     static let artworkHeight: CGFloat = 220
     static let mappingHeight: CGFloat = 240

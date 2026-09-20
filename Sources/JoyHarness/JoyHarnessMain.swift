@@ -26,6 +26,7 @@ enum JoyHarnessEntryPoint {
 
 struct JoyHarnessApp: App {
     @NSApplicationDelegateAdaptor(JoyHarnessAppDelegate.self) private var appDelegate
+    @StateObject private var appearanceSettings = AppearanceSettings()
     @StateObject private var languageSettings = AppLanguageSettings()
     @StateObject private var settingsCoordinator = SettingsCoordinator()
     @StateObject private var launchAtLogin = LaunchAtLoginManager()
@@ -39,7 +40,6 @@ struct JoyHarnessApp: App {
                 .environmentObject(languageSettings)
                 .environmentObject(settingsCoordinator)
                 .environment(\.locale, languageSettings.locale)
-                .frame(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
         }
         .defaultSize(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
         .windowResizability(.contentSize)
@@ -57,6 +57,7 @@ struct JoyHarnessApp: App {
         Settings {
             AppSettingsView(
                 mappingStore: appDelegate.runtime.mappings,
+                appearanceSettings: appearanceSettings,
                 languageSettings: languageSettings,
                 launchAtLogin: launchAtLogin,
                 scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
@@ -78,14 +79,18 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         runtime.start()
         NSApp.activate(ignoringOtherApps: true)
-        DispatchQueue.main.async { self.applyCompactDashboardSizeIfNeeded() }
+        DispatchQueue.main.async { self.configureMainWindow() }
     }
 
-    private func applyCompactDashboardSizeIfNeeded() {
+    private func configureMainWindow() {
+        guard let window = NSApp.windows.first(where: { $0.title == "Joy Harness" }) else { return }
+        window.titlebarSeparatorStyle = .none
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = .windowBackgroundColor
+
         let defaults = UserDefaults.standard
         let migrationKey = "dashboardCompactWindow.applied"
-        guard !defaults.bool(forKey: migrationKey),
-              let window = NSApp.windows.first(where: { $0.title == "Joy Harness" }) else { return }
+        guard !defaults.bool(forKey: migrationKey) else { return }
         // SwiftUI restoration can override defaultSize. Apply once after the
         // main window exists, then let subsequent launches restore it normally.
         window.setContentSize(NSSize(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight))

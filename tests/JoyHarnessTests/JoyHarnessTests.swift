@@ -1,3 +1,4 @@
+import AppKit
 import CoreAudio
 import CoreGraphics
 import Darwin
@@ -117,6 +118,25 @@ struct JoyHarnessTests {
         settings.preference = .english
         #expect(settings.preference.resolved() == .english)
         #expect(L10n.text("中文", "English", language: .english) == "English")
+    }
+
+    @Test
+    @MainActor
+    func appearancePreferencePersistsAndMapsToAppearance() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppearanceSettings(userDefaults: defaults, applyAppearance: { _ in })
+        #expect(settings.preference == .system)
+        #expect(settings.preference.appearanceName == nil)
+        #expect(AppAppearancePreference.light.appearanceName == .aqua)
+        #expect(AppAppearancePreference.dark.appearanceName == .darkAqua)
+
+        settings.preference = .dark
+
+        let reloaded = AppearanceSettings(userDefaults: defaults, applyAppearance: { _ in })
+        #expect(reloaded.preference == .dark)
     }
 
     @Test
