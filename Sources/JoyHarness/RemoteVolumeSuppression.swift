@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct RemoteKeyMapping: Codable, Hashable {
@@ -77,10 +78,25 @@ private struct RemoteVolumeSnapshot: Codable {
 }
 
 /// Uses the system utility instead of private IOHIDEventSystem APIs or root access.
-enum RemoteVolumeGuardWorker {
-    static func run() {
-        setbuf(stdout, nil)
-        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agent-deck")
+final class RemoteVolumeGuardWorker {
+    private let directory: URL
+    private let input: FileHandle
+    private let hidutil: ([String]) throws -> Data
+    private let retryMilliseconds: Int32
+
+    init(
+        directory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agent-deck"),
+        input: FileHandle = .standardInput,
+        retryMilliseconds: Int32 = 500,
+        hidutil: @escaping ([String]) throws -> Data = RemoteVolumeGuardWorker.executeHidutil
+    ) {
+        self.directory = directory
+        self.input = input
+        self.retryMilliseconds = retryMilliseconds
+        self.hidutil = hidutil
+    }
+
+    func run() {
         // A replacement GUI may start before the previous guard finishes restoring.
         var lock: SingleInstanceLock?
         for _ in 0..<150 {
@@ -101,16 +117,41 @@ enum RemoteVolumeGuardWorker {
                 }
                 // Recover even if both the previous GUI and guard were interrupted.
                 try restore(&snapshots, journal: journal)
-                while let command = readLine() {
+                var mapping = false
+                var needsRetry = false
+                var pendingInput = Data()
+                while true {
+                    // Retry late HID event services without blocking mode changes
+                    // or EOF (the GUI may have exited/crashed). Once ready, sleep
+                    // until the next command instead of polling hidutil forever.
+                    var descriptor = pollfd(fd: input.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                    let result = poll(&descriptor, 1, needsRetry ? retryMilliseconds : -1)
+                    if result < 0 {
+                        if errno == EINTR { continue }
+                        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    }
+                    if result > 0 {
+                        let data = input.availableData
+                        if data.isEmpty { break }
+                        pendingInput.append(data)
+                        while let newline = pendingInput.firstIndex(of: 0x0A) {
+                            let command = String(decoding: pendingInput[..<newline], as: UTF8.self)
+                            pendingInput.removeSubrange(...newline)
+                            if command == "mapping" { mapping = true }
+                            else if command == "native" { mapping = false }
+                        }
+                    }
                     do {
-                        if command == "mapping" {
-                            try suppress(&snapshots, journal: journal)
-                        } else if command == "native" {
+                        if mapping {
+                            needsRetry = !(try suppress(&snapshots, journal: journal))
+                        } else {
+                            needsRetry = false
                             try restore(&snapshots, journal: journal)
                         }
                     } catch {
                         print("[agent-deck] remote volume mapping failed: \(error)")
                         try restore(&snapshots, journal: journal)
+                        needsRetry = mapping
                     }
                 }
                 try restore(&snapshots, journal: journal)
@@ -120,7 +161,7 @@ enum RemoteVolumeGuardWorker {
         }
     }
 
-    private static func hidutil(_ arguments: [String]) throws -> Data {
+    private static func executeHidutil(_ arguments: [String]) throws -> Data {
         let command = Process()
         command.executableURL = URL(fileURLWithPath: "/usr/bin/hidutil")
         command.arguments = arguments
@@ -146,16 +187,16 @@ enum RemoteVolumeGuardWorker {
         try json(matching.mapValues { Int64(bitPattern: $0) })
     }
 
-    private static func services() throws -> [[String: Any]] {
+    private func services() throws -> [[String: Any]] {
         let match = ["VendorID": XiaomiRemoteConstants.vendorID, "ProductID": XiaomiRemoteConstants.productID]
-        let output = try hidutil(["list", "--ndjson", "--matching", json(match)])
+        let output = try hidutil(["list", "--ndjson", "--matching", Self.json(match)])
         return try String(decoding: output, as: UTF8.self).split(separator: "\n").compactMap { line in
             let record = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
             return record?["type"] as? String == "service" ? record : nil
         }
     }
 
-    private static func mappingsByService() throws -> [UInt64: [RemoteKeyMapping]] {
+    private func mappingsByService() throws -> [UInt64: [RemoteKeyMapping]] {
         let data = try hidutil(["dump", "services", "-f", "xml"])
         let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         guard let records = plist?["ServiceRecords"] as? [[String: Any]] else {
@@ -178,22 +219,22 @@ enum RemoteVolumeGuardWorker {
         return result
     }
 
-    private static func write(_ mappings: [RemoteKeyMapping], matching: [String: UInt64]) throws {
+    private func write(_ mappings: [RemoteKeyMapping], matching: [String: UInt64]) throws {
         let entries = mappings.map { ["HIDKeyboardModifierMappingSrc": $0.source, "HIDKeyboardModifierMappingDst": $0.destination] }
-        _ = try hidutil(["property", "--matching", serviceMatchingJSON(matching), "--set", json(["UserKeyMapping": entries])])
+        _ = try hidutil(["property", "--matching", Self.serviceMatchingJSON(matching), "--set", Self.json(["UserKeyMapping": entries])])
     }
 
-    private static func save(_ snapshots: [RemoteVolumeSnapshot], journal: URL) throws {
+    private func save(_ snapshots: [RemoteVolumeSnapshot], journal: URL) throws {
         try JSONEncoder().encode(snapshots).write(to: journal, options: .atomic)
     }
 
-    private static func suppress(_ snapshots: inout [RemoteVolumeSnapshot], journal: URL) throws {
+    private func suppress(_ snapshots: inout [RemoteVolumeSnapshot], journal: URL) throws -> Bool {
         let devices = try services()
         let pending = devices.filter { device in
             guard let id = device["IORegistryEntryID"] as? NSNumber else { return false }
             return !snapshots.contains { $0.registryID == id.uint64Value }
         }
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty else { return !devices.isEmpty }
         let mappings = try mappingsByService()
         for device in pending {
             guard let id = device["IORegistryEntryID"] as? NSNumber,
@@ -216,9 +257,13 @@ enum RemoteVolumeGuardWorker {
             }
             print("[agent-deck] Xiaomi Remote native mapped keys suppressed service=\(id)")
         }
+        return devices.allSatisfy { device in
+            guard let id = device["IORegistryEntryID"] as? NSNumber else { return false }
+            return snapshots.contains { $0.registryID == id.uint64Value }
+        }
     }
 
-    private static func restore(_ snapshots: inout [RemoteVolumeSnapshot], journal: URL) throws {
+    private func restore(_ snapshots: inout [RemoteVolumeSnapshot], journal: URL) throws {
         guard !snapshots.isEmpty else { return }
         let connected = try services()
         let current = try mappingsByService()

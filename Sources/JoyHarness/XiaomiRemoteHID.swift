@@ -247,11 +247,7 @@ final class XiaomiRemoteHIDManager {
         let id = ObjectIdentifier(device)
         guard connectedDevices.insert(id).inserted else { return }
         volumeGuard.update(mapping: operationMode == .mapping)
-        // The event service can appear shortly after the raw HID device.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, self.isConnected else { return }
-            self.volumeGuard.update(mapping: self.operationMode == .mapping)
-        }
+        // The guard keeps retrying until the corresponding event service is ready.
         if !isConnected {
             isConnected = true
             print("[agent-deck] Xiaomi Remote connected")

@@ -584,6 +584,7 @@ final class ControllerMappingStore: ObservableObject {
         self.storageKey = storageKey
         let storedFamily = userDefaults.string(forKey: "\(storageKey).controllerFamily")
             .flatMap(ControllerFamily.init(rawValue:)) ?? .xbox
+        Self.migrateRemoteProfile(from: userDefaults, base: storageKey, family: storedFamily)
         let activeStorageKey = Self.storageKey(base: storageKey, family: storedFamily)
         self.controllerFamily = storedFamily
         self.availableInputs = ControllerInput.availableInputs(for: storedFamily)
@@ -682,7 +683,7 @@ final class ControllerMappingStore: ObservableObject {
             from: userDefaults,
             key: joyConOrientationStorageKey
         )
-        if previousFamily.isJoyCon || family.isJoyCon {
+        if previousFamily.isJoyCon || family.isJoyCon || previousFamily == .xiaomiRemote || family == .xiaomiRemote {
             mappings = Self.loadMappings(
                 from: userDefaults,
                 key: activeStorageKey,
@@ -701,7 +702,7 @@ final class ControllerMappingStore: ObservableObject {
                 mappings[input] = newDefaults[input]
             }
         }
-        if !family.isJoyCon {
+        if !family.isJoyCon && family != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
         }
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
@@ -932,7 +933,39 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     private static func storageKey(base: String, family: ControllerFamily) -> String {
-        family.isJoyCon ? "\(base).profiles.\(family.rawValue)" : base
+        family.isJoyCon || family == .xiaomiRemote ? "\(base).profiles.\(family.rawValue)" : base
+    }
+
+    private static func migrateRemoteProfile(from defaults: UserDefaults, base: String, family: ControllerFamily) {
+        let destination = storageKey(base: base, family: .xiaomiRemote)
+        guard defaults.object(forKey: destination) == nil else { return }
+        if family == .xiaomiRemote || family == .generic {
+            // Older versions wrote generic on disconnect, losing the previous
+            // device's identity. Preserve that shared profile as well as a remote
+            // copy; translate only old defaults, as a legacy reconnect did.
+            let legacyDefaults = defaultMappings(for: .generic)
+            let stored = defaults.dictionary(forKey: base) as? [String: String] ?? [:]
+            let remote = family == .xiaomiRemote ? stored : stored.filter { key, value in
+                guard let input = ControllerInput(rawValue: key) else { return false }
+                return legacyDefaults[input]?.rawValue != value
+            }
+            defaults.set(remote, forKey: destination)
+            for suffix in [".openApplications", ".recordedShortcuts"] {
+                if let value = defaults.object(forKey: base + suffix) {
+                    defaults.set(value, forKey: destination + suffix)
+                }
+            }
+            if family == .xiaomiRemote {
+                for suffix in ["", ".openApplications", ".recordedShortcuts"] {
+                    defaults.removeObject(forKey: base + suffix)
+                }
+            }
+        }
+        // Mark migration complete even on a fresh installation, before any new
+        // gamepad settings are saved under the shared key.
+        if defaults.object(forKey: destination) == nil {
+            defaults.set([String: String](), forKey: destination)
+        }
     }
 
     private static func loadJoyConOrientation(

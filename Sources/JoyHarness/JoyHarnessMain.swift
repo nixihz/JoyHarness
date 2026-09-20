@@ -17,7 +17,7 @@ enum JoyHarnessEntryPoint {
             return
         }
         if CommandLine.arguments.contains("--remote-volume-guard") {
-            RemoteVolumeGuardWorker.run()
+            RemoteVolumeGuardWorker().run()
         } else {
             JoyHarnessApp.main()
         }
@@ -270,6 +270,7 @@ final class JoyHarnessRuntime {
         case .testHaptics(let state):
             return haptics.testFeedback(state)
         case .rescanControllers:
+            xiaomiRemote.start()
             buttons.rescanControllers()
             writeStatus(current, note: "controller-discovery-started")
             return true
@@ -383,11 +384,11 @@ final class JoyHarnessRuntime {
             guard let self else { return }
             if input == .options {
                 if isPressed {
-                    self.remoteMicrophoneOutput.finishPreviousSessionIfDraining()
+                    self.remoteMicrophoneOutput.prepareForPress()
                 } else {
                     // Let the last PCM buffers reach the virtual microphone
                     // before releasing the configured dictation shortcut.
-                    self.remoteMicrophoneOutput.end { [weak self] in
+                    self.remoteMicrophoneOutput.releaseWhenFinished { [weak self] in
                         self?.buttons.handleRemoteButton(input, isPressed: false)
                     }
                     return
@@ -399,10 +400,10 @@ final class JoyHarnessRuntime {
             guard let self else { return }
             self.writeStatus(self.current, note: "xiaomi-voice")
         }
-        xiaomiVoice.onStreamChange = { [weak self] active in
+        xiaomiVoice.onStreamEvent = { [weak self] event in
             guard let self else { return }
-            if active { self.remoteMicrophoneOutput.begin() }
-            else { self.remoteMicrophoneOutput.end() }
+            self.remoteMicrophoneOutput.handle(event)
+            if event == .cancelled { self.buttons.handleRemoteButton(.options, isPressed: false) }
             self.writeStatus(self.current, note: "xiaomi-voice-stream")
         }
         xiaomiVoice.onSamples = { [weak self] samples in

@@ -1,6 +1,10 @@
 import CoreBluetooth
 import Foundation
 
+enum RemoteVoiceStreamEvent {
+    case started, ended, cancelled
+}
+
 final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private static let service = CBUUID(string: "AB5E0001-5A21-4F05-BC7D-AF01F617B664")
     private static let transmit = CBUUID(string: "AB5E0002-5A21-4F05-BC7D-AF01F617B664")
@@ -27,7 +31,7 @@ final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralD
     }
     var onStatus: (() -> Void)?
     var onSamples: (([Int16]) -> Void)?
-    var onStreamChange: ((Bool) -> Void)?
+    var onStreamEvent: ((RemoteVoiceStreamEvent) -> Void)?
     private(set) var isReady = false
     private(set) var status = "遥控器麦克风未连接"
     private(set) var batteryLevel: Float?
@@ -68,7 +72,7 @@ final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralD
         requestedCapabilities = false
         microphoneOpen = false
         batteryLevel = nil
-        finishStream()
+        finishStream(cancelled: true)
     }
 
     private func discover() {
@@ -93,7 +97,8 @@ final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralD
     private func connect(_ peripheral: CBPeripheral) {
         guard remote == nil, wanted else { return }
         central?.stopScan()
-        clearConnection()
+        // A nil remote is already clean (initial state or cleared on disconnect).
+        // Resetting here would cancel a HID press that woke the BLE connection.
         remote = peripheral
         peripheral.delegate = self
         central?.connect(peripheral)
@@ -122,15 +127,18 @@ final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralD
     private func closeMicrophone() {
         if microphoneOpen { write([0x0D, stream.session ?? 0]) }
         microphoneOpen = false
-        finishStream()
+        finishStream(cancelled: true)
     }
 
-    private func finishStream() {
-        guard stream.session != nil else { return }
+    private func finishStream(cancelled: Bool) {
+        guard stream.session != nil else {
+            if cancelled { onStreamEvent?(.cancelled) }
+            return
+        }
         print("[agent-deck] Xiaomi voice PCM samples=\(stream.sampleCount) peak=\(stream.peak) rate=16000")
         stream.stop()
         enhancer.reset()
-        onStreamChange?(false)
+        onStreamEvent?(cancelled ? .cancelled : .ended)
         if isReady { report("遥控器麦克风已连接") }
     }
 
@@ -163,16 +171,18 @@ final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralD
                 return
             }
             guard stream.session != bytes[3] else { return }
-            finishStream()
+            // Starting the replacement output clears old buffers/completions;
+            // do not cancel a new HID press that may already have arrived.
+            if stream.session != nil { finishStream(cancelled: false) }
             // RC003 can initiate AUDIO_START directly on a physical voice press,
             // without sending START_SEARCH or waiting for a host MIC_OPEN.
             microphoneOpen = true
             stream.start(session: bytes[3])
             report("正在接收遥控器麦克风")
-            onStreamChange?(true)
+            onStreamEvent?(.started)
         case 0x00:
             microphoneOpen = false
-            finishStream()
+            finishStream(cancelled: false)
         case 0x0A where stream.session != nil:
             guard bytes.count >= 7, bytes[6] <= 88 else { closeMicrophone(); return }
             let bits = UInt16(bytes[4]) << 8 | UInt16(bytes[5])
@@ -267,7 +277,7 @@ final class XiaomiRemoteVoice: NSObject, CBCentralManagerDelegate, CBPeripheralD
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         guard remote === peripheral, let error else { return }
         microphoneOpen = false
-        finishStream()
+        finishStream(cancelled: true)
         report("遥控器语音命令失败：\(error.localizedDescription)")
     }
 

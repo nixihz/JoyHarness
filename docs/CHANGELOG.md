@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Prevent Xiaomi remote mappings from also emitting the native backquote or F5 key by correctly matching Bluetooth services; restore native keys in native mode and on exit.
+- Keep retrying native key suppression when the remote's HID event service appears late; stop retrying after success or when leaving mapping mode.
+- Store Xiaomi mappings, application targets, and recorded shortcuts separately from gamepads, preserving existing remote settings across reconnects and upgrades.
+- Accept the final BLE audio after the voice key is released and wait for playback before releasing the recording shortcut; immediately cancel audio on disconnect, disable, or native mode.
+- Retry Xiaomi HID discovery from the Dashboard's rescan action after an initial open failure.
 
 ## [0.6.1] - 2026-09-20
 
