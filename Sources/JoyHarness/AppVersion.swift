@@ -4,7 +4,7 @@ enum AppVersion {
     static let current: String = {
         load(
             primaryURL: Bundle.main.url(forResource: "VERSION", withExtension: nil),
-            fallbackURL: { Bundle.module.url(forResource: "VERSION", withExtension: nil) }
+            fallbackURL: { AppResources.bundle.url(forResource: "VERSION", withExtension: nil) }
         )
     }()
 

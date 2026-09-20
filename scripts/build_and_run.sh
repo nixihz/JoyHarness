@@ -75,6 +75,7 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<PLIST
 PLIST
 
 "${PROJECT_ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_BUNDLE}" "${BUNDLE_ID}" local
+python3 "${PROJECT_ROOT}/scripts/verify_packaged_app.py" "${STAGED_APP_BUNDLE}"
 "${PROJECT_ROOT}/scripts/stop_joy_harness_instances.sh"
 mkdir -p "${APP_CONTENTS}"
 /usr/bin/rsync -a --delete "${STAGED_CONTENTS}/" "${APP_CONTENTS}/"

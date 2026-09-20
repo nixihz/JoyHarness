@@ -5,6 +5,17 @@ import SwiftUI
 @main
 enum JoyHarnessEntryPoint {
     @MainActor static func main() {
+        if CommandLine.arguments.contains("--verify-bundle-resources") {
+            let missing = ControllerArtwork.missingResources
+            guard AppResources.packagedBundle(in: .main) != nil,
+                  AppVersion.current == Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                  missing.isEmpty else {
+                fputs("Packaged resources invalid: version=\(AppVersion.current), missing=\(missing.sorted())\n", stderr)
+                exit(1)
+            }
+            print("Packaged resources verified: \(AppVersion.current) at \(AppResources.bundle.bundleURL.path)")
+            return
+        }
         if CommandLine.arguments.contains("--remote-volume-guard") {
             RemoteVolumeGuardWorker.run()
         } else {

@@ -7,6 +7,12 @@
 
 [English](CHANGELOG.md)
 
+## [0.6.1] - 2026-09-20
+
+### 修复
+- 修复下载版启动崩溃：显式读取 Contents/Resources 内的资源包，不再依赖 SwiftPM 的应用根目录或构建机路径。
+- 创建 DMG 前执行搬离构建目录的应用，校验版本及控制器图片，防止资源加载问题漏过发布检查。
+
 ## [0.6.0] - 2026-09-19
 
 ### 新增
@@ -129,6 +135,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/nixihz/JoyHarness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nixihz/JoyHarness/compare/v0.4.0...v0.5.0

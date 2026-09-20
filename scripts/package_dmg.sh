@@ -79,6 +79,7 @@ PLIST
 "${ROOT}/scripts/sign_macos_app.sh" "${APP_BUNDLE}" "${BUNDLE_ID}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 plutil -lint "${APP_BUNDLE}/Contents/Info.plist"
+python3 "${ROOT}/scripts/verify_packaged_app.py" "${APP_BUNDLE}"
 
 mkdir -p "${DMG_ROOT}"
 /usr/bin/ditto "${APP_BUNDLE}" "${DMG_ROOT}/${APP_NAME}.app"

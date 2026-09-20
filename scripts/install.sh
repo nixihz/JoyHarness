@@ -63,6 +63,7 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 </plist>
 EOF
 "${ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_DIR}" "${BUNDLE_ID}" local
+python3 "${ROOT}/scripts/verify_packaged_app.py" "${STAGED_APP_DIR}"
 "${ROOT}/scripts/stop_joy_harness_instances.sh"
 mkdir -p "${APP_CONTENTS}"
 /usr/bin/rsync -a --delete "${STAGED_CONTENTS}/" "${APP_CONTENTS}/"

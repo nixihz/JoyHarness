@@ -2,7 +2,7 @@
 
 `.github/workflows/release.yml` publishes a versioned Apple Silicon DMG from
 the `main` branch. It runs the complete test suite, packages the app, verifies
-the DMG and checksum, creates a draft GitHub Release, uploads both assets, and
+the packaged app’s resource loading from a temporary location, the DMG and checksum, creates a draft GitHub Release, uploads both assets, and
 publishes the release only after every previous step succeeds.
 
 ## Run a release
@@ -66,3 +66,11 @@ If Apple rejects a submission, the workflow prints the notarization report and
 stops before stapling or publishing.
 
 Never commit certificates, API keys, or their passwords to the repository.
+
+## Packaged resource check
+
+`python3 scripts/verify_packaged_app.py "dist/Joy Harness.app"` copies the app
+to a temporary directory and executes its version and controller-artwork loaders.
+The check runs during DMG packaging and source installation before replacing the
+installed app. It catches SwiftPM accessor differences between local and CI builds;
+unit tests or signature verification alone do not prove packaged resources load.

@@ -7,13 +7,19 @@ struct ControllerArtwork: View {
     let pressedInputs: Set<ControllerInput>
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let images: [String: NSImage] = {
+    private static var resourceNames: Set<String> {
         let families: [ControllerFamily] = [.dualSense, .dualShock, .xbox, .generic, .xiaomiRemote, .joyConLeft, .joyConRight, .joyConPair]
+        return Set(families.flatMap { $0.dashboardArtworkDescriptors().map(\.resource) })
+    }
+
+    static var missingResources: Set<String> { resourceNames.subtracting(images.keys) }
+
+    private static let images: [String: NSImage] = {
         var result: [String: NSImage] = [:]
-        for descriptor in families.flatMap({ $0.dashboardArtworkDescriptors() }) {
-            let url = Bundle.main.url(forResource: descriptor.resource, withExtension: "png")
-                ?? Bundle.module.url(forResource: descriptor.resource, withExtension: "png")
-            if let url, let image = NSImage(contentsOf: url) { result[descriptor.resource] = image }
+        for name in resourceNames {
+            let url = Bundle.main.url(forResource: name, withExtension: "png")
+                ?? AppResources.bundle.url(forResource: name, withExtension: "png")
+            if let url, let image = NSImage(contentsOf: url) { result[name] = image }
         }
         return result
     }()
