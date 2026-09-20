@@ -95,6 +95,28 @@ enum ControllerFamily: String {
     }
 }
 
+enum ControllerConnectionSource: String {
+    case gameController
+    case xiaomiRemote
+}
+
+/// A live input device exposed to the settings UI.
+///
+/// `id` is intentionally scoped to the current process. GameController does
+/// not expose a stable hardware identifier for every supported device, so the
+/// runtime uses the controller object identity while it is connected.
+struct ConnectedControllerDescriptor: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let family: ControllerFamily
+    let source: ControllerConnectionSource
+
+    var displayName: String {
+        if name.isEmpty { return family.displayName }
+        return name
+    }
+}
+
 enum ControllerBatteryState: String, Equatable {
     case unknown
     case discharging

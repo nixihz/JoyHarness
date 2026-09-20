@@ -315,6 +315,17 @@ final class ButtonBridge {
         attachPreferredController()
     }
 
+    /// Attaches one explicitly selected standard GameController endpoint.
+    ///
+    /// The normal bridge still owns discovery and selection. ControllerHub
+    /// uses this entry point for independent per-device input sessions so
+    /// multiple standard controllers can remain active at once.
+    func attachController(_ selected: GCController) {
+        guard selected.joyConHardwareKind == nil,
+              selected.extendedGamepad != nil else { return }
+        attachStandardController(selected)
+    }
+
     private func attachPreferredController() {
         guard !isRemoteControllerActive else { return }
         let allControllers = GCController.controllers()
@@ -355,7 +366,7 @@ final class ButtonBridge {
             controllers.first(where: { $0 === attached })
         } ?? controllers.first
         guard let selected = selectedController,
-              let gamepad = selected.extendedGamepad else {
+              selected.extendedGamepad != nil else {
             detachObservedHandlers()
             resetInputState()
             controller = nil
@@ -366,6 +377,11 @@ final class ButtonBridge {
             print("[agent-deck] controller unavailable")
             return
         }
+        attachStandardController(selected)
+    }
+
+    private func attachStandardController(_ selected: GCController) {
+        guard let gamepad = selected.extendedGamepad else { return }
         guard controller !== selected else { return }
         detachObservedHandlers()
         resetInputState()

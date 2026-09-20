@@ -200,4 +200,25 @@ struct XiaomiRemoteTests {
         bridge.setRemoteControllerActive(false)
         #expect(family != .xiaomiRemote)
     }
+
+    @Test
+    @MainActor
+    func controllerHubKeepsRemoteSessionIndependentFromGameControllerSessions() {
+        let hub = ControllerHub { family, input in
+            ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+        }
+        var devices: [ConnectedControllerDescriptor] = []
+        hub.onConnectedDevicesChange = { devices = $0 }
+
+        hub.setRemoteControllerActive(true)
+        #expect(devices.count == 1)
+        #expect(devices.first?.family == .xiaomiRemote)
+        #expect(devices.first?.source == .xiaomiRemote)
+
+        hub.setRemoteControllerActive(true)
+        #expect(devices.count == 1)
+
+        hub.setRemoteControllerActive(false)
+        #expect(devices.isEmpty)
+    }
 }

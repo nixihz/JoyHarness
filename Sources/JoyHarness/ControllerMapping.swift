@@ -563,8 +563,11 @@ final class ControllerMappingStore: ObservableObject {
     @Published private(set) var joyConOrientation: JoyConOrientation
     @Published private(set) var openApplicationTargets: [ControllerInput: String]
     @Published private(set) var recordedShortcutConfigurations: [ControllerInput: RecordedShortcutConfiguration]
+    @Published private(set) var connectedDevices: [ConnectedControllerDescriptor] = []
+    @Published private(set) var selectedConnectedDeviceID = ""
 
     var onJoyConOrientationChange: ((JoyConOrientation) -> Void)?
+    var onConnectedDeviceSelectionChange: ((String) -> Void)?
 
     private let userDefaults: UserDefaults
     private let storageKey: String
@@ -614,6 +617,24 @@ final class ControllerMappingStore: ObservableObject {
         mappings[input] ?? Self.defaultMappings(for: controllerFamily)[input] ?? .disabled
     }
 
+    /// Returns the mapping for a connected device without changing the profile
+    /// currently shown in Settings. GameController can deliver input from more
+    /// than one family at the same time, so the input router must not depend on
+    /// the UI's selected profile.
+    func action(
+        for input: ControllerInput,
+        family: ControllerFamily
+    ) -> ControllerMappedAction {
+        guard family != controllerFamily else { return action(for: input) }
+        let key = Self.storageKey(base: storageKey, family: family)
+        let stored = Self.loadMappings(
+            from: userDefaults,
+            key: key,
+            defaults: Self.defaultMappings(for: family)
+        )
+        return stored[input] ?? Self.defaultMappings(for: family)[input] ?? .disabled
+    }
+
     func displayName(for input: ControllerInput) -> String {
         input.displayName(
             for: controllerFamily,
@@ -623,6 +644,18 @@ final class ControllerMappingStore: ObservableObject {
 
     func openApplicationTarget(for input: ControllerInput) -> String? {
         openApplicationTargets[input]
+    }
+
+    func openApplicationTarget(
+        for input: ControllerInput,
+        family: ControllerFamily
+    ) -> String? {
+        guard family != controllerFamily else { return openApplicationTarget(for: input) }
+        let key = Self.storageKey(base: storageKey, family: family)
+        return Self.loadOpenApplicationTargets(
+            from: userDefaults,
+            key: "\(key).openApplications"
+        )[input]
     }
 
     func openApplicationDisplayName(for input: ControllerInput) -> String? {
@@ -648,6 +681,18 @@ final class ControllerMappingStore: ObservableObject {
 
     func recordedShortcutConfiguration(for input: ControllerInput) -> RecordedShortcutConfiguration {
         recordedShortcutConfigurations[input] ?? RecordedShortcutConfiguration(shortcut: nil, note: "")
+    }
+
+    func recordedShortcutConfiguration(
+        for input: ControllerInput,
+        family: ControllerFamily
+    ) -> RecordedShortcutConfiguration {
+        guard family != controllerFamily else { return recordedShortcutConfiguration(for: input) }
+        let key = Self.storageKey(base: storageKey, family: family)
+        return Self.loadRecordedShortcutConfigurations(
+            from: userDefaults,
+            key: "\(key).recordedShortcuts"
+        )[input] ?? RecordedShortcutConfiguration(shortcut: nil, note: "")
     }
 
     func mappedActionDisplayName(for input: ControllerInput) -> String {
@@ -707,6 +752,37 @@ final class ControllerMappingStore: ObservableObject {
         }
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
         persistAll()
+    }
+
+    func setConnectedDevices(_ devices: [ConnectedControllerDescriptor]) {
+        let deduplicated = devices.reduce(into: [ConnectedControllerDescriptor]()) { result, device in
+            guard !result.contains(where: { $0.id == device.id }) else { return }
+            result.append(device)
+        }
+        connectedDevices = deduplicated
+
+        if let selected = deduplicated.first(where: { $0.id == selectedConnectedDeviceID }) {
+            if selected.family != controllerFamily {
+                setControllerFamily(selected.family)
+            }
+            return
+        }
+
+        if let sameFamily = deduplicated.first(where: { $0.family == controllerFamily }) {
+            selectedConnectedDeviceID = sameFamily.id
+        } else if let first = deduplicated.first {
+            selectedConnectedDeviceID = first.id
+            setControllerFamily(first.family)
+        } else {
+            selectedConnectedDeviceID = ""
+        }
+    }
+
+    func selectConnectedDevice(_ id: String) {
+        guard let device = connectedDevices.first(where: { $0.id == id }) else { return }
+        selectedConnectedDeviceID = device.id
+        setControllerFamily(device.family)
+        onConnectedDeviceSelectionChange?(device.id)
     }
 
     func setJoyConOrientation(_ orientation: JoyConOrientation) {

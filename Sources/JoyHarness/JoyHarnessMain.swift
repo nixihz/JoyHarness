@@ -122,7 +122,7 @@ final class JoyHarnessRuntime {
     private let adaptiveTrigger = AdaptiveTriggerFeedback()
     private var xboxTriggerPressState = RightTriggerPressState()
     private let threads = CodexThreadProvider()
-    private let buttons: ButtonBridge
+    private let buttons: ControllerHub
     private let mouse = MouseBridge()
     private let rp2040 = RP2040Bridge()
     private let slotHotkeys = SlotHotkeys()
@@ -132,6 +132,7 @@ final class JoyHarnessRuntime {
     private let remoteMicrophoneOutput = RemoteMicrophoneOutput()
     private var current: PadState = .idle
     private var controllerFamily: ControllerFamily = .generic
+    private var lastStatusControllerID: String?
     private var joyConSnapshot: JoyConControllerSnapshot?
     private var slotStates = Array(repeating: PadState.idle, count: 6)
     private var slotThreads = Array<CodexThreadSummary?>(repeating: nil, count: 6)
@@ -161,7 +162,9 @@ final class JoyHarnessRuntime {
         self.pointerSensitivitySettings = pointerSensitivitySettings
         let nativeGamepadAppSettings = NativeGamepadAppSettings()
         self.nativeGamepadAppSettings = nativeGamepadAppSettings
-        self.buttons = ButtonBridge(mappingProvider: { mappings.action(for: $0) })
+        self.buttons = ControllerHub(
+            mappingProvider: { family, input in mappings.action(for: input, family: family) }
+        )
         self.dashboard = DashboardStore(statusURL: statusURL)
         self.dashboard.onAction = { [weak self] action in
             self?.perform(action) ?? false
@@ -305,11 +308,11 @@ final class JoyHarnessRuntime {
         buttons.touchpadPointerHandler = { [weak self] x, y in
             self?.mouse.applyPointerDelta(x: x, y: y)
         }
-        buttons.openApplicationTargetProvider = { [weak self] input in
-            self?.mappings.openApplicationTarget(for: input)
+        buttons.openApplicationTargetProvider = { [weak self] family, input in
+            self?.mappings.openApplicationTarget(for: input, family: family)
         }
-        buttons.recordedShortcutProvider = { [weak self] input in
-            self?.mappings.recordedShortcutConfiguration(for: input).shortcut
+        buttons.recordedShortcutProvider = { [weak self] family, input in
+            self?.mappings.recordedShortcutConfiguration(for: input, family: family).shortcut
         }
         buttons.joyConOrientationProvider = { [weak self] in
             self?.mappings.joyConOrientation ?? .horizontal
@@ -317,15 +320,18 @@ final class JoyHarnessRuntime {
         mappings.onJoyConOrientationChange = { [weak self] _ in
             self?.buttons.refreshJoyConOrientation()
         }
+        mappings.onConnectedDeviceSelectionChange = { [weak self] id in
+            self?.buttons.selectController(id: id)
+        }
         buttons.recordedShortcutHandler = { [weak self] shortcut, pressed in
             self?.mouse.setRecordedShortcut(shortcut, pressed: pressed)
         }
         buttons.openApplicationHandler = { [weak self] bundleIdentifier in
             self?.openApplication(bundleIdentifier: bundleIdentifier) ?? false
         }
-        buttons.rightTriggerFeedbackHandler = { [weak self] value in
+        buttons.rightTriggerFeedbackHandler = { [weak self] family, value in
             guard let self else { return }
-            if self.controllerFamily == .xbox {
+            if family == .xbox {
                 if let event = self.xboxTriggerPressState.update(value: value) {
                     self.haptics.playXboxTriggerFeedback(event)
                 }
@@ -347,6 +353,8 @@ final class JoyHarnessRuntime {
         }
         buttons.onControllerChange = { [weak self] controller, family in
             guard let self else { return }
+            let previousFamily = self.controllerFamily
+            let selectedDeviceID = self.buttons.selectedDeviceID
             self.dashboard.clearControllerInputs()
             self.lastBatterySnapshot = nil
             self.lastJoyConBatterySnapshots.removeAll()
@@ -354,9 +362,20 @@ final class JoyHarnessRuntime {
             self.xboxTriggerPressState = RightTriggerPressState()
             self.mappings.setControllerFamily(family)
             self.adaptiveTrigger.attach(controller)
+            // A picker change does not alter the connected-controller set, so
+            // the haptics connection callback is not guaranteed to run. Write
+            // immediately so the dashboard reflects the selected profile.
+            if self.lastStatusControllerID != selectedDeviceID ||
+                previousFamily != family {
+                self.writeStatus(self.current, note: "controller-selected")
+            }
+            self.lastStatusControllerID = selectedDeviceID
         }
         buttons.onControllerSetChange = { [weak self] controllers in
             self?.haptics.attach(controllers)
+        }
+        buttons.onConnectedDevicesChange = { [weak self] devices in
+            self?.mappings.setConnectedDevices(devices)
         }
         buttons.onJoyConChange = { [weak self] snapshot in
             guard let self else { return }
@@ -567,9 +586,10 @@ final class JoyHarnessRuntime {
                 "state": slotStates[index].rawValue,
             ]
         }
-        let isRemoteConnected = controllerFamily == .xiaomiRemote && xiaomiRemote.isConnected
-        let controllerConnected = haptics.connectedName != "none" || isRemoteConnected
-        let controllerName = isRemoteConnected ? controllerFamily.displayName : haptics.connectedName
+        let connectedDevices = buttons.connectedDevices
+        let controllerConnected = !connectedDevices.isEmpty || haptics.connectedName != "none"
+        let controllerName = connectedDevices.map(\.displayName).joined(separator: " + ")
+            .isEmpty ? haptics.connectedName : connectedDevices.map(\.displayName).joined(separator: " + ")
         var payload: [String: Any] = [
             "app_path": Bundle.main.bundleURL.path,
             "app_version": AppVersion.current,
@@ -580,6 +600,15 @@ final class JoyHarnessRuntime {
             "controller": controllerName,
             "controller_connected": controllerConnected,
             "controller_family": controllerFamily.rawValue,
+            "controller_devices": connectedDevices.map { device in
+                [
+                    "id": device.id,
+                    "name": device.name,
+                    "family": device.family.rawValue,
+                    "source": device.source.rawValue,
+                    "selected": device.id == buttons.selectedDeviceID,
+                ]
+            },
             "controller_adaptive_trigger": adaptiveTrigger.isAvailable,
             "controller_impulse_trigger": haptics.hasRightTriggerFeedback,
             "controller_touchpad": controllerFamily == .dualSense || controllerFamily == .dualShock,

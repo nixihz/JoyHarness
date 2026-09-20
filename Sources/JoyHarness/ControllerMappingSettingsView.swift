@@ -15,6 +15,39 @@ struct ControllerMappingSettingsPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !store.connectedDevices.isEmpty {
+                HStack(spacing: 12) {
+                    Label(
+                        L10n.text("设置设备", "Configure Device"),
+                        systemImage: "rectangle.3.group"
+                    )
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                    Picker(
+                        L10n.text("设置设备", "Configure Device"),
+                        selection: Binding(
+                            get: { store.selectedConnectedDeviceID },
+                            set: { store.selectConnectedDevice($0) }
+                        )
+                    ) {
+                        ForEach(store.connectedDevices) { device in
+                            Text(device.displayName + " · " + device.family.displayName)
+                                .tag(device.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.bar)
+
+                Divider()
+            }
+
             if store.controllerFamily == .joyConLeft || store.controllerFamily == .joyConRight {
                 HStack(spacing: 12) {
                     Text(L10n.text("握持方向", "Grip Orientation"))

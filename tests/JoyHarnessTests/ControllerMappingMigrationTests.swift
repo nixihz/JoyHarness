@@ -4,6 +4,87 @@ import Testing
 
 @Suite(.serialized)
 struct ControllerMappingMigrationTests {
+    @Test
+    func connectedDeviceSelectionSwitchesProfilesWithoutLosingCustomMappings() throws {
+        let suiteName = "ControllerMappingMigrationTests.devices.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        let xbox = ConnectedControllerDescriptor(
+            id: "xbox-1",
+            name: "Xbox Wireless Controller",
+            family: .xbox,
+            source: .gameController
+        )
+        let remote = ConnectedControllerDescriptor(
+            id: "remote-1",
+            name: "小米蓝牙遥控器",
+            family: .xiaomiRemote,
+            source: .xiaomiRemote
+        )
+        var selectedIDs: [String] = []
+        store.onConnectedDeviceSelectionChange = { selectedIDs.append($0) }
+        store.setConnectedDevices([xbox, remote])
+
+        #expect(store.selectedConnectedDeviceID == xbox.id)
+        store.setAction(.copy, for: .buttonA)
+        store.selectConnectedDevice(remote.id)
+        #expect(store.controllerFamily == .xiaomiRemote)
+        #expect(store.action(for: .buttonA) == .enter)
+
+        store.setAction(.screenshotTool, for: .buttonY)
+        store.selectConnectedDevice(xbox.id)
+        #expect(store.controllerFamily == .xbox)
+        #expect(store.action(for: .buttonA) == .copy)
+        #expect(store.action(for: .buttonY) == .escape)
+
+        store.selectConnectedDevice(remote.id)
+        #expect(store.action(for: .buttonY) == .screenshotTool)
+        #expect(selectedIDs == [remote.id, xbox.id, remote.id])
+    }
+
+    @Test
+    func familyMappingLookupRemainsAvailableWhenAnotherProfileIsDisplayed() throws {
+        let suiteName = "ControllerMappingMigrationTests.familyLookup.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setAction(.copy, for: .buttonA)
+        store.setControllerFamily(.xiaomiRemote)
+
+        #expect(store.action(for: .buttonA) == .enter)
+        #expect(store.action(for: .buttonA, family: .xbox) == .copy)
+    }
+
+    @Test
+    func changingAProfileDoesNotReplaceTheSelectedSameFamilyDevice() throws {
+        let suiteName = "ControllerMappingMigrationTests.sameFamily.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        let first = ConnectedControllerDescriptor(
+            id: "xbox-a",
+            name: "Xbox Wireless Controller",
+            family: .xbox,
+            source: .gameController
+        )
+        let second = ConnectedControllerDescriptor(
+            id: "xbox-b",
+            name: "Xbox Wireless Controller",
+            family: .xbox,
+            source: .gameController
+        )
+        store.setConnectedDevices([first, second])
+        store.selectConnectedDevice(second.id)
+
+        store.setControllerFamily(.xbox)
+
+        #expect(store.selectedConnectedDeviceID == second.id)
+    }
+
     @Test func remoteMappingsSurviveReconnectAndRemainSeparateFromGamepads() throws {
         let suite = "ControllerMappingMigrationTests.Remote.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
