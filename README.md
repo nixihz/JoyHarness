@@ -44,7 +44,7 @@ shasum -a 256 -c Joy-Harness-v0.6.1-macOS-arm64.dmg.sha256
 
 ## What's New in v0.6.0
 
-- Redesigned the controller dashboard with a compact 744 × 600 layout, device artwork, live input feedback, per-button mappings, and expandable connection details.
+- Redesigned the controller dashboard with a fixed 744 × 600 work area, device artwork, live input feedback, per-button mappings, and a right-side connection inspector.
 - Added Xiaomi Bluetooth Remote 2 Pro (RC003-MS) support, including voice input through the bundled microphone component and volume controls.
 - Added configurable global shortcuts for all six task slots.
 - Fixed pointer movement across offset displays, duplicate Joy-Con HID snapshots, typed controller actions, and app resource packaging.
@@ -203,6 +203,8 @@ The RP2040 is optional for mouse control, system shortcuts, the dashboard, and m
 - A data-capable USB cable. Charge-only cables cannot flash firmware or expose serial/HID devices.
 
 Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
+
+Multiple GameController devices can stay connected at the same time, and the Xiaomi RC003-MS remote can be connected alongside them. Xbox, DualSense/DualShock, and the remote keep independent input sessions, so connecting one device no longer disconnects or disables another. First-generation Joy-Con keeps its existing composition priority: when Joy-Con endpoints are present, Joy Harness presents their paired or single logical profile until they disconnect.
 
 First-generation Joy-Con connect individually over Bluetooth. Joy Harness supports an L/R pair as one logical controller and either side alone. For a single Joy-Con, choose **Horizontal** or **Vertical** in the main controller-mapping panel; left and right preferences persist independently, while paired mode ignores them. A Joy-Con (L) vertical trace established the Apple axis basis used by the current transform. The corrected pointer output, right-only, horizontal, and paired modes still require final hardware validation before removing the experimental label; haptics and motion remain conditional on what macOS exposes.
 
@@ -403,9 +405,13 @@ Joy Harness does not subscribe to the Codex task lifecycle and does not automati
 
 Joy Harness is a background app with a window. Closing the window does not quit the process; explicitly quitting the app stops it without an automatic restart.
 
-The dashboard places the current input device beside its individual button mappings. It adapts to Xiaomi remotes, DualSense, DualShock, Xbox, single or paired Joy-Con, and generic controllers. Single Joy-Con has a native horizontal/vertical grip picker. The main window has a fixed 744 × 600 pt content area, with vertical scrolling for additional content.
+The dashboard places the selected input device beside its individual button mappings. It adapts to Xiaomi remotes, DualSense, DualShock, Xbox, single or paired Joy-Con, and generic controllers. Single Joy-Con has a native horizontal/vertical grip picker. The main window keeps a fixed 744 × 600 pt work area; only the button mapping list scrolls inside its bounded panel.
 
-Connection details are expanded by default and can be collapsed. They retain device capabilities, Joy-Con endpoints, battery, adapter connection, operating mode, Accessibility and Input Monitoring permissions, voice input, recording ownership, and four finite haptic tests. Unknown or stale data is labeled explicitly. Native gamepad mode pauses mappings while retaining physical input feedback.
+When more than one device is connected, open **Settings > Customize Buttons** and use the **Configure Device** picker at the top to choose which connected device is shown. Changing the picker only changes the profile being edited; all connected devices continue to receive input. Xiaomi and Joy-Con profiles are stored separately. Xbox and PlayStation standard gamepads use the shared standard-gamepad mapping profile so their common controls remain consistent.
+
+The status snapshot keeps the selected family in `controller_family` and adds `controller_devices`, an array containing each connected device's process-local `id`, `name`, `family`, `source`, and `selected` flag. The ID is valid for the current app session and is intended for UI/state correlation, not long-term hardware identification.
+
+Connection details open on demand from the trailing toolbar button without scrolling or compressing the 744 × 600 work area. The inspector retains device capabilities, Joy-Con endpoints, battery, adapter connection, operating mode, Accessibility and Input Monitoring permissions, voice input, recording ownership, and four finite haptic tests. Unknown or stale data is labeled explicitly. Native gamepad mode pauses mappings while retaining physical input feedback.
 
 Tasks remain in the target application. The dashboard has no task list, slot cards, task titles, state banners, or task navigation. Slot names can still appear as configurable mapping actions. Haptic tests do not change task state.
 

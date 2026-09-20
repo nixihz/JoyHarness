@@ -227,6 +227,11 @@ xcode-select --install
 **蓝牙模式可以正常震动**；USB 模式虽可被系统识别，系统原生 Identify 也不会触发震动。
 需要状态反馈时优先使用蓝牙。
 
+多个被 macOS `GameController` 识别的手柄可以同时保持连接，小米 RC003-MS 遥控器也可以与
+它们并行连接。Xbox、DualSense/DualShock 与遥控器各自拥有独立输入会话，连接其中一个设备
+不会再主动断开或禁用其他设备。初代 Joy-Con 仍保留现有的组合优先级：检测到 Joy-Con 端点
+时，Joy Harness 会优先展示左右成对或单支的逻辑 profile，直到 Joy-Con 断开。
+
 初代 Joy-Con 需要分别通过蓝牙连接。Joy Harness 可将 L/R 组合为一只逻辑手柄，也支持左单支
 或右单支。在主界面的“控制映射”区域可选择横握或竖握，左右单支分别保存方向与映射，双支模式
 不受该方向设置影响。左 Joy-Con 竖握的实机轨迹已经确定当前变换使用的 Apple 轴基准；修正后的
@@ -504,6 +509,15 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程；主�
 - 手柄名称、震动是否可用、RP2040 是否连接、当前是否为物理 Codex Micro 模式。
 - 辅助功能权限诊断。
 - 打开当前任务和震动状态测试按钮。
+
+连接多个设备时，打开“设置 → 自定义按键”，在顶部“设置设备”选择器中选择要查看和编辑的
+已连接设备。切换选择只改变当前展示的 profile，不会停用其他设备的输入；小米遥控器和
+Joy-Con profile 独立保存，Xbox 与 PlayStation 标准手柄共用标准手柄映射 profile，以保持
+共同按键的一致行为。
+
+`~/.agent-deck/status.json` 的 `controller_family` 表示当前展示的设备类型；新增的
+`controller_devices` 数组列出每个在线设备的进程内 `id`、`name`、`family`、`source` 和
+`selected`。其中 `id` 只在本次应用运行期间有效，用于界面和状态关联，不是持久化硬件标识。
 
 控制台中的任务命令同样依赖 RP2040 已连接。任务名称来自 Codex app-server；未命名任务会
 回退显示首条消息摘要。
