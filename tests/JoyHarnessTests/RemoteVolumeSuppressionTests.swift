@@ -3,11 +3,32 @@ import Testing
 @testable import JoyHarness
 
 struct RemoteVolumeSuppressionTests {
-    @Test func suppressesNativeVoiceAndRestoresItsOriginalMapping() {
-        let voice = RemoteKeyMapping(source: 0x70000003E, destination: 0x70000003A)
-        let applied = RemoteVolumeSuppression.suppress([voice])
-        #expect(applied.contains(.init(source: voice.source, destination: 0)))
-        #expect(RemoteVolumeSuppression.restore(applied, original: [voice]) == [voice])
+    @Test(arguments: [Int64(-496_656_494), 0, 3_798_310_802])
+    func serviceMatchingPreservesLocationIDReturnedByHidutil(locationID: Int64) throws {
+        let service: [String: Int64] = [
+            "VendorID": 10007, "ProductID": 12984, "LocationID": locationID,
+            "PrimaryUsagePage": 1, "PrimaryUsage": 6,
+        ]
+        let matching = service.mapValues { NSNumber(value: $0).uint64Value }
+        let json = try RemoteVolumeGuardWorker.serviceMatchingJSON(matching)
+        let decoded = try JSONDecoder().decode([String: Int64].self, from: Data(json.utf8))
+        #expect(decoded == service)
+    }
+
+    @Test func restoresSignedLocationIDFromExistingUnsignedJournal() throws {
+        let journal = Data(#"{"VendorID":10007,"ProductID":12984,"LocationID":18446744073212895122,"PrimaryUsagePage":1,"PrimaryUsage":6}"#.utf8)
+        let matching = try JSONDecoder().decode([String: UInt64].self, from: journal)
+        let json = try RemoteVolumeGuardWorker.serviceMatchingJSON(matching)
+        let decoded = try JSONDecoder().decode([String: Int64].self, from: Data(json.utf8))
+        #expect(decoded["LocationID"] == -496_656_494)
+    }
+
+    @Test(arguments: [UInt64(0x700000035), 0x70000003E])
+    func suppressesCustomAndVoiceKeysWithoutChangingTheirOriginalMappings(source: UInt64) {
+        let original = [RemoteKeyMapping(source: source, destination: 0x7000000E7)]
+        let applied = RemoteVolumeSuppression.suppress(original)
+        #expect(applied.contains(.init(source: source, destination: 0)))
+        #expect(RemoteVolumeSuppression.restore(applied, original: original) == original)
     }
 
     @Test func preservesExistingMappingsAndRestoresVolume() {

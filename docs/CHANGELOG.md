@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [简体中文](CHANGELOG.zh-CN.md)
 
+## [Unreleased]
+
+### Fixed
+- Prevent Xiaomi remote mappings from also emitting the native backquote or F5 key by correctly matching Bluetooth services; restore native keys in native mode and on exit.
+
 ## [0.6.1] - 2026-09-20
 
 ### Fixed

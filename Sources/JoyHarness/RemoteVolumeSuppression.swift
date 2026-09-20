@@ -139,6 +139,13 @@ enum RemoteVolumeGuardWorker {
         String(decoding: try JSONSerialization.data(withJSONObject: value, options: .sortedKeys), as: UTF8.self)
     }
 
+    static func serviceMatchingJSON(_ matching: [String: UInt64]) throws -> String {
+        // hidutil reports Bluetooth service LocationID as a signed number.
+        // Preserve that value for matching, including when restoring old journals
+        // that stored its UInt64 bit pattern. A widened value matches no service.
+        try json(matching.mapValues { Int64(bitPattern: $0) })
+    }
+
     private static func services() throws -> [[String: Any]] {
         let match = ["VendorID": XiaomiRemoteConstants.vendorID, "ProductID": XiaomiRemoteConstants.productID]
         let output = try hidutil(["list", "--ndjson", "--matching", json(match)])
@@ -173,7 +180,7 @@ enum RemoteVolumeGuardWorker {
 
     private static func write(_ mappings: [RemoteKeyMapping], matching: [String: UInt64]) throws {
         let entries = mappings.map { ["HIDKeyboardModifierMappingSrc": $0.source, "HIDKeyboardModifierMappingDst": $0.destination] }
-        _ = try hidutil(["property", "--matching", json(matching), "--set", json(["UserKeyMapping": entries])])
+        _ = try hidutil(["property", "--matching", serviceMatchingJSON(matching), "--set", json(["UserKeyMapping": entries])])
     }
 
     private static func save(_ snapshots: [RemoteVolumeSnapshot], journal: URL) throws {
