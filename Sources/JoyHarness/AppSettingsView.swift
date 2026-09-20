@@ -47,6 +47,7 @@ struct AppSettingsView: View {
 
 private struct GeneralSettingsView: View {
     @State private var remoteVoiceMessage: String?
+    @State private var installingMicrophone = false
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
@@ -66,17 +67,30 @@ private struct GeneralSettingsView: View {
                         remoteVoiceMessage = L10n.text("已选择 Joy Harness 遥控器麦克风；请在语音应用中使用系统默认输入。", "Selected Joy Harness Remote Microphone; use the system default input in your voice app.")
                     } catch { remoteVoiceMessage = error.localizedDescription }
                 }
+                .disabled(installingMicrophone)
                 Text(remoteVoiceMessage ?? (RemoteMicrophoneOutput.installed
                     ? L10n.text("这会切换系统默认输入；可在系统声音设置中切回其他麦克风。", "This changes the default input. Switch back in System Sound settings.")
-                    : L10n.text("麦克风组件尚未启用；首次安装需要管理员验证。", "Enable the microphone component first; installation requires administrator authentication.")))
+                    : L10n.text("麦克风组件尚未启用；安装需要管理员验证，并会短暂中断声音。", "Enable the microphone component first; installation requires administrator authentication and briefly interrupts audio.")))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(L10n.text("启用 Joy Harness 麦克风组件", "Enable Joy Harness Microphone")) {
-                    guard let installer = Bundle.main.url(forResource: "JoyHarnessMicrophone", withExtension: "pkg") else {
-                        remoteVoiceMessage = L10n.text("当前构建缺少麦克风组件，请重新构建应用。", "This build is missing its microphone component. Rebuild the app.")
-                        return
+                    installingMicrophone = true
+                    remoteVoiceMessage = L10n.text("正在启用麦克风组件，请完成管理员验证；声音会短暂中断。", "Enabling the microphone; authenticate as an administrator. Audio will briefly stop.")
+                    Task { @MainActor in
+                        defer { installingMicrophone = false }
+                        do {
+                            try await RemoteMicrophoneInstallation.install()
+                            remoteVoiceMessage = L10n.text("麦克风组件已安装，音频服务正在重新加载。稍后点击“使用遥控器作为系统麦克风”。", "Microphone installed; the audio service is reloading. Select Use Remote as System Microphone shortly.")
+                        } catch is CancellationError {
+                            remoteVoiceMessage = L10n.text("已取消启用麦克风组件。", "Microphone installation cancelled.")
+                        } catch {
+                            remoteVoiceMessage = L10n.text("启用失败：", "Installation failed: ") + error.localizedDescription
+                        }
                     }
-                    NSWorkspace.shared.open(installer)
+                }
+                .disabled(installingMicrophone)
+                if installingMicrophone {
+                    ProgressView().controlSize(.small)
                 }
             }
 

@@ -12,17 +12,3 @@ xcrun clang -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -Werror \
   "${ROOT}/Drivers/JoyHarnessMicrophone/Driver.c" \
   -o "${DRIVER}/Contents/MacOS/JoyHarnessMicrophone"
 "${ROOT}/scripts/sign_macos_app.sh" "${DRIVER}" tech.keli.joyharness.microphone "${SIGNING_MODE}"
-PKGBUILD_ARGS=(
-  --component "${DRIVER}"
-  --scripts "${ROOT}/Drivers/JoyHarnessMicrophone/InstallerScripts"
-  --install-location /Library/Audio/Plug-Ins/HAL
-  --identifier tech.keli.joyharness.microphone.pkg --version 1.0.0
-)
-if [[ -n "${JOY_HARNESS_INSTALLER_SIGNING_IDENTITY:-}" ]]; then
-  PKGBUILD_ARGS+=(--sign "${JOY_HARNESS_INSTALLER_SIGNING_IDENTITY}" --timestamp)
-fi
-/usr/bin/pkgbuild "${PKGBUILD_ARGS[@]}" \
-  "${OUTPUT}/JoyHarnessMicrophone.pkg"
-if [[ -n "${JOY_HARNESS_INSTALLER_SIGNING_IDENTITY:-}" ]]; then
-  /usr/sbin/pkgutil --check-signature "${OUTPUT}/JoyHarnessMicrophone.pkg"
-fi

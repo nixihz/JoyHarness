@@ -40,7 +40,8 @@ chmod +x "${STAGED_BINARY}"
 /usr/bin/ditto "${RESOURCE_BUNDLE}" "${STAGED_CONTENTS}/Resources/JoyHarness_JoyHarness.bundle"
 install -m 644 "${PROJECT_ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_CONTENTS}/Resources/JoyHarness.icns"
 "${PROJECT_ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
-install -m 644 "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.pkg" "${STAGED_CONTENTS}/Resources/JoyHarnessMicrophone.pkg"
+mkdir -p "${STAGED_CONTENTS}/PlugIns"
+/usr/bin/ditto "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.driver" "${STAGED_CONTENTS}/PlugIns/JoyHarnessMicrophone.driver"
 
 cat > "${STAGED_CONTENTS}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

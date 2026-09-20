@@ -235,7 +235,7 @@ RC003-MS 在 **系统设置 → 蓝牙** 中配对后，启动 Joy Harness 并�
 如果使用 Karabiner-Elements，请在 Devices 中关闭这只遥控器的 Modify events，避免其独占 HID。
 Joy Harness 需要“输入监控”授权；`./scripts/build_and_run.sh --logs` 可查看每次按下、松开对应的遥控器事件。
 内置麦克风通过 ATVV 蓝牙语音协议直接接入 Joy Harness。在“设置 → 通用 → 遥控器麦克风”
-启用应用自带组件，再选择为系统语音输入；无需另装语音桥软件。首次安装需要管理员验证，
+启用应用自带的已签名驱动，再选择为系统语音输入；无需独立安装器或语音桥软件。首次安装需要管理员验证，
 音频服务重载时声音会短暂中断。详见[遥控器麦克风说明](xiaomi-remote-voice.md)。
 映射模式下，12 个已适配按键只执行 Joy Harness 映射，避免方向键、菜单和系统音量双重响应；其他键盘不受影响。
 切换到原生模式或退出应用后恢复原有系统按键行为。可运行 `python3 scripts/verify_xiaomi_remote_volume.py`

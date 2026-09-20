@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Haptic tests now produce finite feedback without changing task state.
 
 ### Fixed
+- Bundle the signed microphone driver directly with the app and enable it through administrator authorization, removing the installer certificate requirement.
 - Pointer movement across displays with offset positions.
 - Duplicate Joy-Con HID snapshots.
 - Handling of typed controller actions.

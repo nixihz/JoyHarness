@@ -40,7 +40,8 @@ install -m 755 "${BUILT_BINARY}" "${APP_BUNDLE}/Contents/MacOS/JoyHarness"
 /usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/Contents/Resources/JoyHarness_JoyHarness.bundle"
 install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${APP_BUNDLE}/Contents/Resources/JoyHarness.icns"
 "${ROOT}/scripts/build_microphone_driver.sh" "${WORK_DIR}/microphone" distribution
-install -m 644 "${WORK_DIR}/microphone/JoyHarnessMicrophone.pkg" "${APP_BUNDLE}/Contents/Resources/JoyHarnessMicrophone.pkg"
+mkdir -p "${APP_BUNDLE}/Contents/PlugIns"
+/usr/bin/ditto "${WORK_DIR}/microphone/JoyHarnessMicrophone.driver" "${APP_BUNDLE}/Contents/PlugIns/JoyHarnessMicrophone.driver"
 
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

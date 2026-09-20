@@ -14,16 +14,15 @@ CURRENT_VERSION = (
 
 
 class ReleaseAutomationTests(unittest.TestCase):
-    def test_notarized_release_requires_installer_credentials(self) -> None:
+    def test_release_credentials_accept_existing_five_secrets(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         step = workflow.split("      - name: Validate release secrets\n", 1)[1]
         script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("      - name:", 1)[0])
         keys = (
             "CERTIFICATE_BASE64", "CERTIFICATE_PASSWORD",
             "API_KEY_BASE64", "API_KEY_ID", "API_ISSUER_ID",
-            "INSTALLER_CERTIFICATE_BASE64", "INSTALLER_CERTIFICATE_PASSWORD",
         )
-        for count, mode in ((0, "unnotarized"), (5, None), (6, None), (7, "notarized")):
+        for count, mode in ((0, "unnotarized"), (1, None), (4, None), (5, "notarized")):
             with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / "github-env"
                 env = dict(os.environ, GITHUB_ENV=str(output))
@@ -31,7 +30,7 @@ class ReleaseAutomationTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
                 if mode is None:
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertIn("Developer ID Installer", result.stderr)
+                    self.assertIn("partially configured", result.stderr)
                     self.assertFalse(output.exists())
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)

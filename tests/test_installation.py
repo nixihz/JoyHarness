@@ -134,6 +134,15 @@ class InstallationTests(unittest.TestCase):
 
             environment = os.environ.copy()
             environment["JOY_HARNESS_SIGNING_IDENTITY"] = "-"
+            plugins = app / "Contents" / "PlugIns"
+            subprocess.run(
+                [str(ROOT / "scripts/build_microphone_driver.sh"), str(plugins), "distribution"],
+                check=True, env=environment, capture_output=True, text=True,
+            )
+            driver = plugins / "JoyHarnessMicrophone.driver"
+            driver_signature = subprocess.run(
+                ["codesign", "-dvv", str(driver)], check=True, capture_output=True, text=True,
+            ).stderr
             subprocess.run(
                 [
                     str(ROOT / "scripts" / "sign_macos_app.sh"),
@@ -145,6 +154,12 @@ class InstallationTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            # Signing the outer app must preserve the nested driver's identity and hash.
+            signed_driver = subprocess.run(
+                ["codesign", "-dvv", str(driver)], check=True, capture_output=True, text=True,
+            ).stderr
+            self.assertEqual(signed_driver, driver_signature)
+            self.assertIn("Identifier=tech.keli.joyharness.microphone", signed_driver)
             subprocess.run(
                 ["codesign", "--verify", "--deep", "--strict", str(app)],
                 check=True,

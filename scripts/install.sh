@@ -32,7 +32,8 @@ install -m 755 "${BUILT}" "${STAGED_APP_EXE}"
 # Launch Services reads CFBundleIconFile from the app's resources, not the module bundle.
 install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_CONTENTS}/Resources/JoyHarness.icns"
 "${ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
-install -m 644 "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.pkg" "${STAGED_CONTENTS}/Resources/JoyHarnessMicrophone.pkg"
+mkdir -p "${STAGED_CONTENTS}/PlugIns"
+/usr/bin/ditto "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.driver" "${STAGED_CONTENTS}/PlugIns/JoyHarnessMicrophone.driver"
 cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

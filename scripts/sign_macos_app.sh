@@ -61,9 +61,10 @@ fi
 
 if [[ -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
   echo "==> Signing ${APP_BUNDLE} with ${SIGNING_IDENTITY}"
+  # Nested drivers are signed first by build_microphone_driver.sh. Do not
+  # recursively re-sign them with the parent bundle identifier.
   CODESIGN_ARGS=(
     --force
-    --deep
     --sign "${SIGNING_IDENTITY}"
     --identifier "${BUNDLE_ID}"
   )
@@ -73,7 +74,7 @@ if [[ -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
   codesign "${CODESIGN_ARGS[@]}" "${APP_BUNDLE}"
 else
   echo "==> Signing ${APP_BUNDLE} with a stable ad-hoc requirement"
-  codesign --force --deep --sign - \
+  codesign --force --sign - \
     --identifier "${BUNDLE_ID}" \
     --requirements "=designated => identifier \"${BUNDLE_ID}\"" \
     "${APP_BUNDLE}"

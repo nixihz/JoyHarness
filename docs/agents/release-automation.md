@@ -32,21 +32,19 @@ exists. It does not modify an existing release.
 With none of the release secrets configured, the workflow creates an ad-hoc
 signed, unnotarized DMG and adds the Gatekeeper limitation to the release notes.
 
-For a public Developer ID release, configure all seven repository secrets:
+For a public Developer ID release, configure all five repository secrets:
 
 | Secret | Content |
 |---|---|
 | `DEVELOPER_ID_CERTIFICATE_BASE64` | Base64-encoded Developer ID Application `.p12` |
 | `DEVELOPER_ID_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` |
-| `DEVELOPER_ID_INSTALLER_CERTIFICATE_BASE64` | Base64-encoded Developer ID Installer `.p12`, including its private key |
-| `DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD` | Password used when exporting the installer `.p12` |
 | `APPLE_API_KEY_P8_BASE64` | Base64-encoded App Store Connect API `.p8` key |
 | `APPLE_API_KEY_ID` | App Store Connect API key ID |
 | `APPLE_API_ISSUER_ID` | App Store Connect API issuer ID |
 
 The workflow fails before building if only part of this set is configured. With
-the full set, it imports both certificates into a temporary keychain, signs the microphone
-installer package with Developer ID Installer, signs the app
+the full set, it imports the application certificate into a temporary keychain, signs the bundled
+microphone driver and the app
 with Hardened Runtime and a trusted timestamp, signs the DMG, submits it with
 `notarytool`, staples the ticket, validates Gatekeeper acceptance, and regenerates
 the checksum after stapling.
@@ -58,12 +56,11 @@ base64 -i DeveloperIDApplication.p12 | tr -d '\n'
 base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\n'
 ```
 
-Developer ID Application cannot sign an installer package. Starting with v0.6.0,
-the DMG includes `JoyHarnessMicrophone.pkg`; its installer signature is required
-for Apple notarization. Export the Developer ID Installer certificate and its
-private key as a password-protected `.p12`, then add the two installer secrets in
-the repository's Settings → Secrets and variables → Actions. Do not paste the
-certificate or password into a chat or commit them to the repository.
+The microphone driver is bundled at `Joy Harness.app/Contents/PlugIns/JoyHarnessMicrophone.driver`.
+It uses the same Developer ID Application identity as the app and is included in
+DMG notarization. There is no `.pkg` or Developer ID Installer dependency.
+The Settings action installs the bundled driver after administrator authentication,
+verifies its staged signature before replacing the installed copy, and reloads CoreAudio.
 
 If Apple rejects a submission, the workflow prints the notarization report and
 stops before stapling or publishing.
