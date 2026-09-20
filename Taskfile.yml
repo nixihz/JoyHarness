@@ -29,7 +29,7 @@ tasks:
   test:
     desc: Test the Swift bridge and installation migrations
     cmds:
-      - swift test
+      - swift test --no-parallel
       - bash scripts/test_microphone_driver.sh
       - python3 -m unittest discover -s tests -v
 
