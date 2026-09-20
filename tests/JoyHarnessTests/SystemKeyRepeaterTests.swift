@@ -4,19 +4,27 @@ import Testing
 
 @MainActor
 struct SystemKeyRepeaterTests {
+    // CI can delay main-actor tasks; wait for observable repeats, not a fixed scheduling window.
+    private func waitForRepeats(_ ready: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !ready(), ContinuousClock.now < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
     @Test func heldArrowsRepeatIndependentlyAndStopOnRelease() async throws {
         var events: [SystemKey] = []
         let repeater = SystemKeyRepeater(initialDelay: 20_000_000, interval: 10_000_000) { events.append($0) }
         defer { repeater.stopAll() }
         let arrows: [SystemKey] = [.arrowUp, .arrowDown, .arrowLeft, .arrowRight]
         for key in arrows { repeater.start(key) }
-        try await Task.sleep(nanoseconds: 150_000_000)
+        try await waitForRepeats { arrows.allSatisfy { key in events.filter { $0 == key }.count > 1 } }
         for key in arrows { #expect(events.filter { $0 == key }.count > 1) }
 
         repeater.stop(.arrowLeft)
         let leftCount = events.filter { $0 == .arrowLeft }.count
         let count = events.count
-        try await Task.sleep(nanoseconds: 80_000_000)
+        try await waitForRepeats { events.count > count }
         #expect(events.filter { $0 == .arrowLeft }.count == leftCount)
         #expect(events.count > count)
 
@@ -52,7 +60,7 @@ struct SystemKeyRepeaterTests {
             bridge.setOperationMode(.mapping)
             bridge.handleRemoteButton(.dpadUp, isPressed: true)
             let before = repeats
-            try await Task.sleep(nanoseconds: 100_000_000)
+            try await waitForRepeats { repeats > before }
             #expect(repeats > before)
             if disconnect { bridge.setRemoteControllerActive(false) }
             else { bridge.setOperationMode(.native) }
