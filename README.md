@@ -37,6 +37,16 @@ Verify the download with:
 shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
 ```
 
+## Dashboard
+
+**DualSense controller**
+
+![Joy Harness dashboard showing DualSense button mappings and connection details](docs/images/dashboard-dualsense.png)
+
+**Xiaomi RC003-MS remote**
+
+![Joy Harness dashboard showing Xiaomi remote button mappings and connection details](docs/images/dashboard-xiaomi-remote.png)
+
 ## What's New in v0.7.0
 
 - Keeps standard game controllers and the Xiaomi RC003-MS remote connected at the same time with independent input sessions and selectable mapping profiles.

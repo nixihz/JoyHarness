@@ -38,6 +38,16 @@ DMG 只包含可手动启动的 `Joy Harness.app`。如需本地 CLI，或需要
 shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
 ```
 
+## 界面预览
+
+**DualSense 手柄**
+
+![Joy Harness 界面展示 DualSense 按键映射和连接详情](images/dashboard-dualsense.png)
+
+**小米 RC003-MS 遥控器**
+
+![Joy Harness 界面展示小米遥控器按键映射和连接详情](images/dashboard-xiaomi-remote.png)
+
 ## v0.7.0 更新
 
 - 标准游戏手柄与小米 RC003-MS 遥控器可同时保持连接，各自使用独立输入会话，并可选择要编辑的映射配置。
