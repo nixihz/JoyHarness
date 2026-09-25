@@ -25,6 +25,25 @@ struct DashboardRenderingTests {
                 let mapping = ControllerMappingStore(userDefaults: defaults)
                 mapping.setControllerFamily(family)
                 mapping.setJoyConOrientation(compact ? .vertical : .horizontal)
+                // Several connected devices show the header device switcher;
+                // four devices exercise its narrower fallbacks.
+                if index == 0 || index == 4 {
+                    let shown = ConnectedControllerDescriptor(
+                        id: "shown", name: "", family: family,
+                        source: family == .xiaomiRemote ? .xiaomiRemote : .gameController
+                    )
+                    let dualSense = ConnectedControllerDescriptor(
+                        id: "dualsense", name: "DualSense Wireless Controller", family: .dualSense, source: .gameController
+                    )
+                    let xboxes = index == 4 ? ["xbox-a", "xbox-b"].map {
+                        ConnectedControllerDescriptor(id: $0, name: "Xbox Wireless Controller", family: .xbox, source: .gameController)
+                    } : []
+                    mapping.setConnectedDevices([shown, dualSense] + xboxes)
+                    mapping.setDisplayedDevice(shown.id)
+                    // Settings configures another device; the Dashboard must
+                    // still show the displayed device's artwork and mappings.
+                    mapping.selectConnectedDevice(dualSense.id)
+                }
                 let statusURL = directory.appendingPathComponent("fixture.json")
                 var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(DashboardStatus.empty)) as? [String: Any])
                 json["controller"] = family.displayName

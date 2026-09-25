@@ -190,3 +190,16 @@ struct DashboardPresentation {
 
 
 }
+
+extension DashboardPresentation {
+    /// Uses the grip of the Joy-Con the status reports, which may not be the
+    /// device Settings is editing.
+    init(status: DashboardStatus, freshness: StatusFreshness, mappingStore: ControllerMappingStore) {
+        let family = status.joyConMode.flatMap(JoyConMode.init(rawValue:))?.controllerFamily
+        self.init(
+            status: status,
+            freshness: freshness,
+            orientation: family.map { mappingStore.joyConOrientation(for: $0) } ?? .vertical
+        )
+    }
+}

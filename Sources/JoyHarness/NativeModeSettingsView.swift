@@ -29,8 +29,8 @@ struct NativeModeSettingsPane: View {
                         Image(systemName: "info.circle.fill")
                             .foregroundStyle(.tint)
                         Text(L10n.text(
-                            "快捷切换：按手柄上的 PS / Home 键可随时手动切换原生/映射模式。",
-                            "Shortcut: Press the PS / Home button on your controller anytime to toggle between Native and Mapping modes."
+                            "手动切换：在「按键映射」中把任一按键设为「切换原生/映射模式」（小米遥控器的菜单键默认如此）。手柄的 PS / Home 键用于呼出 Harness 切换浮层。",
+                            "Manual switch: In Key Mapping, assign 'Toggle Native/Mapping Mode' to any button (the Xiaomi remote's Menu button does this by default). The gamepad PS / Home button opens the Harness switcher."
                         ))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -77,7 +77,7 @@ struct NativeModeSettingsPane: View {
                                 ))
                                 .labelsHidden()
 
-                                AppIconView(bundleIdentifier: app.bundleIdentifier)
+                                ApplicationIconView(bundleIdentifier: app.bundleIdentifier, placeholderSize: 24)
                                     .frame(width: 32, height: 32)
 
                                 VStack(alignment: .leading, spacing: 2) {
@@ -135,9 +135,10 @@ struct NativeModeSettingsPane: View {
                         browseForApplication()
                     }
 
+                    let runningApplications = ApplicationPresentation.runningApplications()
                     if !runningApplications.isEmpty {
                         Menu(L10n.text("从运行中的应用添加", "Add from Running Applications")) {
-                            ForEach(runningApplications, id: \.bundleIdentifier) { running in
+                            ForEach(runningApplications) { running in
                                 Button(running.name) {
                                     settings.addApp(
                                         bundleIdentifier: running.bundleIdentifier ?? "",
@@ -163,6 +164,11 @@ struct NativeModeSettingsPane: View {
             .padding(.horizontal, 16)
             .frame(height: 54)
             .background(.bar)
+        }
+        .onAppear {
+            // App activation only reveals running defaults; the pane also
+            // picks up defaults installed or removed while Joy Harness ran.
+            settings.refreshInstalledDefaultApps()
         }
         .sheet(isPresented: $isCustomAppSheetPresented) {
             VStack(spacing: 16) {
@@ -215,26 +221,10 @@ struct NativeModeSettingsPane: View {
             }
         } message: {
             Text(L10n.text(
-                "将恢复默认的原生手柄应用列表（包含 JoyDSH）。",
-                "This will restore the default list of native gamepad apps (including JoyDSH)."
+                "将根据本机安装情况恢复默认的原生手柄应用列表（JoyDSH 与 Antigravity）。",
+                "This will restore installed default native gamepad apps (JoyDSH and Antigravity)."
             ))
         }
-    }
-
-    private struct RunningAppInfo: Hashable {
-        let name: String
-        let bundleIdentifier: String?
-    }
-
-    private var runningApplications: [RunningAppInfo] {
-        let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
-            .compactMap { app -> RunningAppInfo? in
-                let name = app.localizedName ?? ""
-                guard !name.isEmpty else { return nil }
-                return RunningAppInfo(name: name, bundleIdentifier: app.bundleIdentifier)
-            }
-        return Array(Set(apps)).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private func browseForApplication() {
@@ -252,31 +242,9 @@ struct NativeModeSettingsPane: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let bundle = Bundle(url: url)
         let bundleIdentifier = bundle?.bundleIdentifier ?? ""
-        let appName = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
-        settings.addApp(bundleIdentifier: bundleIdentifier, appName: appName)
-    }
-}
-
-private struct AppIconView: View {
-    let bundleIdentifier: String
-
-    var body: some View {
-        if let image = appIcon {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-        } else {
-            Image(systemName: "app.dashed")
-                .font(.system(size: 24))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var appIcon: NSImage? {
-        guard !bundleIdentifier.isEmpty else { return nil }
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
-            return NSWorkspace.shared.icon(forFile: url.path)
-        }
-        return nil
+        settings.addApp(
+            bundleIdentifier: bundleIdentifier,
+            appName: ApplicationPresentation.name(forApplicationAt: url)
+        )
     }
 }

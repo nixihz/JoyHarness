@@ -18,7 +18,7 @@ struct DashboardView: View {
     }
 
     private var presentation: DashboardPresentation {
-        DashboardPresentation(status: store.status, freshness: store.freshness, orientation: mappingStore.joyConOrientation)
+        DashboardPresentation(status: store.status, freshness: store.freshness, mappingStore: mappingStore)
     }
 
     var body: some View {
@@ -117,11 +117,70 @@ struct DashboardView: View {
                 Spacer(minLength: 0)
                 DashboardSettingsButton().buttonStyle(.borderedProminent).fixedSize()
             }
+            deviceSwitcher
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: DashboardStyle.Space.inset) { summaryBadges }
                 VStack(alignment: .leading, spacing: DashboardStyle.Space.small) { summaryBadges }
             }
         }
+    }
+
+    /// Shown only with several devices connected. The selection also follows
+    /// the device that was pressed last. It only changes what the Dashboard
+    /// shows; Settings keeps its own device to configure.
+    @ViewBuilder private var deviceSwitcher: some View {
+        if mappingStore.connectedDevices.count > 1 {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DashboardStyle.Space.medium) {
+                    devicePicker.pickerStyle(.segmented).fixedSize()
+                    deviceSwitcherHint
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: DashboardStyle.Space.medium) {
+                    devicePicker.pickerStyle(.segmented).fixedSize()
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: DashboardStyle.Space.medium) {
+                    devicePicker.pickerStyle(.menu).fixedSize()
+                    deviceSwitcherHint
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: DashboardStyle.Space.medium) {
+                    devicePicker.pickerStyle(.menu).fixedSize()
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var devicePicker: some View {
+        let titles = ConnectedControllerDescriptor.pickerTitles(for: mappingStore.connectedDevices)
+        return Picker(
+            L10n.text("显示设备", "Displayed Device"),
+            selection: Binding(
+                get: { mappingStore.displayedDeviceID },
+                set: { mappingStore.requestDisplayedDevice($0) }
+            )
+        ) {
+            ForEach(mappingStore.connectedDevices) { device in
+                Text(titles[device.id] ?? device.displayName).tag(device.id)
+            }
+        }
+        .labelsHidden()
+        .help(Self.deviceSwitcherHintText)
+        .accessibilityHint(Self.deviceSwitcherHintText)
+    }
+
+    private var deviceSwitcherHint: some View {
+        Label(Self.deviceSwitcherHintText, systemImage: "hand.tap")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+
+    private static var deviceSwitcherHintText: String {
+        L10n.text("按下任一设备的按键即可切换到该设备", "Press a button on any device to show it")
     }
 
     @ViewBuilder private var summaryBadges: some View {
@@ -149,7 +208,7 @@ struct DashboardView: View {
         } else if store.status.isNativeMode {
             notice("pause.circle", L10n.text("映射已暂停 · 原生手柄模式", "Mappings paused · Native gamepad mode") +
                 (store.status.frontmostAppName.map { " · " + $0 } ?? "") + "\n" +
-                L10n.text("使用模式切换按键恢复映射，或调整原生模式设置。", "Use your mode switch button to resume mappings, or adjust Native Mode settings.")) {
+                L10n.text("按 PS/Home 键恢复映射，或调整原生模式设置。", "Press PS/Home to resume mappings, or adjust Native Mode settings.")) {
                 DashboardSettingsButton(tab: .nativeMode)
             }
         }

@@ -1,6 +1,19 @@
 import Foundation
+import GameController
 import Testing
 @testable import JoyHarness
+
+private final class TestDualSenseController: GCController {
+    private let testExtendedGamepad = GCDualSenseGamepad()
+
+    override var extendedGamepad: GCExtendedGamepad? { testExtendedGamepad }
+    override var vendorName: String? { "DualSense Wireless Controller" }
+}
+
+private enum HubEvent: Equatable {
+    case show(ControllerFamily)
+    case input(ControllerInput, Bool)
+}
 
 @Suite(.serialized)
 struct XiaomiRemoteTests {
@@ -220,5 +233,230 @@ struct XiaomiRemoteTests {
 
         hub.setRemoteControllerActive(false)
         #expect(devices.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func connectingRemoteDoesNotReattachSelectedDualSense() {
+        let controller = TestDualSenseController()
+        let hub = ControllerHub(
+            mappingProvider: { family, input in
+                ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+            },
+            controllerProvider: { [controller] },
+            currentControllerProvider: { controller }
+        )
+        defer { hub.stop() }
+        var selections: [(GCController?, ControllerFamily)] = []
+        var controllerSets: [[GCController]] = []
+        hub.onControllerChange = { selections.append(($0, $1)) }
+        hub.onControllerSetChange = { controllerSets.append($0) }
+
+        hub.refreshControllers(preferCurrent: true)
+        #expect(selections.count == 1)
+        #expect(controllerSets.count == 1)
+        #expect(selections.first?.0 === controller)
+        #expect(selections.first?.1 == .dualSense)
+
+        hub.setRemoteControllerActive(true)
+
+        #expect(hub.connectedDevices.count == 2)
+        #expect(hub.selectedDeviceID != nil)
+        #expect(selections.count == 1)
+        #expect(controllerSets.count == 1)
+
+        hub.refreshControllers()
+        #expect(controllerSets.count == 1)
+    }
+
+    @Test
+    @MainActor
+    func dualSenseRawHomeUsesDualSenseSessionWhenRemoteIsSelected() {
+        let controller = TestDualSenseController()
+        let hub = ControllerHub(
+            mappingProvider: { family, input in
+                ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+            },
+            controllerProvider: { [controller] },
+            currentControllerProvider: { controller }
+        )
+        defer { hub.stop() }
+        var presentedCount = 0
+        hub.onHarnessSwitcherPresent = { presentedCount += 1 }
+
+        hub.refreshControllers(preferCurrent: true)
+        hub.setRemoteControllerActive(true)
+        hub.selectController(id: "xiaomi-remote")
+
+        hub.handleRawHomeButton(for: .dualSense, isPressed: true)
+        hub.handleRawHomeButton(for: .dualSense, isPressed: false)
+
+        #expect(presentedCount == 1)
+    }
+
+    @Test
+    @MainActor
+    func pressingAnotherDeviceShowsItBeforePublishingThePress() throws {
+        let controller = TestDualSenseController()
+        let hub = ControllerHub(
+            mappingProvider: { family, input in
+                ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+            },
+            controllerProvider: { [controller] },
+            currentControllerProvider: { controller }
+        )
+        defer { hub.stop() }
+        hub.refreshControllers(preferCurrent: true)
+        hub.setRemoteControllerActive(true)
+        let dualSenseID = try #require(hub.selectedDeviceID)
+        #expect(dualSenseID != "xiaomi-remote")
+
+        var events: [HubEvent] = []
+        hub.onControllerChange = { _, family in events.append(.show(family)) }
+        hub.onInputStateChange = { events.append(.input($0, $1)) }
+
+        hub.handleRemoteButton(.buttonA, isPressed: true)
+        hub.handleRemoteButton(.buttonA, isPressed: false)
+        #expect(events == [.show(.xiaomiRemote), .input(.buttonA, true), .input(.buttonA, false)])
+        #expect(hub.selectedDeviceID == "xiaomi-remote")
+
+        // Pressing the device already shown does not switch again.
+        events.removeAll()
+        hub.handleRemoteButton(.dpadUp, isPressed: true)
+        hub.handleRemoteButton(.dpadUp, isPressed: false)
+        #expect(events == [.input(.dpadUp, true), .input(.dpadUp, false)])
+
+        events.removeAll()
+        hub.handleRawHomeButton(for: .dualSense, isPressed: true)
+        #expect(events == [.show(.dualSense), .input(.home, true)])
+        #expect(hub.selectedDeviceID == dualSenseID)
+    }
+
+    @Test
+    @MainActor
+    func releasingAnInputOnAHiddenDeviceKeepsTheShownDevice() {
+        let controller = TestDualSenseController()
+        let hub = ControllerHub(
+            mappingProvider: { family, input in
+                ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+            },
+            controllerProvider: { [controller] },
+            currentControllerProvider: { controller }
+        )
+        defer { hub.stop() }
+        hub.refreshControllers(preferCurrent: true)
+        hub.setRemoteControllerActive(true)
+
+        var events: [HubEvent] = []
+        hub.onControllerChange = { _, family in events.append(.show(family)) }
+        hub.onInputStateChange = { events.append(.input($0, $1)) }
+
+        hub.handleRawHomeButton(for: .dualSense, isPressed: true)
+        hub.handleRemoteButton(.buttonA, isPressed: true)
+        hub.handleRawHomeButton(for: .dualSense, isPressed: false)
+
+        #expect(events == [
+            .input(.home, true),
+            .show(.xiaomiRemote),
+            .input(.buttonA, true),
+        ])
+        #expect(hub.selectedDeviceID == "xiaomi-remote")
+    }
+
+    @Test
+    @MainActor
+    func switchingDevicesRepublishesAnInputHeldOnBothDevices() {
+        let controller = TestDualSenseController()
+        let hub = ControllerHub(
+            mappingProvider: { family, input in
+                ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+            },
+            controllerProvider: { [controller] },
+            currentControllerProvider: { controller }
+        )
+        defer { hub.stop() }
+        hub.refreshControllers(preferCurrent: true)
+        hub.setRemoteControllerActive(true)
+
+        var events: [HubEvent] = []
+        hub.onControllerChange = { _, family in events.append(.show(family)) }
+        hub.onInputStateChange = { events.append(.input($0, $1)) }
+
+        // The dashboard clears its inputs on every switch, so Home must be
+        // shown again although the remote still holds it.
+        hub.handleRemoteButton(.home, isPressed: true)
+        hub.handleRawHomeButton(for: .dualSense, isPressed: true)
+        hub.handleRawHomeButton(for: .dualSense, isPressed: false)
+        #expect(events == [
+            .show(.xiaomiRemote),
+            .input(.home, true),
+            .show(.dualSense),
+            .input(.home, true),
+            .input(.home, false),
+        ])
+        hub.handleRemoteButton(.home, isPressed: false)
+        #expect(events.count == 5)
+    }
+
+    @Test
+    @MainActor
+    func manualDeviceSelectionRestoresItsHeldInput() throws {
+        let controller = TestDualSenseController()
+        let hub = ControllerHub(
+            mappingProvider: { family, input in
+                ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+            },
+            controllerProvider: { [controller] },
+            currentControllerProvider: { controller }
+        )
+        defer { hub.stop() }
+        hub.refreshControllers(preferCurrent: true)
+        hub.setRemoteControllerActive(true)
+        let dualSenseID = try #require(hub.selectedDeviceID)
+
+        var events: [HubEvent] = []
+        hub.onControllerChange = { _, family in events.append(.show(family)) }
+        hub.onInputStateChange = { events.append(.input($0, $1)) }
+
+        hub.handleRemoteButton(.buttonA, isPressed: true)
+        hub.selectController(id: dualSenseID)
+        hub.selectController(id: "xiaomi-remote")
+
+        #expect(events == [
+            .show(.xiaomiRemote),
+            .input(.buttonA, true),
+            .show(.dualSense),
+            .show(.xiaomiRemote),
+            .input(.buttonA, true),
+        ])
+    }
+
+    @Test
+    func simultaneousLeftSticksKeepPointerAndScrollSeparate() {
+        let states = [
+            ControllerHub.StickState(x: 0.6, y: -0.3, scrolling: false),
+            ControllerHub.StickState(x: 0.4, y: 0.9, scrolling: true),
+        ]
+
+        #expect(ControllerHub.aggregateStick(states, scrolling: false) == SIMD2(0.6, -0.3))
+        #expect(ControllerHub.aggregateStick(states, scrolling: true) == SIMD2(0.4, 0.9))
+    }
+
+    @Test
+    @MainActor
+    func controllerHubCancelsTheSwitcherWhenItsOwnerDisconnects() {
+        let hub = ControllerHub { family, input in
+            ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+        }
+        var events: [String] = []
+        hub.onHarnessSwitcherPresent = { events.append("present") }
+        hub.onHarnessSwitcherCancel = { events.append("cancel") }
+        hub.setRemoteControllerActive(true)
+
+        hub.handleRawHomeButton(isPressed: true)
+        #expect(events == ["present"])
+
+        hub.setRemoteControllerActive(false)
+        #expect(events == ["present", "cancel"])
     }
 }

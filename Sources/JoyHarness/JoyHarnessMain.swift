@@ -32,7 +32,7 @@ struct JoyHarnessApp: App {
     @StateObject private var launchAtLogin = LaunchAtLoginManager()
 
     var body: some Scene {
-        WindowGroup("Joy Harness", id: "main") {
+        WindowGroup(MainWindow.title, id: MainWindow.id) {
             DashboardView(
                 store: appDelegate.runtime.dashboard,
                 mappingStore: appDelegate.runtime.mappings
@@ -40,6 +40,10 @@ struct JoyHarnessApp: App {
                 .environmentObject(languageSettings)
                 .environmentObject(settingsCoordinator)
                 .environment(\.locale, languageSettings.locale)
+                .mainWindowChrome()
+                .exposeOpenMainWindow { [runtime = appDelegate.runtime] openMainWindow in
+                    runtime.mainWindowOpener = openMainWindow
+                }
         }
         .defaultSize(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
         .windowResizability(.contentSize)
@@ -63,6 +67,7 @@ struct JoyHarnessApp: App {
                 scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
                 pointerSensitivitySettings: appDelegate.runtime.pointerSensitivitySettings,
                 nativeModeSettings: appDelegate.runtime.nativeGamepadAppSettings,
+                harnessProviderSettings: appDelegate.runtime.harnessProviderSettings,
                 settingsCoordinator: settingsCoordinator,
                 slotShortcutSettings: appDelegate.runtime.slotShortcutSettings
             )
@@ -83,11 +88,7 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureMainWindow() {
-        guard let window = NSApp.windows.first(where: { $0.title == "Joy Harness" }) else { return }
-        window.titlebarSeparatorStyle = .none
-        window.titlebarAppearsTransparent = true
-        window.backgroundColor = .windowBackgroundColor
-
+        guard let window = NSApp.windows.first(where: { $0.title == MainWindow.title }) else { return }
         let defaults = UserDefaults.standard
         let migrationKey = "dashboardCompactWindow.applied"
         guard !defaults.bool(forKey: migrationKey) else { return }
@@ -100,6 +101,14 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// SwiftUI leaves a Dock click doing nothing once the Dashboard is
+    /// closed, since Joy Harness keeps running; reopen it here.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard MainWindow.find(in: NSApp.windows)?.isVisible != true else { return true }
+        runtime.showMainWindow()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -115,15 +124,21 @@ final class JoyHarnessRuntime {
     let scrollDirectionSettings: ScrollDirectionSettings
     let pointerSensitivitySettings: PointerSensitivitySettings
     let nativeGamepadAppSettings: NativeGamepadAppSettings
+    let harnessProviderSettings: HarnessProviderSettings
+    /// Opens a new Dashboard window. The main window installs it because only
+    /// SwiftUI views can reach `openWindow`.
+    var mainWindowOpener: (() -> Void)?
     private(set) var operationMode: ControllerOperationMode = .mapping
     private var frontmostAppName: String?
     private var frontmostAppBundleID: String?
     private var manuallySuppressedNativeBundleID: String?
+    private var manuallyForcedNativeMode = false
 
     private let home: String
     private let statusURL: URL
     private let socketPath: String
     private let haptics = HapticEngine()
+    private let harnessSwitcher = HarnessSwitcherCoordinator()
     private let adaptiveTrigger = AdaptiveTriggerFeedback()
     private var xboxTriggerPressState = RightTriggerPressState()
     private let threads = CodexThreadProvider()
@@ -159,7 +174,11 @@ final class JoyHarnessRuntime {
         self.statusURL = URL(fileURLWithPath: "\(home)/.agent-deck/status.json")
         self.socketPath = ProcessInfo.processInfo.environment["AGENT_DECK_SOCK"]
             ?? "\(home)/.agent-deck/pad.sock"
-        let mappings = ControllerMappingStore()
+        let harnessProviderSettings = HarnessProviderSettings()
+        self.harnessProviderSettings = harnessProviderSettings
+        let mappings = ControllerMappingStore(
+            harnessProvider: harnessProviderSettings.activeProviderID ?? .codex
+        )
         self.mappings = mappings
         let scrollDirectionSettings = ScrollDirectionSettings()
         self.scrollDirectionSettings = scrollDirectionSettings
@@ -187,6 +206,12 @@ final class JoyHarnessRuntime {
                 self?.checkFrontmostAppMode()
             }
         }
+        harnessProviderSettings.onActiveProviderChange = { [weak self] providerID in
+            self?.applyActiveHarness(providerID)
+        }
+        harnessProviderSettings.onSelectionRequest = { [weak self] providerID in
+            self?.selectHarness(providerID) ?? false
+        }
     }
 
     func start() {
@@ -201,6 +226,7 @@ final class JoyHarnessRuntime {
         self.instanceLock = instanceLock
         hasStarted = true
         configureBridge()
+        adaptiveTrigger.startHIDInputMonitoring()
         threads.onUpdate = { [weak self] summaries in
             self?.updateThreads(summaries)
         }
@@ -240,7 +266,7 @@ final class JoyHarnessRuntime {
         checkFrontmostAppMode()
 
         print("[agent-deck] physical Codex Micro mode; task metadata enabled")
-        print("[agent-deck] ready - left stick=pointer, L3=speed boost, touchpad=slow slide, LT+left stick=scroll, LT+face=Codex actions")
+        print("[agent-deck] ready - left stick=pointer, right stick=scroll, L3=speed boost, touchpad=slow slide, LT+left stick=scroll, LT+face=Codex actions")
     }
 
     private func registerSlotHotkeys() {
@@ -262,17 +288,22 @@ final class JoyHarnessRuntime {
             writeStatus(current, note: "status-refreshed")
             return true
         case .selectSlot(let index):
-            guard (0..<6).contains(index), rp2040.isConnected else { return false }
+            guard isCodexHarnessActive,
+                  (0..<6).contains(index),
+                  rp2040.isConnected else { return false }
             buttons.selectSlot(index)
             return true
         case .approve:
+            guard isCodexHarnessActive else { return false }
             return tapMicroKey("ACT07")
         case .deny:
+            guard isCodexHarnessActive else { return false }
             return tapMicroKey("ACT08")
         case .toggleFastMode:
+            guard isCodexHarnessActive else { return false }
             return tapMicroKey("ACT06")
         case .openThread:
-            guard rp2040.isConnected else { return false }
+            guard isCodexHarnessActive, rp2040.isConnected else { return false }
             buttons.openSelectedSlot()
             return true
         case .testHaptics(let state):
@@ -285,15 +316,33 @@ final class JoyHarnessRuntime {
         }
     }
 
+    private var isCodexHarnessActive: Bool {
+        harnessProviderSettings.activeProviderID == .codex
+    }
+
     private func configureBridge() {
         buttons.keyHandler = { [weak self] key, action in
-            self?.rp2040.sendKey(key, action: action) ?? false
+            guard let self else { return false }
+            guard action == 0 || (self.isCodexHarnessActive && !self.harnessSwitcher.isPresented) else {
+                return false
+            }
+            return self.rp2040.sendKey(key, action: action)
         }
         buttons.joystickHandler = { [weak self] angle, distance in
-            self?.rp2040.sendJoystick(angle: angle, distance: distance) ?? false
+            guard let self else { return false }
+            if distance > 0,
+               (!self.isCodexHarnessActive || self.harnessSwitcher.isPresented) {
+                return true
+            }
+            return self.rp2040.sendJoystick(angle: angle, distance: distance)
         }
         buttons.leftStickHandler = { [weak self] x, y, scrolling in
-            self?.mouse.updateStick(x: x, y: y, scrolling: scrolling)
+            guard let self, !self.harnessSwitcher.isPresented else { return }
+            self.mouse.updateStick(x: x, y: y, scrolling: scrolling)
+        }
+        buttons.rightStickHandler = { [weak self] x, y in
+            guard let self, !self.harnessSwitcher.isPresented else { return }
+            self.mouse.updateScrollStick(x: x, y: y)
         }
         buttons.mouseButtonHandler = { [weak self] button, pressed in
             self?.mouse.setMouseButton(button, pressed: pressed)
@@ -311,7 +360,11 @@ final class JoyHarnessRuntime {
             self?.mouse.setPrecisionActive(active)
         }
         buttons.touchpadPointerHandler = { [weak self] x, y in
-            self?.mouse.applyPointerDelta(x: x, y: y)
+            guard let self, !self.harnessSwitcher.isPresented else { return }
+            self.mouse.applyPointerDelta(x: x, y: y)
+        }
+        harnessSwitcher.bind(to: buttons) { [weak self] in
+            self?.presentHarnessSwitcher()
         }
         buttons.openApplicationTargetProvider = { [weak self] family, input in
             self?.mappings.openApplicationTarget(for: input, family: family)
@@ -319,13 +372,15 @@ final class JoyHarnessRuntime {
         buttons.recordedShortcutProvider = { [weak self] family, input in
             self?.mappings.recordedShortcutConfiguration(for: input, family: family).shortcut
         }
-        buttons.joyConOrientationProvider = { [weak self] in
-            self?.mappings.joyConOrientation ?? .horizontal
+        buttons.joyConOrientationProvider = { [weak self] family in
+            self?.mappings.joyConOrientation(for: family) ?? .horizontal
         }
         mappings.onJoyConOrientationChange = { [weak self] _ in
             self?.buttons.refreshJoyConOrientation()
+            // Held inputs change meaning with the grip orientation.
+            self?.dashboard.clearControllerInputs()
         }
-        mappings.onConnectedDeviceSelectionChange = { [weak self] id in
+        mappings.onDisplayedDeviceRequest = { [weak self] id in
             self?.buttons.selectController(id: id)
         }
         buttons.recordedShortcutHandler = { [weak self] shortcut, pressed in
@@ -348,7 +403,7 @@ final class JoyHarnessRuntime {
             self?.haptics.playAdaptiveTriggerFeedback(event)
         }
         adaptiveTrigger.onHomeButtonChange = { [weak self] isPressed in
-            self?.buttons.handleRawHomeButton(isPressed: isPressed)
+            self?.buttons.handleRawHomeButton(for: .dualSense, isPressed: isPressed)
         }
         buttons.onSlotSelected = { [weak self] index in
             guard let self else { return }
@@ -364,12 +419,13 @@ final class JoyHarnessRuntime {
             self.lastBatterySnapshot = nil
             self.lastJoyConBatterySnapshots.removeAll()
             self.controllerFamily = family
-            self.xboxTriggerPressState = RightTriggerPressState()
-            self.mappings.setControllerFamily(family)
-            self.adaptiveTrigger.attach(controller)
-            // A picker change does not alter the connected-controller set, so
+            // The hub's selection is the Dashboard's displayed device only.
+            // Settings keeps editing its own device, and every connected
+            // device keeps its mappings and trigger feedback.
+            self.mappings.setDisplayedDevice(selectedDeviceID)
+            // A display change does not alter the connected-controller set, so
             // the haptics connection callback is not guaranteed to run. Write
-            // immediately so the dashboard reflects the selected profile.
+            // immediately so the dashboard reflects the displayed device.
             if self.lastStatusControllerID != selectedDeviceID ||
                 previousFamily != family {
                 self.writeStatus(self.current, note: "controller-selected")
@@ -377,7 +433,17 @@ final class JoyHarnessRuntime {
             self.lastStatusControllerID = selectedDeviceID
         }
         buttons.onControllerSetChange = { [weak self] controllers in
-            self?.haptics.attach(controllers)
+            guard let self else { return }
+            let dualSense = controllers.first {
+                ControllerFamily.detect(controller: $0) == .dualSense
+            }
+            self.adaptiveTrigger.attach(dualSense)
+            if !controllers.contains(where: { ControllerFamily.detect(controller: $0) == .xbox }) {
+                // Reset only once no Xbox controller remains: switching the
+                // displayed device must not replay feedback for a held trigger.
+                self.xboxTriggerPressState = RightTriggerPressState()
+            }
+            self.haptics.attach(controllers)
         }
         buttons.onConnectedDevicesChange = { [weak self] devices in
             self?.mappings.setConnectedDevices(devices)
@@ -422,6 +488,7 @@ final class JoyHarnessRuntime {
         }
         xiaomiVoice.onStatus = { [weak self] in
             guard let self else { return }
+            self.warmUpRemoteMicrophoneIfReady()
             self.writeStatus(self.current, note: "xiaomi-voice")
         }
         xiaomiVoice.onStreamEvent = { [weak self] event in
@@ -432,9 +499,6 @@ final class JoyHarnessRuntime {
         }
         xiaomiVoice.onSamples = { [weak self] samples in
             self?.remoteMicrophoneOutput.append(samples)
-        }
-        buttons.onAvailableInputsChange = { [weak self] inputs in
-            self?.mappings.setAvailableInputs(inputs)
         }
         buttons.onInputStateChange = { [weak self] input, pressed in
             self?.dashboard.setControllerInput(input, pressed: pressed)
@@ -460,28 +524,111 @@ final class JoyHarnessRuntime {
         }
     }
 
+    private func presentHarnessSwitcher() {
+        guard !harnessSwitcher.isPresented else { return }
+        let runningApplications = NSWorkspace.shared.runningApplications
+        let harnessOptions = harnessProviderSettings.enabledProviders.map { provider in
+            let runningApplication = runningApplications.first {
+                provider.isAssociated(bundleIdentifier: $0.bundleIdentifier, appName: $0.localizedName)
+            }
+            return HarnessSwitcherOption(
+                configuration: provider,
+                isApplicationConnected: runningApplication != nil,
+                applicationIcon: runningApplication?.icon
+                    ?? provider.installedApplicationURL().map { NSWorkspace.shared.icon(forFile: $0.path) }
+            )
+        }
+
+        buttons.suspendMappedOutputs()
+        mouse.updateStick(x: 0, y: 0, scrolling: false)
+        mouse.updateScrollStick(x: 0, y: 0)
+        _ = rp2040.sendJoystick(angle: 0, distance: 0)
+        harnessSwitcher.present(
+            options: harnessOptions + [.mainWindow(applicationIcon: NSApp.applicationIconImage)],
+            current: harnessProviderSettings.activeProviderID
+        ) { [weak self] target in
+            switch target {
+            case let .harness(providerID):
+                _ = self?.selectHarness(providerID)
+            case .mainWindow:
+                self?.showMainWindow()
+            }
+        }
+    }
+
+    /// Brings Joy Harness forward with its Dashboard, reopening it when it was
+    /// closed. The gamepad pointer can open settings from there.
+    func showMainWindow() {
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = MainWindow.find(in: NSApp.windows) {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        } else if let mainWindowOpener {
+            mainWindowOpener()
+        } else {
+            print("[agent-deck] main window unavailable: it has not appeared since launch")
+        }
+    }
+
+    @discardableResult
+    private func selectHarness(_ providerID: HarnessProviderID) -> Bool {
+        guard harnessProviderSettings.select(providerID),
+              let provider = harnessProviderSettings.provider(for: providerID) else { return false }
+        if provider.activateApplicationOnSelection,
+           let bundleIdentifier = provider.bundleIdentifier {
+            _ = openApplication(bundleIdentifier: bundleIdentifier)
+        }
+        return true
+    }
+
+    /// Called after the active Harness is stored, whether it changed through
+    /// the switcher, the settings picker, frontmost-app matching or disabling.
+    private func applyActiveHarness(_ providerID: HarnessProviderID?) {
+        // Held outputs and radial input belong to the previous mapping profile.
+        buttons.suspendMappedOutputs()
+        _ = rp2040.sendJoystick(angle: 0, distance: 0)
+        if let providerID {
+            mappings.setHarnessProvider(providerID)
+        }
+        print("[agent-deck] harness=\(providerID?.rawValue ?? "none")")
+        guard hasStarted else { return }
+        writeStatus(current, note: "harness-change: \(providerID?.rawValue ?? "none")")
+    }
+
     func checkFrontmostAppMode() {
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         let bundleID = app.bundleIdentifier
         let appName = app.localizedName
+        nativeGamepadAppSettings.revealDefaultApp(runningWithBundleIdentifier: bundleID)
         self.frontmostAppName = appName
         self.frontmostAppBundleID = bundleID
+        if let matchedProvider = harnessProviderSettings.match(
+            bundleIdentifier: bundleID,
+            appName: appName
+        ) {
+            _ = harnessProviderSettings.select(matchedProvider.id)
+        }
         guard nativeGamepadAppSettings.autoSwitchEnabled else { return }
 
         let matches = nativeGamepadAppSettings.matches(runningApp: app)
-        if matches {
-            if let bundleID, bundleID == manuallySuppressedNativeBundleID {
-                return
-            }
-            if operationMode != .native {
-                setOperationMode(.native, note: "auto-switch: \(appName ?? bundleID ?? "native-app")")
-            }
-        } else {
-            manuallySuppressedNativeBundleID = nil
-            if operationMode == .native {
-                setOperationMode(.mapping, note: "auto-switch: \(appName ?? bundleID ?? "mapping-app")")
-            }
+        if matches, let bundleID, bundleID == manuallySuppressedNativeBundleID {
+            return
         }
+        if !matches {
+            manuallySuppressedNativeBundleID = nil
+        }
+        guard let nextMode = OperationModeAutoSwitchPolicy.targetMode(
+            currentMode: operationMode,
+            frontmostMatches: matches,
+            manuallyForcedNative: manuallyForcedNativeMode
+        ) else {
+            return
+        }
+        setOperationMode(
+            nextMode,
+            note: "auto-switch: \(appName ?? bundleID ?? (matches ? "native-app" : "mapping-app"))"
+        )
     }
 
     func unfocusFrontmostNativeAppIfNeeded() {
@@ -507,17 +654,14 @@ final class JoyHarnessRuntime {
         }
     }
 
-    func handleManualModeToggle() {
-        let nextMode: ControllerOperationMode = (operationMode == .native ? .mapping : .native)
-        setOperationMode(nextMode, note: "manual-toggle")
-    }
-
     private func handleOperationModeChanged(_ mode: ControllerOperationMode) {
         guard mode != operationMode else { return }
+        manuallyForcedNativeMode = mode == .native
         let previousMode = operationMode
         operationMode = mode
         xiaomiRemote.setOperationMode(mode)
         xiaomiVoice.enabled = mode == .mapping
+        warmUpRemoteMicrophoneIfReady()
         if previousMode == .native && mode == .mapping {
             unfocusFrontmostNativeAppIfNeeded()
         }
@@ -531,6 +675,7 @@ final class JoyHarnessRuntime {
         operationMode = mode
         xiaomiRemote.setOperationMode(mode)
         xiaomiVoice.enabled = mode == .mapping
+        warmUpRemoteMicrophoneIfReady()
         buttons.setOperationMode(mode)
         if previousMode == .native && mode == .mapping && note.contains("manual") {
             unfocusFrontmostNativeAppIfNeeded()
@@ -540,7 +685,20 @@ final class JoyHarnessRuntime {
         print("[agent-deck] operation mode=\(mode.rawValue) note=\(note)")
     }
 
+    private func warmUpRemoteMicrophoneIfReady(attemptsRemaining: Int = 4) {
+        guard operationMode == .mapping, xiaomiVoice.isReady else { return }
+        if RemoteMicrophoneOutput.installed {
+            remoteMicrophoneOutput.warmUp()
+            return
+        }
+        guard attemptsRemaining > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.warmUpRemoteMicrophoneIfReady(attemptsRemaining: attemptsRemaining - 1)
+        }
+    }
+
     private func tapMicroKey(_ key: String) -> Bool {
+        guard isCodexHarnessActive else { return false }
         guard rp2040.sendKey(key, action: 1) else { return false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
             _ = self?.rp2040.sendKey(key, action: 0)
@@ -629,6 +787,8 @@ final class JoyHarnessRuntime {
             "rp2040": rp2040.isConnected,
             "mode": "physical-codex-micro",
             "operation_mode": operationMode.rawValue,
+            "active_harness": harnessProviderSettings.activeProviderID?.rawValue ?? "",
+            "active_harness_name": harnessProviderSettings.activeProvider?.displayName ?? "",
             "frontmost_app_name": frontmostAppName ?? "",
             "frontmost_app_bundle_id": frontmostAppBundleID ?? "",
             "note": note ?? "",
@@ -645,7 +805,9 @@ final class JoyHarnessRuntime {
         if let joyConSnapshot {
             payload["joycon_mode"] = joyConSnapshot.mode.rawValue
             if joyConSnapshot.mode != .pair {
-                payload["joycon_orientation"] = mappings.joyConOrientation.rawValue
+                payload["joycon_orientation"] = mappings.joyConOrientation(
+                    for: joyConSnapshot.mode.controllerFamily
+                ).rawValue
             }
             let sticks = buttons.joyConSticks
             payload["joycon_primary_stick"] = stickPayload(sticks.primary)
@@ -806,5 +968,17 @@ final class JoyHarnessRuntime {
         if let raw = command.state, let state = PadState.parse(raw) {
             apply(state, note: command.note, threadID: command.threadID)
         }
+    }
+}
+
+enum OperationModeAutoSwitchPolicy {
+    static func targetMode(
+        currentMode: ControllerOperationMode,
+        frontmostMatches: Bool,
+        manuallyForcedNative: Bool
+    ) -> ControllerOperationMode? {
+        guard !manuallyForcedNative else { return nil }
+        let target: ControllerOperationMode = frontmostMatches ? .native : .mapping
+        return target == currentMode ? nil : target
     }
 }

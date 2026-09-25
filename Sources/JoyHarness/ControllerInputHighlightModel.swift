@@ -74,7 +74,7 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
         marker(.rightThumbstickButton, 0.66, 0.45, size: CGSize(width: 46, height: 46), cornerRadius: 23),
         marker(.menu, 0.72, 0.12, size: CGSize(width: 25, height: 31), cornerRadius: 10),
         marker(.options, 0.28, 0.12, size: CGSize(width: 25, height: 31), cornerRadius: 10),
-        marker(.home, 0.50, 0.54, size: CGSize(width: 31, height: 18), cornerRadius: 8),
+        marker(.home, 0.50, 0.503, size: CGSize(width: 31, height: 18), cornerRadius: 8),
         marker(.touchpadButton, 0.50, 0.18, size: CGSize(width: 126, height: 68), cornerRadius: 12),
         marker(.leftShoulder, 0.24, 0.065, size: CGSize(width: 64, height: 20), cornerRadius: 8),
         marker(.rightShoulder, 0.76, 0.065, size: CGSize(width: 64, height: 20), cornerRadius: 8),

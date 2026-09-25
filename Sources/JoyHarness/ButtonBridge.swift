@@ -21,6 +21,9 @@ enum SystemKey: Hashable {
     case screenshotTool
     case browserBack
     case browserForward
+    case claudePreviousSession
+    case claudeNextSession
+    case claudeSearch
 }
 
 enum FaceButton {
@@ -139,6 +142,105 @@ final class JoyConInputRefreshScheduler {
     }
 }
 
+/// Merges the GameController and raw HID reports of one Home button so each
+/// physical press yields one press edge, whichever source arrives first, late,
+/// or not at all.
+struct HomeButtonPressMerger {
+    enum Source: CaseIterable {
+        case gameController
+        case rawHID
+    }
+
+    /// How long a press from one source waits for the other source's copy.
+    /// GameController Home can trail raw HID by the system gesture delay.
+    static let defaultEchoWindow: TimeInterval = 1.0
+
+    let echoWindow: TimeInterval
+    private(set) var isPressed = false
+    private var pressedSources: Set<Source> = []
+    private var echoDeadlines: [Source: [TimeInterval]] = [:]
+
+    init(echoWindow: TimeInterval = Self.defaultEchoWindow) {
+        self.echoWindow = echoWindow
+    }
+
+    /// Returns the merged edge, or nil when the report repeats a source's
+    /// state or duplicates a press the other source already reported.
+    mutating func update(
+        _ source: Source,
+        isPressed sourceIsPressed: Bool,
+        at timestamp: TimeInterval
+    ) -> Bool? {
+        guard sourceIsPressed != pressedSources.contains(source) else { return nil }
+
+        guard sourceIsPressed else {
+            pressedSources.remove(source)
+            guard isPressed else { return nil }
+            // The first release wins and forgets the other source's press, so
+            // a source that loses its release can neither hold the merged
+            // button down nor ignore its own next press as a repeat.
+            pressedSources.removeAll()
+            isPressed = false
+            return false
+        }
+
+        pressedSources.insert(source)
+        var pendingEchoes = echoDeadlines[source, default: []].filter { $0 >= timestamp }
+        if !pendingEchoes.isEmpty {
+            pendingEchoes.removeFirst()
+            echoDeadlines[source] = pendingEchoes
+            return nil
+        }
+        echoDeadlines[source] = nil
+        guard !isPressed else { return nil }
+
+        isPressed = true
+        for other in Source.allCases where other != source {
+            echoDeadlines[other] = echoDeadlines[other, default: []]
+                .filter { $0 >= timestamp } + [timestamp + echoWindow]
+        }
+        return true
+    }
+
+    mutating func reset() {
+        isPressed = false
+        pressedSources.removeAll()
+        echoDeadlines.removeAll()
+    }
+}
+
+private struct StandardGamepadEventSnapshot {
+    let changedButtonPressed: Bool?
+    let changedButtonValue: Float?
+    let leftStickX: Float
+    let leftStickY: Float
+    let dpadUp: Bool
+    let dpadDown: Bool
+    let dpadLeft: Bool
+    let dpadRight: Bool
+
+    init(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
+        changedButtonPressed = (changedElement as? GCControllerButtonInput)?.isPressed
+        changedButtonValue = (changedElement as? GCControllerButtonInput)?.value
+        leftStickX = gamepad.leftThumbstick.xAxis.value
+        leftStickY = gamepad.leftThumbstick.yAxis.value
+        dpadUp = gamepad.dpad.up.isPressed
+        dpadDown = gamepad.dpad.down.isPressed
+        dpadLeft = gamepad.dpad.left.isPressed
+        dpadRight = gamepad.dpad.right.isPressed
+    }
+
+    func dpadPressed(for input: ControllerInput) -> Bool {
+        switch input {
+        case .dpadUp: dpadUp
+        case .dpadDown: dpadDown
+        case .dpadLeft: dpadLeft
+        case .dpadRight: dpadRight
+        default: false
+        }
+    }
+}
+
 final class ButtonBridge {
     private weak var controller: GCController?
     private var observedControllers: [GCController] = []
@@ -170,6 +272,7 @@ final class ButtonBridge {
     private var inputSourceGeneration: UInt64 = 0
     private let joyConInputRefreshScheduler = JoyConInputRefreshScheduler()
     private var controllerObservers: [NSObjectProtocol] = []
+    private var overlaySuppressedButtons: Set<ObjectIdentifier> = []
 
     var isRunning: Bool { !controllerObservers.isEmpty }
     var controllerObserverCount: Int { controllerObservers.count }
@@ -181,6 +284,9 @@ final class ButtonBridge {
     var keyHandler: ((String, Int) -> Bool)?
     var joystickHandler: ((Float, Float) -> Bool)?
     var leftStickHandler: ((Float, Float, Bool) -> Void)?
+    /// Right stick scrolling. Receives zero while LT turns the right stick into shortcut directions.
+    var rightStickHandler: ((Float, Float) -> Void)?
+    var overlayStickHandler: ((Float, Float) -> Bool)?
     var touchpadPointerHandler: ((CGFloat, CGFloat) -> Void)?
     var mouseButtonHandler: ((MouseButton, Bool) -> Void)?
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
@@ -199,6 +305,9 @@ final class ButtonBridge {
     var onJoyConChange: ((JoyConControllerSnapshot?) -> Void)?
     var onAvailableInputsChange: ((Set<ControllerInput>) -> Void)?
     var onInputStateChange: ((ControllerInput, Bool) -> Void)?
+    var inputInterceptor: ((ControllerInput, Bool) -> Bool)?
+    var onHarnessSwitcherPresent: (() -> Void)?
+    var homeButtonClock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     var mappingProvider: (ControllerInput) -> ControllerMappedAction
 
     var batterySnapshot: ControllerBatterySnapshot? {
@@ -228,9 +337,11 @@ final class ButtonBridge {
         return result
     }
 
-    init(mappingProvider: @escaping (ControllerInput) -> ControllerMappedAction = {
-        ControllerMappingStore.defaultMappings[$0] ?? .disabled
-    }) {
+    init(
+        mappingProvider: @escaping (ControllerInput) -> ControllerMappedAction = {
+            ControllerMappingStore.defaultMappings[$0] ?? .disabled
+        }
+    ) {
         self.mappingProvider = mappingProvider
     }
 
@@ -264,7 +375,7 @@ final class ButtonBridge {
 
     func setOperationMode(_ mode: ControllerOperationMode) {
         guard mode != operationMode else { return }
-        resetInputState()
+        resetInputState(preservingHomeButtonState: true)
         operationMode = mode
         onOperationModeChange?(mode)
     }
@@ -284,8 +395,8 @@ final class ButtonBridge {
             NotificationCenter.default.removeObserver(observer)
         }
         controllerObservers.removeAll()
-        detachObservedHandlers()
         resetInputState()
+        detachObservedHandlers()
         controller = nil
         controllerFamily = .generic
         isRemoteControllerActive = false
@@ -367,8 +478,8 @@ final class ButtonBridge {
         } ?? controllers.first
         guard let selected = selectedController,
               selected.extendedGamepad != nil else {
-            detachObservedHandlers()
             resetInputState()
+            detachObservedHandlers()
             controller = nil
             controllerFamily = .generic
             onControllerChange?(nil, .generic)
@@ -383,23 +494,35 @@ final class ButtonBridge {
     private func attachStandardController(_ selected: GCController) {
         guard let gamepad = selected.extendedGamepad else { return }
         guard controller !== selected else { return }
-        detachObservedHandlers()
         resetInputState()
+        detachObservedHandlers()
         controller = selected
         let family = ControllerFamily.detect(controller: selected)
         controllerFamily = family
         let generation = inputSourceGeneration
         let endpointID = ObjectIdentifier(selected)
         gamepad.valueChangedHandler = { [weak self] gamepad, element in
+            let event = StandardGamepadEventSnapshot(
+                gamepad: gamepad,
+                changedElement: element
+            )
             DispatchQueue.main.async {
                 guard let self,
                       self.inputSourceGeneration == generation,
                       let activeController = self.controller,
                       ObjectIdentifier(activeController) == endpointID else { return }
-                self.handle(gamepad: gamepad, changedElement: element)
+                self.handle(
+                    gamepad: gamepad,
+                    changedElement: element,
+                    event: event
+                )
             }
         }
         if let homeButton = gamepad.buttonHome {
+            // Home opens the Harness switcher, so ask the system not to hold or
+            // swallow it for the Game Overlay. The system may still ignore this
+            // preference, which is why DualSense also reads Home over raw HID.
+            homeButton.preferredSystemGestureState = .disabled
             homeButton.pressedChangedHandler = { [weak self] button, _, isPressed in
                 DispatchQueue.main.async {
                     guard let self,
@@ -412,14 +535,18 @@ final class ButtonBridge {
         }
         if #available(macOS 14.0, *) {
             selected.physicalInputProfile.valueDidChangeHandler = { [weak self] profile, element in
+                let homePressed: Bool? = if element.aliases.contains(GCInputButtonHome) {
+                    (element as? GCControllerButtonInput)?.isPressed
+                } else {
+                    nil
+                }
                 DispatchQueue.main.async {
                     guard let self,
                           self.inputSourceGeneration == generation,
                           let activeController = self.controller,
                           ObjectIdentifier(activeController) == endpointID else { return }
-                    if element.aliases.contains(GCInputButtonHome),
-                       let button = element as? GCControllerButtonInput {
-                        self.handleHomeButton(isPressed: button.isPressed)
+                    if let homePressed {
+                        self.handleHomeButton(isPressed: homePressed)
                     }
                 }
             }
@@ -455,8 +582,8 @@ final class ButtonBridge {
             return
         }
 
-        detachObservedHandlers()
         resetInputState()
+        detachObservedHandlers()
         joyConInputSnapshot = .neutral
         joyConActiveInputs.removeAll()
         joyConComposition = next
@@ -517,6 +644,7 @@ final class ButtonBridge {
         inputSourceGeneration &+= 1
         controller?.extendedGamepad?.valueChangedHandler = nil
         controller?.extendedGamepad?.buttonHome?.pressedChangedHandler = nil
+        controller?.extendedGamepad?.buttonHome?.preferredSystemGestureState = .enabled
         if #available(macOS 14.0, *) {
             controller?.physicalInputProfile.valueDidChangeHandler = nil
         }
@@ -525,7 +653,7 @@ final class ButtonBridge {
             observed.microGamepad?.valueChangedHandler = nil
             observed.physicalInputProfile.valueDidChangeHandler = nil
         }
-        isHomeButtonPressed = false
+        homeButtonMerger.reset()
         observedControllers.removeAll()
     }
 
@@ -642,14 +770,25 @@ final class ButtonBridge {
     func applyJoyConSnapshot(_ next: JoyConInputSnapshot) {
         let previous = joyConInputSnapshot
         let allInputs = Set(previous.buttons.keys).union(next.buttons.keys)
+        let overlayConsumesStick = overlayStickHandler?(
+            next.primaryStick.x,
+            next.primaryStick.y
+        ) == true
 
         if operationMode == .native {
             for input in allInputs {
                 let wasPressed = previous.buttons[input] == true
                 let isPressed = next.buttons[input] == true
-                if wasPressed != isPressed { publishInput(input, pressed: isPressed) }
+                guard wasPressed != isPressed else { continue }
+                if input == .home {
+                    handleHomeButton(isPressed: isPressed)
+                    continue
+                }
+                let changed = publishInput(input, pressed: isPressed)
+                let consumed = changed && inputInterceptor?(input, isPressed) == true
+                guard !consumed else { continue }
                 guard !wasPressed && isPressed else { continue }
-                if input == .home || mappingProvider(input) == .toggleOperationMode {
+                if mappingProvider(input) == .toggleOperationMode {
                     toggleOperationMode()
                     break
                 }
@@ -671,8 +810,11 @@ final class ButtonBridge {
             let isPressed = next.buttons[input] == true
             guard wasPressed != isPressed else { continue }
 
-            publishInput(input, pressed: isPressed)
-            if mappingProvider(input) == .functionModifier {
+            if input == .home {
+                handleHomeButton(isPressed: isPressed)
+            } else if mappingProvider(input) == .functionModifier {
+                let changed = publishInput(input, pressed: isPressed)
+                _ = changed && inputInterceptor?(input, isPressed) == true
                 if !isPressed {
                     joyConActiveInputs.removeValue(forKey: input)
                 }
@@ -681,23 +823,36 @@ final class ButtonBridge {
             }
         }
 
-        leftStickHandler?(next.primaryStick.x, next.primaryStick.y, functionPressed)
+        if !overlayConsumesStick {
+            leftStickHandler?(next.primaryStick.x, next.primaryStick.y, functionPressed)
+        }
+        publishRightStickScroll(x: next.secondaryStick.x, y: next.secondaryStick.y)
         updateJoyConJoystick(next)
         updateFunctionRightStick(x: next.secondaryStick.x, y: next.secondaryStick.y)
         joyConInputSnapshot = next
     }
 
     private func handleJoyConButton(_ input: ControllerInput, isPressed: Bool) {
-        publishInput(input, pressed: isPressed)
+        let changed = publishInput(input, pressed: isPressed)
+        let consumed = changed && inputInterceptor?(input, isPressed) == true
         if !isPressed {
             if let activeInput = joyConActiveInputs.removeValue(forKey: input) {
-                handleMappedDirection(activeInput, isPressed: false)
+                handleMappedDirection(
+                    activeInput,
+                    isPressed: false,
+                    allowsInterception: false
+                )
             }
             return
         }
+        guard !consumed else { return }
         let effectiveInput = functionPressed ? functionInput(for: input) ?? input : input
         joyConActiveInputs[input] = effectiveInput
-        handleMappedDirection(effectiveInput, isPressed: true)
+        handleMappedDirection(
+            effectiveInput,
+            isPressed: true,
+            allowsInterception: false
+        )
     }
 
     private func functionInput(for input: ControllerInput) -> ControllerInput? {
@@ -738,11 +893,13 @@ final class ButtonBridge {
         } else {
             0
         }
-        let x = !functionPressed && abs(dpadX) > 0.1 ? dpadX
-            : (functionPressed ? 0 : snapshot.secondaryStick.x)
-        let y = !functionPressed && abs(dpadY) > 0.1 ? dpadY
-            : (functionPressed ? 0 : snapshot.secondaryStick.y)
+        let x = functionPressed ? 0 : dpadX
+        let y = functionPressed ? 0 : dpadY
         publishJoystick(x: x, y: y)
+    }
+
+    private func publishRightStickScroll(x: Float, y: Float) {
+        rightStickHandler?(functionPressed ? 0 : x, functionPressed ? 0 : y)
     }
 
     private func publishJoystick(x: Float, y: Float) {
@@ -756,21 +913,46 @@ final class ButtonBridge {
         lastJoystick = (angle, distance)
     }
 
-    private func handle(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
+    private func handle(
+        gamepad: GCExtendedGamepad,
+        changedElement: GCControllerElement,
+        event: StandardGamepadEventSnapshot
+    ) {
         if let homeButton = gamepad.buttonHome, changedElement === homeButton {
-            handleHomeButton(isPressed: homeButton.isPressed)
+            handleHomeButton(isPressed: event.changedButtonPressed ?? homeButton.isPressed)
+            return
+        }
+        if Self.isLeftStickElement(changedElement, in: gamepad),
+           overlayStickHandler?(
+               event.leftStickX,
+               event.leftStickY
+           ) == true {
             return
         }
         if operationMode == .native {
+            var changedElementWasConsumed = false
             if let input = inputForElement(changedElement, in: gamepad),
                let button = changedElement as? GCControllerButtonInput {
-                publishInput(input, pressed: button.isPressed)
+                let isPressed = event.changedButtonPressed ?? button.isPressed
+                let changed = publishInput(input, pressed: isPressed)
+                if changed {
+                    changedElementWasConsumed = inputInterceptor?(input, isPressed) == true
+                }
             }
             for (input, button) in [
                 (ControllerInput.dpadUp, gamepad.dpad.up), (.dpadDown, gamepad.dpad.down),
                 (.dpadLeft, gamepad.dpad.left), (.dpadRight, gamepad.dpad.right),
-            ] { publishInput(input, pressed: button.isPressed) }
-            if let buttonInput = changedElement as? GCControllerButtonInput, buttonInput.isPressed {
+            ] {
+                let isPressed = event.dpadPressed(for: input)
+                let changed = publishInput(input, pressed: isPressed)
+                if changed {
+                    let consumed = inputInterceptor?(input, isPressed) == true
+                    if changedElement === button { changedElementWasConsumed = consumed }
+                }
+            }
+            if let buttonInput = changedElement as? GCControllerButtonInput,
+               event.changedButtonPressed ?? buttonInput.isPressed,
+               !changedElementWasConsumed {
                 if let input = inputForElement(changedElement, in: gamepad),
                    mappingProvider(input) == .toggleOperationMode {
                     toggleOperationMode()
@@ -784,11 +966,19 @@ final class ButtonBridge {
 
         if changedElement === gamepad.leftTrigger {
             if mappingProvider(.leftTrigger) == .functionModifier {
-                functionPressed = gamepad.leftTrigger.value >= 0.55
+                functionPressed = (event.changedButtonValue ?? gamepad.leftTrigger.value) >= 0.55
                 let id = ObjectIdentifier(gamepad.leftTrigger)
                 if functionPressed {
-                    controllerInputsByButton[id] = .leftTrigger
-                    publishInput(.leftTrigger, pressed: true)
+                    if overlaySuppressedButtons.contains(id) {
+                        functionPressed = false
+                    } else {
+                        controllerInputsByButton[id] = .leftTrigger
+                        let changed = publishInput(.leftTrigger, pressed: true)
+                        if changed, inputInterceptor?(.leftTrigger, true) == true {
+                            overlaySuppressedButtons.insert(id)
+                            functionPressed = false
+                        }
+                    }
                 } else {
                     release(gamepad.leftTrigger)
                 }
@@ -798,12 +988,19 @@ final class ButtonBridge {
             }
         }
         leftStickHandler?(
-            gamepad.leftThumbstick.xAxis.value,
-            gamepad.leftThumbstick.yAxis.value,
+            event.leftStickX,
+            event.leftStickY,
             functionPressed
         )
+        publishRightStickScroll(
+            x: gamepad.rightThumbstick.xAxis.value,
+            y: gamepad.rightThumbstick.yAxis.value
+        )
         updateJoystick(gamepad)
-        updateDPadButtons(gamepad)
+        updateDPadButtons(
+            gamepad,
+            event: event
+        )
         updateFunctionRightStick(gamepad)
         if changedElement === gamepad.leftTrigger { return }
 
@@ -814,7 +1011,11 @@ final class ButtonBridge {
             (gamepad.buttonY, .buttonY, .functionButtonY),
         ]
         for (button, primaryInput, functionInput) in faceButtons where changedElement === button {
-            handleMappedButton(button, input: functionPressed ? functionInput : primaryInput)
+            handleMappedButton(
+                button,
+                input: functionPressed ? functionInput : primaryInput,
+                isPressed: event.changedButtonPressed ?? button.isPressed
+            )
             return
         }
 
@@ -823,39 +1024,62 @@ final class ButtonBridge {
             (gamepad.rightShoulder, .rightShoulder, .functionRightShoulder),
         ]
         for (button, primaryInput, functionInput) in shoulderButtons where changedElement === button {
-            handleMappedButton(button, input: functionPressed ? functionInput : primaryInput)
+            handleMappedButton(
+                button,
+                input: functionPressed ? functionInput : primaryInput,
+                isPressed: event.changedButtonPressed ?? button.isPressed
+            )
             return
         }
 
         if changedElement === gamepad.buttonMenu {
-            handleMappedButton(gamepad.buttonMenu, input: .menu)
+            handleMappedButton(
+                gamepad.buttonMenu,
+                input: .menu,
+                isPressed: event.changedButtonPressed ?? gamepad.buttonMenu.isPressed
+            )
         } else if let button = gamepad.buttonOptions, changedElement === button {
-            handleMappedButton(button, input: .options)
+            handleMappedButton(
+                button,
+                input: .options,
+                isPressed: event.changedButtonPressed ?? button.isPressed
+            )
         } else if changedElement === gamepad.rightTrigger {
-            rightTriggerFeedbackHandler?(gamepad.rightTrigger.value)
+            let value = event.changedButtonValue ?? gamepad.rightTrigger.value
+            rightTriggerFeedbackHandler?(value)
             let input: ControllerInput = functionPressed ? .functionRightTrigger : .rightTrigger
             if controllerFamily == .dualSense,
-               let isPressed = rightTriggerPressState.update(value: gamepad.rightTrigger.value) {
+               let isPressed = rightTriggerPressState.update(value: value) {
                 handleMappedButton(
                     gamepad.rightTrigger,
                     input: input,
                     isPressed: isPressed
                 )
             } else if controllerFamily != .dualSense {
-                handleMappedButton(gamepad.rightTrigger, input: input)
+                handleMappedButton(
+                    gamepad.rightTrigger,
+                    input: input,
+                    isPressed: event.changedButtonPressed ?? gamepad.rightTrigger.isPressed
+                )
             }
         } else if let button = gamepad.leftThumbstickButton, changedElement === button {
             handleMappedButton(
                 button,
-                input: functionPressed ? .functionLeftThumbstickButton : .leftThumbstickButton
+                input: functionPressed ? .functionLeftThumbstickButton : .leftThumbstickButton,
+                isPressed: event.changedButtonPressed ?? button.isPressed
             )
         } else if let button = gamepad.rightThumbstickButton, changedElement === button {
             handleMappedButton(
                 button,
-                input: functionPressed ? .functionRightThumbstickButton : .rightThumbstickButton
+                input: functionPressed ? .functionRightThumbstickButton : .rightThumbstickButton,
+                isPressed: event.changedButtonPressed ?? button.isPressed
             )
         } else if let button = Self.touchpadButton(for: gamepad), changedElement === button {
-            handleMappedButton(button, input: .touchpadButton)
+            handleMappedButton(
+                button,
+                input: .touchpadButton,
+                isPressed: event.changedButtonPressed ?? button.isPressed
+            )
         }
     }
 
@@ -863,6 +1087,15 @@ final class ButtonBridge {
         if let dualSense = gamepad as? GCDualSenseGamepad { return dualSense.touchpadButton }
         if let dualShock = gamepad as? GCDualShockGamepad { return dualShock.touchpadButton }
         return nil
+    }
+
+    private static func isLeftStickElement(
+        _ element: GCControllerElement,
+        in gamepad: GCExtendedGamepad
+    ) -> Bool {
+        element === gamepad.leftThumbstick ||
+            element === gamepad.leftThumbstick.xAxis ||
+            element === gamepad.leftThumbstick.yAxis
     }
 
     private static func touchpadPrimary(for gamepad: GCExtendedGamepad) -> GCControllerDirectionPad? {
@@ -908,44 +1141,50 @@ final class ButtonBridge {
         handleMappedButton(button, input: input, isPressed: button.isPressed)
     }
 
-    private var isHomeButtonPressed = false
+    private var homeButtonMerger = HomeButtonPressMerger()
 
     func handleRawHomeButton(isPressed: Bool) {
-        handleHomeButton(isPressed: isPressed)
+        updateHomeButton(from: .rawHID, isPressed: isPressed)
     }
 
     func handleHomeButton(isPressed: Bool) {
-        guard isPressed != isHomeButtonPressed else { return }
-        isHomeButtonPressed = isPressed
-
-        if operationMode == .native {
-            if isPressed {
-                toggleOperationMode()
-            }
-            return
-        }
-        handleMappedHomeButton(isPressed: isPressed)
+        updateHomeButton(from: .gameController, isPressed: isPressed)
     }
 
-    private func handleMappedHomeButton(isPressed: Bool) {
+    private func updateHomeButton(from source: HomeButtonPressMerger.Source, isPressed sourceIsPressed: Bool) {
+        guard let isPressed = homeButtonMerger.update(
+            source,
+            isPressed: sourceIsPressed,
+            at: homeButtonClock()
+        ) else { return }
+        print("[agent-deck] Home \(isPressed ? "pressed" : "released") via \(source)")
+        _ = publishInput(.home, pressed: isPressed)
+
+        if isPressed {
+            guard inputInterceptor?(.home, true) != true else { return }
+            // Native mode pauses every mapping, so PS/Home is the way back to
+            // mapping mode, as the Xiaomi remote's Home is.
+            if operationMode == .native {
+                toggleOperationMode()
+                return
+            }
+            onHarnessSwitcherPresent?()
+            return
+        }
+        _ = inputInterceptor?(.home, false)
+    }
+
+    private func handleImmediateMappedHomeButton(isPressed: Bool) {
         let fakeID = ObjectIdentifier(self)
         guard isPressed else {
-            if let input = controllerInputsByButton.removeValue(forKey: fakeID) {
-                publishInput(input, pressed: false)
-            }
             pressedButtons.remove(fakeID)
             if let action = activeControllerActions.removeValue(forKey: fakeID) {
                 end(action)
             }
             return
         }
-        if let previousInput = controllerInputsByButton[fakeID], previousInput != .home {
-            publishInput(previousInput, pressed: false)
-        }
-        controllerInputsByButton[fakeID] = .home
-        publishInput(.home, pressed: true)
         guard let action = resolvedAction(for: .home) else { return }
-        print("[agent-deck] direct Home button -> action=\(action)")
+        print("[agent-deck] immediate Home button -> action=\(action)")
         if pressedButtons.insert(fakeID).inserted {
             if begin(action) {
                 activeControllerActions[fakeID] = action
@@ -962,14 +1201,21 @@ final class ButtonBridge {
     ) {
         let id = ObjectIdentifier(button)
         guard isPressed else {
+            overlaySuppressedButtons.remove(id)
             release(button)
             return
         }
+        guard !overlaySuppressedButtons.contains(id) else { return }
         if let previousInput = controllerInputsByButton[id], previousInput != input {
-            publishInput(previousInput, pressed: false)
+            let changed = publishInput(previousInput, pressed: false)
+            if changed { _ = inputInterceptor?(previousInput, false) }
         }
         controllerInputsByButton[id] = input
-        publishInput(input, pressed: true)
+        let changed = publishInput(input, pressed: true)
+        if changed, inputInterceptor?(input, true) == true {
+            overlaySuppressedButtons.insert(id)
+            return
+        }
         guard let action = resolvedAction(for: input) else {
             return
         }
@@ -1121,8 +1367,10 @@ final class ButtonBridge {
 
     private func release(_ button: GCControllerButtonInput) {
         let id = ObjectIdentifier(button)
+        overlaySuppressedButtons.remove(id)
         if let input = controllerInputsByButton.removeValue(forKey: id) {
-            publishInput(input, pressed: false)
+            let changed = publishInput(input, pressed: false)
+            if changed { _ = inputInterceptor?(input, false) }
         }
         pressedButtons.remove(id)
         if let action = activeControllerActions.removeValue(forKey: id) {
@@ -1130,14 +1378,16 @@ final class ButtonBridge {
         }
     }
 
-    private func publishInput(_ input: ControllerInput, pressed: Bool) {
-        guard pressed != publishedInputs.contains(input) else { return }
+    @discardableResult
+    private func publishInput(_ input: ControllerInput, pressed: Bool) -> Bool {
+        guard pressed != publishedInputs.contains(input) else { return false }
         if pressed {
             publishedInputs.insert(input)
         } else {
             publishedInputs.remove(input)
         }
         onInputStateChange?(input, pressed)
+        return true
     }
 
     func selectSlot(_ slot: Int) {
@@ -1163,7 +1413,10 @@ final class ButtonBridge {
         }
     }
 
-    private func updateDPadButtons(_ gamepad: GCExtendedGamepad) {
+    private func updateDPadButtons(
+        _ gamepad: GCExtendedGamepad,
+        event: StandardGamepadEventSnapshot
+    ) {
         let buttons: [(GCControllerButtonInput, ControllerInput, ControllerInput)] = [
             (gamepad.dpad.up, .dpadUp, .functionDpadUp),
             (gamepad.dpad.left, .dpadLeft, .functionDpadLeft),
@@ -1171,7 +1424,11 @@ final class ButtonBridge {
             (gamepad.dpad.right, .dpadRight, .functionDpadRight),
         ]
         for (button, primaryInput, functionInput) in buttons {
-            handleMappedButton(button, input: functionPressed ? functionInput : primaryInput)
+            handleMappedButton(
+                button,
+                input: functionPressed ? functionInput : primaryInput,
+                isPressed: event.dpadPressed(for: primaryInput)
+            )
         }
     }
 
@@ -1192,12 +1449,8 @@ final class ButtonBridge {
         } else {
             0
         }
-        let rightX = functionPressed ? 0 : gamepad.rightThumbstick.xAxis.value
-        let rightY = functionPressed ? 0 : gamepad.rightThumbstick.yAxis.value
-        let x = !functionPressed && abs(dpadX) > 0.1
-            ? dpadX : rightX
-        let y = !functionPressed && abs(dpadY) > 0.1
-            ? dpadY : rightY
+        let x = functionPressed ? 0 : dpadX
+        let y = functionPressed ? 0 : dpadY
         publishJoystick(x: x, y: y)
     }
 
@@ -1231,14 +1484,20 @@ final class ButtonBridge {
         }
     }
 
-    private func handleMappedDirection(_ input: ControllerInput, isPressed: Bool) {
+    private func handleMappedDirection(
+        _ input: ControllerInput,
+        isPressed: Bool,
+        allowsInterception: Bool = true
+    ) {
         if !isPressed {
+            if allowsInterception { _ = inputInterceptor?(input, false) }
             pressedDirectionInputs.remove(input)
             if let action = activeDirectionActions.removeValue(forKey: input) {
                 end(action)
             }
             return
         }
+        if allowsInterception, inputInterceptor?(input, true) == true { return }
         guard pressedDirectionInputs.insert(input).inserted else { return }
         guard let action = resolvedAction(for: input) else {
             pressedDirectionInputs.remove(input)
@@ -1318,7 +1577,32 @@ final class ButtonBridge {
         return turns >= 0 ? turns : turns + 1
     }
 
-    func resetInputState() {
+    /// Ends mapped outputs without disturbing the active Home button. Buttons
+    /// that are still physically down remain suppressed until their release.
+    func suspendMappedOutputs() {
+        overlaySuppressedButtons.formUnion(controllerInputsByButton.keys)
+        for action in activeControllerActions.values { end(action) }
+        for action in activeDirectionActions.values { end(action) }
+        pressedButtons.removeAll()
+        activeControllerActions.removeAll()
+        pressedDirectionInputs.removeAll()
+        activeDirectionActions.removeAll()
+        activeActionCounts.removeAll()
+        functionPressed = false
+        activeFunctionRightStickDirection = nil
+        mouseSpeedBoostPressed = false
+        mousePrecisionPressed = false
+        if let lastJoystick, lastJoystick.distance > 0 {
+            _ = joystickHandler?(0, 0)
+            self.lastJoystick = (0, 0)
+        }
+        leftStickHandler?(0, 0, false)
+        rightStickHandler?(0, 0)
+        touchpadTracker.reset()
+    }
+
+    func resetInputState(preservingHomeButtonState: Bool = false) {
+        overlaySuppressedButtons.removeAll()
         for action in activeControllerActions.values { end(action) }
         for action in activeDirectionActions.values { end(action) }
         if mouseSpeedBoostPressed { mouseSpeedBoostHandler?(false) }
@@ -1337,7 +1621,9 @@ final class ButtonBridge {
         mouseSpeedBoostPressed = false
         mousePrecisionPressed = false
         activeFunctionRightStickDirection = nil
-        isHomeButtonPressed = false
+        if !preservingHomeButtonState {
+            homeButtonMerger.reset()
+        }
         joyConActiveInputs.removeAll()
         joyConInputSnapshot = .neutral
         touchpadTracker.reset()
@@ -1350,13 +1636,14 @@ final class ButtonBridge {
         }
         publishedInputs.removeAll()
         leftStickHandler?(0, 0, false)
+        rightStickHandler?(0, 0)
     }
 
     func setRemoteControllerActive(_ active: Bool) {
         isRemoteControllerActive = active
         if active {
-            detachObservedHandlers()
             resetInputState()
+            detachObservedHandlers()
             controller = nil
             controllerFamily = .xiaomiRemote
             onControllerChange?(nil, .xiaomiRemote)
@@ -1372,9 +1659,30 @@ final class ButtonBridge {
     }
 
     func handleRemoteButton(_ input: ControllerInput, isPressed: Bool) {
-        publishInput(input, pressed: isPressed)
+        let changed = publishInput(input, pressed: isPressed)
+        guard changed else { return }
+        let consumed = inputInterceptor?(input, isPressed) == true
         if input == .home {
-            handleHomeButton(isPressed: isPressed)
+            if !isPressed {
+                handleImmediateMappedHomeButton(isPressed: false)
+                return
+            }
+            guard !consumed else { return }
+            if operationMode == .native {
+                toggleOperationMode()
+            } else {
+                handleImmediateMappedHomeButton(isPressed: true)
+            }
+            return
+        }
+        if consumed {
+            if !isPressed {
+                handleMappedDirection(
+                    input,
+                    isPressed: false,
+                    allowsInterception: false
+                )
+            }
             return
         }
         if operationMode == .native {
@@ -1383,6 +1691,10 @@ final class ButtonBridge {
             }
             return
         }
-        handleMappedDirection(input, isPressed: isPressed)
+        handleMappedDirection(
+            input,
+            isPressed: isPressed,
+            allowsInterception: false
+        )
     }
 }

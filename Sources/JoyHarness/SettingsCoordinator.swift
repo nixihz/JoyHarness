@@ -5,6 +5,7 @@ import Foundation
 final class SettingsCoordinator: ObservableObject {
     enum Tab: String, Hashable, CaseIterable, Identifiable {
         case general
+        case harness
         case controllerMapping
         case slotShortcuts
         case nativeMode
@@ -15,6 +16,8 @@ final class SettingsCoordinator: ObservableObject {
             switch self {
             case .general:
                 L10n.text("通用", "General")
+            case .harness:
+                "Harness"
             case .controllerMapping:
                 L10n.text("按键映射", "Key Mapping")
             case .slotShortcuts:
@@ -28,6 +31,8 @@ final class SettingsCoordinator: ObservableObject {
             switch self {
             case .general:
                 "gearshape"
+            case .harness:
+                "square.grid.2x2"
             case .controllerMapping:
                 "slider.horizontal.3"
             case .slotShortcuts:

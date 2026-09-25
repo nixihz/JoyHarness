@@ -5,7 +5,7 @@ import Testing
 @Suite(.serialized)
 struct ControllerMappingMigrationTests {
     @Test
-    func connectedDeviceSelectionSwitchesProfilesWithoutLosingCustomMappings() throws {
+    func configuredDeviceSwitchesProfilesWithoutLosingCustomMappings() throws {
         let suiteName = "ControllerMappingMigrationTests.devices.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -23,9 +23,10 @@ struct ControllerMappingMigrationTests {
             family: .xiaomiRemote,
             source: .xiaomiRemote
         )
-        var selectedIDs: [String] = []
-        store.onConnectedDeviceSelectionChange = { selectedIDs.append($0) }
+        var displayRequests: [String] = []
+        store.onDisplayedDeviceRequest = { displayRequests.append($0) }
         store.setConnectedDevices([xbox, remote])
+        store.setDisplayedDevice(xbox.id)
 
         #expect(store.selectedConnectedDeviceID == xbox.id)
         store.setAction(.copy, for: .buttonA)
@@ -41,7 +42,9 @@ struct ControllerMappingMigrationTests {
 
         store.selectConnectedDevice(remote.id)
         #expect(store.action(for: .buttonY) == .screenshotTool)
-        #expect(selectedIDs == [remote.id, xbox.id, remote.id])
+        // Choosing what to configure never moves the Dashboard.
+        #expect(displayRequests.isEmpty)
+        #expect(store.displayedDeviceID == xbox.id)
     }
 
     @Test
@@ -85,6 +88,199 @@ struct ControllerMappingMigrationTests {
         #expect(store.selectedConnectedDeviceID == second.id)
     }
 
+    @Test
+    func pressingAnotherDeviceKeepsTheDeviceBeingConfigured() throws {
+        let suiteName = "ControllerMappingMigrationTests.display.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        let dualSense = ConnectedControllerDescriptor(
+            id: "dualsense-1",
+            name: "DualSense Wireless Controller",
+            family: .dualSense,
+            source: .gameController
+        )
+        let remote = ConnectedControllerDescriptor(
+            id: "remote-1",
+            name: "小米蓝牙遥控器",
+            family: .xiaomiRemote,
+            source: .xiaomiRemote
+        )
+        store.setConnectedDevices([dualSense, remote])
+        store.selectConnectedDevice(remote.id)
+        store.setAction(.screenshotTool, for: .buttonY)
+
+        // The DualSense drives the Settings UI while the remote is configured.
+        store.setDisplayedDevice(dualSense.id)
+
+        #expect(store.displayedDeviceID == dualSense.id)
+        #expect(store.selectedConnectedDeviceID == remote.id)
+        #expect(store.controllerFamily == .xiaomiRemote)
+        #expect(store.availableInputs == ControllerInput.availableInputs(for: .xiaomiRemote))
+        #expect(store.action(for: .buttonY) == .screenshotTool)
+
+        store.setDisplayedDevice(nil)
+        #expect(store.displayedDeviceID.isEmpty)
+        #expect(store.selectedConnectedDeviceID == remote.id)
+    }
+
+    @Test
+    func dashboardPickerAsksTheHubOnlyForAnotherConnectedDevice() throws {
+        let suiteName = "ControllerMappingMigrationTests.request.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        let xbox = ConnectedControllerDescriptor(
+            id: "xbox-1",
+            name: "Xbox Wireless Controller",
+            family: .xbox,
+            source: .gameController
+        )
+        let remote = ConnectedControllerDescriptor(
+            id: "remote-1",
+            name: "小米蓝牙遥控器",
+            family: .xiaomiRemote,
+            source: .xiaomiRemote
+        )
+        store.setConnectedDevices([xbox, remote])
+        store.setDisplayedDevice(xbox.id)
+        var requests: [String] = []
+        store.onDisplayedDeviceRequest = { requests.append($0) }
+
+        store.requestDisplayedDevice(xbox.id)
+        store.requestDisplayedDevice("disconnected")
+        store.requestDisplayedDevice(remote.id)
+
+        #expect(requests == [remote.id])
+        // The hub owns the displayed device and reports it back.
+        #expect(store.displayedDeviceID == xbox.id)
+        #expect(store.selectedConnectedDeviceID == xbox.id)
+        #expect(store.controllerFamily == .xbox)
+    }
+
+    @Test
+    func deviceInputsReachSettingsAndDashboardSeparately() throws {
+        let suiteName = "ControllerMappingMigrationTests.inputs.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        let remote = ConnectedControllerDescriptor(
+            id: "remote-1",
+            name: "小米蓝牙遥控器",
+            family: .xiaomiRemote,
+            source: .xiaomiRemote
+        )
+        // The stick click is unreadable, and the touchpad is not a Joy-Con input.
+        let joyCon = ConnectedControllerDescriptor(
+            id: "joycon-1",
+            name: "",
+            family: .joyConLeft,
+            source: .gameController,
+            availableInputs: [.buttonA, .leftShoulder, .touchpadButton]
+        )
+        store.setConnectedDevices([remote, joyCon])
+        store.selectConnectedDevice(remote.id)
+        store.setDisplayedDevice(joyCon.id)
+
+        #expect(store.displayedInputs(for: .joyConLeft) == [.buttonA, .leftShoulder])
+        #expect(store.availableInputs == ControllerInput.availableInputs(for: .xiaomiRemote))
+
+        store.selectConnectedDevice(joyCon.id)
+        #expect(store.availableInputs == [.buttonA, .leftShoulder])
+
+        store.setConnectedDevices([remote])
+        #expect(store.displayedInputs(for: .joyConLeft) == ControllerInput.availableInputs(for: .joyConLeft))
+    }
+
+    @Test
+    func dashboardProfileReadsAnotherFamilyWithoutChangingTheConfiguredProfile() throws {
+        let suiteName = "ControllerMappingMigrationTests.profile.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setControllerFamily(.xiaomiRemote)
+        store.setAction(.mouseLeft, for: .buttonA)
+        store.setAction(.openApplication, for: .buttonY)
+        store.setOpenApplicationTarget("com.example.remote", for: .buttonY)
+        store.setAction(.recordedShortcut, for: .buttonB)
+        store.setRecordedShortcut(
+            RecordedKeyboardShortcut(keyCode: 0x2D, keyName: "N", modifiers: [.shift, .command]),
+            for: .buttonB
+        )
+        store.setRecordedShortcutNote("remote shortcut", for: .buttonB)
+        store.setControllerFamily(.xbox)
+        store.setAction(.copy, for: .buttonA)
+
+        let remote = store.profile(for: .xiaomiRemote)
+
+        #expect(remote.action(for: .buttonA) == .mouseLeft)
+        #expect(remote.openApplicationDisplayName(for: .buttonY) == "com.example.remote")
+        #expect(remote.mappedActionDisplayName(for: .buttonB) == "remote shortcut")
+        #expect(!remote.isReservedForHarnessSwitcher(.home))
+        #expect(store.profile(for: .xbox).isReservedForHarnessSwitcher(.home))
+        #expect(store.controllerFamily == .xbox)
+        #expect(store.action(for: .buttonA) == .copy)
+        #expect(store.openApplicationTarget(for: .buttonY) == nil)
+    }
+
+    @Test
+    func dashboardGripChangeKeepsTheConfiguredProfile() throws {
+        let suiteName = "ControllerMappingMigrationTests.grip.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setControllerFamily(.xiaomiRemote)
+        var changes: [JoyConOrientation] = []
+        store.onJoyConOrientationChange = { changes.append($0) }
+
+        store.setJoyConOrientation(.vertical, for: .joyConRight)
+        store.setJoyConOrientation(.vertical, for: .joyConRight)
+        store.setJoyConOrientation(.vertical, for: .joyConPair)
+
+        #expect(changes == [.vertical])
+        #expect(store.controllerFamily == .xiaomiRemote)
+        #expect(store.joyConOrientation(for: .joyConRight) == .vertical)
+        #expect(store.joyConOrientation(for: .joyConLeft) == .horizontal)
+
+        let reloaded = ControllerMappingStore(userDefaults: defaults)
+        reloaded.setControllerFamily(.joyConRight)
+        #expect(reloaded.joyConOrientation == .vertical)
+    }
+
+    @Test
+    func joyConOrientationLookupKeepsEachGripWhileAnotherProfileIsShown() throws {
+        let suiteName = "ControllerMappingMigrationTests.orientation.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ControllerMappingStore(userDefaults: defaults)
+        store.setControllerFamily(.joyConLeft)
+        store.setJoyConOrientation(.vertical)
+        store.setControllerFamily(.xiaomiRemote)
+
+        #expect(store.joyConOrientation(for: .joyConLeft) == .vertical)
+        #expect(store.joyConOrientation(for: .joyConRight) == .horizontal)
+    }
+
+    @Test
+    func pickerTitlesNumberOnlyDevicesSharingAName() {
+        let devices = [
+            ConnectedControllerDescriptor(id: "a", name: "Xbox Wireless Controller", family: .xbox, source: .gameController),
+            ConnectedControllerDescriptor(id: "remote", name: "", family: .xiaomiRemote, source: .xiaomiRemote),
+            ConnectedControllerDescriptor(id: "b", name: "Xbox Wireless Controller", family: .xbox, source: .gameController),
+        ]
+
+        let titles = ConnectedControllerDescriptor.pickerTitles(for: devices)
+
+        #expect(titles["a"] == "Xbox Wireless Controller 1")
+        #expect(titles["b"] == "Xbox Wireless Controller 2")
+        #expect(titles["remote"] == ControllerFamily.xiaomiRemote.displayName)
+    }
     @Test func remoteMappingsSurviveReconnectAndRemainSeparateFromGamepads() throws {
         let suite = "ControllerMappingMigrationTests.Remote.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

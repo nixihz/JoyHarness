@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ControllerMappingSettingsPane: View {
     @ObservedObject var store: ControllerMappingStore
+    @ObservedObject var harnessProviderSettings: HarnessProviderSettings
     @State private var isResetConfirmationPresented = false
     @State private var recordingInput: ControllerInput?
     private var joyConOrientationBinding: Binding<JoyConOrientation> {
@@ -15,7 +16,12 @@ struct ControllerMappingSettingsPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ActiveHarnessPickerBar(settings: harnessProviderSettings)
+
+            Divider()
+
             if !store.connectedDevices.isEmpty {
+                let titles = ConnectedControllerDescriptor.pickerTitles(for: store.connectedDevices)
                 HStack(spacing: 12) {
                     Label(
                         L10n.text("设置设备", "Configure Device"),
@@ -32,7 +38,7 @@ struct ControllerMappingSettingsPane: View {
                         )
                     ) {
                         ForEach(store.connectedDevices) { device in
-                            Text(device.displayName + " · " + device.family.displayName)
+                            Text((titles[device.id] ?? device.displayName) + " · " + device.family.displayName)
                                 .tag(device.id)
                         }
                     }
@@ -79,22 +85,17 @@ struct ControllerMappingSettingsPane: View {
                 ForEach(ControllerInputGroup.allCases) { group in
                     Section(group.displayName) {
                         ForEach(inputs(in: group)) { input in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Picker(store.displayName(for: input), selection: binding(for: input)) {
-                                    ForEach(input.availableActions) { action in
-                                        Text(action.displayName).tag(action)
-                                    }
+                            if store.isReservedForHarnessSwitcher(input) {
+                                LabeledContent(store.displayName(for: input)) {
+                                    Text(store.mappedActionDisplayName(for: input))
+                                        .foregroundStyle(.secondary)
                                 }
-                                .pickerStyle(.menu)
-
-                                if store.action(for: input) == .openApplication {
-                                    configurationDivider
-                                    openApplicationRow(for: input)
-                                }
-                                if store.action(for: input) == .recordedShortcut {
-                                    configurationDivider
-                                    recordedShortcutRows(for: input)
-                                }
+                                .help(L10n.text(
+                                    "手柄的 PS/Home 固定用于呼出 Harness 切换浮层。",
+                                    "Gamepad PS/Home always opens the Harness switcher."
+                                ))
+                            } else {
+                                mappingRow(for: input)
                             }
                         }
                     }
@@ -126,6 +127,26 @@ struct ControllerMappingSettingsPane: View {
                 "当前的所有自定义按键设置将被替换。",
                 "All custom button mappings will be replaced."
             ))
+        }
+    }
+
+    private func mappingRow(for input: ControllerInput) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker(store.displayName(for: input), selection: binding(for: input)) {
+                ForEach(input.availableActions) { action in
+                    Text(action.displayName).tag(action)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if store.action(for: input) == .openApplication {
+                configurationDivider
+                openApplicationRow(for: input)
+            }
+            if store.action(for: input) == .recordedShortcut {
+                configurationDivider
+                recordedShortcutRows(for: input)
+            }
         }
     }
 

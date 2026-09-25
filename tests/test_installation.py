@@ -40,8 +40,15 @@ class InstallationTests(unittest.TestCase):
 
         self.assertIn('scripts/stop_joy_harness_instances.sh"', script)
         self.assertIn('pgrep -f -x "${APP_BINARY}"', script)
-        self.assertIn('APP_BUNDLE="${HOME}/.agent-deck/${DISPLAY_NAME}.app"', script)
+        self.assertIn('APP_BUNDLE="/Applications/${DISPLAY_NAME}.app"', script)
         self.assertIn('codesign -dvvv "${APP_BUNDLE}"', script)
+
+    def test_install_and_development_builds_share_applications_path(self) -> None:
+        development = (ROOT / "scripts" / "build_and_run.sh").read_text(encoding="utf-8")
+        installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+        self.assertIn('APP_BUNDLE="/Applications/${DISPLAY_NAME}.app"', development)
+        self.assertIn('APP_DIR="/Applications/Joy Harness.app"', installer)
 
     def test_joycon_pointer_verifier_has_passing_self_test(self) -> None:
         result = subprocess.run(

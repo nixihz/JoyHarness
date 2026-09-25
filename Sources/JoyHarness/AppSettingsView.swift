@@ -8,6 +8,7 @@ struct AppSettingsView: View {
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
     @ObservedObject var nativeModeSettings: NativeGamepadAppSettings
+    @ObservedObject var harnessProviderSettings: HarnessProviderSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
     @ObservedObject var slotShortcutSettings: SlotShortcutSettings
 
@@ -35,8 +36,13 @@ struct AppSettingsView: View {
                     scrollDirectionSettings: scrollDirectionSettings,
                     pointerSensitivitySettings: pointerSensitivitySettings
                 )
+            case .harness:
+                HarnessSettingsPane(settings: harnessProviderSettings)
             case .controllerMapping:
-                ControllerMappingSettingsPane(store: mappingStore)
+                ControllerMappingSettingsPane(
+                    store: mappingStore,
+                    harnessProviderSettings: harnessProviderSettings
+                )
             case .slotShortcuts:
                 SlotShortcutSettingsPane(settings: slotShortcutSettings)
             case .nativeMode:
@@ -208,8 +214,8 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Text(L10n.text(
-                    "用于 LT / L2 + 左摇杆滚动网页或文档。可随时切换。",
-                    "Applies to LT / L2 + left stick scrolling in browsers and documents. You can change it anytime."
+                    "用于右摇杆和 LT / L2 + 左摇杆滚动网页或文档。可随时切换。",
+                    "Applies to right stick and LT / L2 + left stick scrolling in browsers and documents. You can change it anytime."
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)

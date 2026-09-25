@@ -120,21 +120,17 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 - Added graduated Xbox Impulse Trigger feedback and a resistance wall for the DualSense R2 adaptive trigger.
 - Added Simplified Chinese and English interfaces with system-language and manual selection modes.
 
-![Xbox controller layout](Sources/JoyHarness/Resources/controller-dashboard.png)
-
-![PS5 DualSense controller layout](Sources/JoyHarness/Resources/controller-dashboard-dualsense.png)
-
 ## Features
 
 - **Control Codex away from the keyboard:** switch among six Codex Micro task slots, open the active task, approve or reject permission prompts, and enter `yes` or `no`. Fast mode and task splitting can still be assigned as custom mappings.
 - **Push-to-talk:** hold Menu/Options to send Codex Micro `ACT10`, then release to stop. DualSense controllers can also use the touchpad button. Recording remains native to Codex Desktop.
 - **DualSense audio diagnostics:** detect the controller microphone exposed over USB and report whether it is the default macOS input. Joy Harness does not claim the recording device or change global audio settings.
 - **Graduated trigger feedback:** DualSense R2 provides a light touch, a resistance wall, and a stronger confirmation after the trigger point. Xbox RT uses Impulse Trigger feedback where supported.
-- **Control macOS:** move and scroll with the left stick; hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
+- **Control macOS:** move the pointer with the left stick and scroll with the right stick (or LT + left stick); hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
 - **Global keyboard slot shortcuts:** record or clear a shortcut for each slot in Settings → Slot Shortcuts. None are assigned by default; changes are saved and apply immediately, including in the background. Requires the app to be running and an RP2040 connection; a controller is optional.
 - **Diagnose locally:** inspect controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
-- **Native Gamepad Mode (Passthrough):** automatically disable simulated mouse and key mappings when switching into specific applications (such as JoyDSH, Steam, or games) so they can directly receive raw controller events. Press the **PS / Home** button anytime to manually toggle between Native Mode and Mapping Mode with haptic feedback.
+- **Native Gamepad Mode (Passthrough):** automatically disable simulated mouse and key mappings when switching into specific applications (such as JoyDSH, Steam, or games) so they can directly receive raw controller events. To switch manually, assign **Toggle Native/Mapping Mode** to a button (the Xiaomi remote's Menu uses it by default); switching gives haptic feedback. Gamepad PS / Home opens the Harness switcher in mapping mode and returns to mapping mode from Native Mode.
 - **Customize mappings:** assign base buttons, the D-pad, and the LT layer (including LT + right stick directions) to mouse, system, browser, app-launch, Codex Micro, slot, or disabled actions. Changes apply immediately and persist automatically.
 - **Xiaomi RC003-MS:** Xiaomi Bluetooth Remote 2 Pro is detected directly through macOS IOHID. OK, Back, Menu, Voice, Home, D-pad, volume, and custom keys are available in the mapping editor; the Dashboard shows the remote-specific artwork and live highlights.
 - **Run in the background:** launch at login can be enabled in Settings, and disconnected controllers or RP2040 boards are detected again while the app is running.
@@ -210,7 +206,7 @@ The RP2040 is optional for mouse control, system shortcuts, the dashboard, and m
 - A Raspberry Pi Pico or compatible RP2040 development board.
 - A data-capable USB cable. Charge-only cables cannot flash firmware or expose serial/HID devices.
 
-Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
+Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense R2 resistance is restored through the matching USB or Bluetooth HID output while Joy Harness is in the background, and remains attached when the Xiaomi remote is the selected mapping profile. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
 
 Multiple GameController devices can stay connected at the same time, and the Xiaomi RC003-MS remote can be connected alongside them. Xbox, DualSense/DualShock, and the remote keep independent input sessions, so connecting one device no longer disconnects or disables another. First-generation Joy-Con keeps its existing composition priority: when Joy-Con endpoints are present, Joy Harness presents their paired or single logical profile until they disconnect.
 
@@ -232,7 +228,7 @@ With the freshly built app running, verify the physical stick-to-pointer directi
 ./scripts/verify_joycon_pointer.sh pair
 ```
 
-The verifier checks the active Joy-Con mode first, then measures the pointer displacement for physical up, right, down, and left. Paired verification uses the left Joy-Con stick because the right stick belongs to the secondary/radial input path.
+The verifier checks the active Joy-Con mode first, then measures the pointer displacement for physical up, right, down, and left. Paired verification uses the left Joy-Con stick because the right stick scrolls instead of moving the pointer.
 
 The DualSense microphone appears as `DualSense Wireless Controller` or `Wireless Controller` even when connected over USB. Select it under **System Settings > Sound > Input**. Joy Harness reports the actual USB transport and whether the device is the default input. The controller's physical mute button is not exposed through the public GameController API.
 
@@ -352,6 +348,12 @@ task demo
 
 Finally, open a task in Codex Desktop and verify approval with `LT + A`, rejection with `LT + B`, slot switching with LB/RB, and push-to-talk by holding Menu/Options.
 
+## Harness Switching
+
+Joy Harness keeps independent controller mappings for Codex, Claude, Cursor, and Antigravity. Press PS/Home, even while Joy Harness is in the background, to open the Harness switcher, which shows each associated app's icon. Move with D-pad Left/Right, LB/RB, or the left stick, then press A to confirm. The last card, **Main Window**, brings up the Joy Harness main window, reopening it if it was closed, instead of switching Harness; open settings from there. Press PS/Home again or B to close it without switching; clicking anywhere, switching apps, or changing Spaces also closes it.
+
+Use **Settings > Harness** to enable Harnesses, associate macOS applications, and choose whether a confirmed selection activates the associated app. A uniquely matched foreground application switches the active Harness automatically; ambiguous terminal apps keep the current manual selection. Codex retains existing mapping storage, while the other Harnesses start without Codex Micro, task-slot, or radial actions and can be customized independently.
+
 ## Default Controls
 
 Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in the mapping area, to customize buttons and LT combinations. Settings apply immediately and are stored in the current user's preferences. **Restore Default Mapping** restores the behavior below.
@@ -364,7 +366,8 @@ Any mappable input can use **Record Shortcut...**. Select **Click to Record**, t
 |---|---|---|
 | Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
 | DualSense / DualShock touchpad slide | Slow relative pointer movement for fine aiming; no modifier required. Touchpad click remains the mapped touchpad button action (default left mouse button) | Yes |
-| LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings | Yes |
+| Right stick | Vertical and horizontal scrolling in every Harness, no modifier; works while the left stick moves the pointer. Same speed and Natural/Traditional direction as LT + left stick | Yes |
+| LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings. The only scroll input on a single Joy-Con | Yes |
 | Hold L3 | Temporarily use the configurable Fast pointer sensitivity (default `1.8x`) | Yes |
 | A press/release | Left mouse button, including hold and drag | Yes |
 | B press/release | Right mouse button, including hold and drag | Yes |
@@ -379,7 +382,7 @@ Any mappable input can use **Record Shortcut...**. Select **Click to Record**, t
 | Xbox: Options/View; PlayStation: Create | Lark screenshot (`Command-Shift-A`) | Yes |
 | D-pad Up press/release | Right Command press/release, useful for voice-input tools | Yes |
 
-These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. Hold L3 alone to boost pointer speed. While LT is held, the right stick no longer sends Codex radial input. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
+These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. Hold L3 alone to boost pointer speed. While LT is held, the right stick stops scrolling and triggers its four direction mappings instead. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
 
 ### Codex Micro Controls
 
@@ -395,7 +398,7 @@ These actions target the foreground application, not only Codex Desktop. LT is a
 | Hold/release Menu or Options | `ACT10` press/release | Native Codex Desktop push-to-talk |
 | Hold/release DualSense/DualShock touchpad (when mapped to push-to-talk) | `ACT10` press/release | Optional PlayStation push-to-talk input |
 | RT / R2 past the resistance wall | `ACT12` | Focus Codex Desktop after the confirmation travel point |
-| D-pad Left/Down/Right without LT and right stick | `v.oai.rad` | Radial input as angle and magnitude |
+| D-pad Left/Down/Right without LT | `v.oai.rad` | Radial input as angle and magnitude; the right stick scrolls instead |
 
 Joy Harness reads the six most recent task names and ordering through the read-only Codex app-server `thread/list` method. Local state stores only display names, or a first-message summary for unnamed tasks, and never stores full conversation content.
 
@@ -413,11 +416,11 @@ Joy Harness does not subscribe to the Codex task lifecycle and does not automati
 
 Joy Harness is a background app with a window. Closing the window does not quit the process; explicitly quitting the app stops it without an automatic restart.
 
-The dashboard places the selected input device beside its individual button mappings. It adapts to Xiaomi remotes, DualSense, DualShock, Xbox, single or paired Joy-Con, and generic controllers. Single Joy-Con has a native horizontal/vertical grip picker. The main window keeps a fixed 744 × 600 pt work area; only the button mapping list scrolls inside its bounded panel.
+The dashboard places the displayed input device beside its individual button mappings. It adapts to Xiaomi remotes, DualSense, DualShock, Xbox, single or paired Joy-Con, and generic controllers. Single Joy-Con has a native horizontal/vertical grip picker. The main window keeps a fixed 744 × 600 pt work area; only the button mapping list scrolls inside its bounded panel.
 
-When more than one device is connected, open **Settings > Customize Buttons** and use the **Configure Device** picker at the top to choose which connected device is shown. Changing the picker only changes the profile being edited; all connected devices continue to receive input. Xiaomi and Joy-Con profiles are stored separately. Xbox and PlayStation standard gamepads use the shared standard-gamepad mapping profile so their common controls remain consistent.
+When more than one device is connected, the dashboard header shows a device switcher, and the dashboard follows whichever device most recently had a button pressed. You can also choose the shown device in that switcher. Devices with the same name are numbered. The switcher only changes what the dashboard shows: every connected device keeps receiving input with its own mappings and trigger feedback, and the device chosen with the **Configure Device** picker at the top of **Settings > Customize Buttons** stays put. Button presses never change that picker; it changes only when you pick another device there or its device disconnects, so you can navigate Settings with one controller while configuring another device. Xiaomi and Joy-Con profiles are stored separately. Xbox and PlayStation standard gamepads use the shared standard-gamepad mapping profile so their common controls remain consistent.
 
-The status snapshot keeps the selected family in `controller_family` and adds `controller_devices`, an array containing each connected device's process-local `id`, `name`, `family`, `source`, and `selected` flag. The ID is valid for the current app session and is intended for UI/state correlation, not long-term hardware identification.
+The status snapshot keeps the displayed device's family in `controller_family` and adds `controller_devices`, an array containing each connected device's process-local `id`, `name`, `family`, `source`, and a `selected` flag marking the displayed device. The ID is valid for the current app session and is intended for UI/state correlation, not long-term hardware identification.
 
 Connection details open on demand from the trailing toolbar button without scrolling or compressing the 744 × 600 work area. The inspector retains device capabilities, Joy-Con endpoints, battery, adapter connection, operating mode, Accessibility and Input Monitoring permissions, voice input, recording ownership, and four finite haptic tests. Unknown or stale data is labeled explicitly. Native gamepad mode pauses mappings while retaining physical input feedback.
 
@@ -475,7 +478,7 @@ Additional modes:
 ./scripts/build_and_run.sh --debug
 ```
 
-The script first builds a signed app, stops installed Joy Harness/AgentDeck processes, and replaces the canonical test app at `~/.agent-deck/Joy Harness.app`. It prints that exact path and signing identity before launch. Use this app for every hardware test; do not open the `.app` left under `dist/` by the DMG packaging task.
+The script first builds a signed app, stops installed Joy Harness/AgentDeck processes, and replaces the canonical test app at `/Applications/Joy Harness.app`. It prints that exact path and signing identity before launch. Use this app for every hardware test; do not open the `.app` left under `dist/` by the DMG packaging task.
 
 Create a release image for the current Mac architecture with:
 
@@ -492,13 +495,13 @@ Artifacts are written to `dist/`. The package script verifies the app signature,
 
 | Path | Content |
 |---|---|
-| `~/.agent-deck/Joy Harness.app` | Signed Joy Harness app |
+| `/Applications/Joy Harness.app` | Signed Joy Harness app used by local installs and hardware tests |
 | `~/.agent-deck/bin/` | App entry point and CLI |
 | `~/.local/bin/joy-harness-send` | Symlink to the installed CLI |
 | `~/.agent-deck/status.json` | Connection, permission, slot, and state snapshot |
 | `~/.agent-deck/pad.sock` | Local CLI/app Unix socket with `0600` permissions |
 
-The development and install commands require Developer ID and use the same canonical app path. The first successful local signature pins the identity in `~/.agent-deck/signing-identity`; later identity changes fail instead of silently changing trust. Grant **Input Monitoring** and **Accessibility** to `~/.agent-deck/Joy Harness.app`. Keeping the path and signing requirement stable helps preserve macOS authorization across rebuilds; migrating from an older signature may require reauthorization. Settings > General shows the current app's path and a button to reveal it in Finder.
+The development and install commands require Developer ID and use the same canonical app path. The first successful local signature pins the identity in `~/.agent-deck/signing-identity`; later identity changes fail instead of silently changing trust. Grant **Input Monitoring** and **Accessibility** to `/Applications/Joy Harness.app`. Keeping the path and signing requirement stable helps preserve macOS authorization across rebuilds; migrating from an older signature may require reauthorization. Settings > General shows the current app's path and a button to reveal it in Finder.
 
 When upgrading an older hooks/`notify` installation, the installer backs up the affected configuration before removing obsolete Joy Harness entries. New installations do not write to `~/.codex/hooks.json` or Codex `notify` configuration. Legacy `agent-deck-send`, `AgentDeck`, and `~/.agent-deck` names remain for upgrade compatibility.
 
@@ -565,8 +568,11 @@ scripts/verify_joycon_pointer.sh
                                 hardware stick-to-pointer direction verifier
 tests/                          Swift and Python tests
 docs/research/                  controller audio, wireless, and agent integration research
+docs/adr/                       architecture decision records
 Taskfile.yml                    common task entry points
 ```
+
+Mapping reference: [every controller and Harness default mapping, with a test checklist and known issues](docs/controller-mappings.md) (Chinese).
 
 Research notes:
 

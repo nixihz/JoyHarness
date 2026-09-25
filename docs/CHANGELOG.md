@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add a PS/Home Harness switcher for Codex, Claude, Cursor, and Antigravity, with immediate presentation, independent mappings, application associations, and unique foreground-app matching. The panel widens to fit every enabled Harness and uses Liquid Glass on macOS 26. Cards show each associated app's real icon; press PS/Home again or B, click anywhere, or switch apps or Spaces to close it without switching. A trailing Main Window card brings up the Joy Harness main window from the controller, even after it was closed.
+- Add Antigravity as an optional Native Mode app, disabled by default so its Harness mappings work; migrate the earlier development default to disabled. Default apps are listed only when installed.
+- Add Claude Harness default mappings: L1/R1 cycle to the previous/next Claude session (`⌘⇧[` / `⌘⇧]`) and RT opens Claude Search (`⌘⇧K`). Saved Claude profiles fill these keys once where they were still No Action.
+- Show Xbox and PlayStation brand marks and the Xiaomi wordmark on the Dashboard controller artwork.
+- Show a device switcher in the Dashboard header when several devices are connected. The Dashboard also switches to whichever device most recently had a button pressed; devices with the same name are numbered. The switcher is display only and is separate from the Settings **Configure Device** picker.
+
+### Changed
+- Gamepad PS/Home now opens the Harness switcher in mapping mode; in Native Mode it returns to mapping mode, like the Xiaomi remote's Home.
+- Install and local test builds now go to `/Applications/Joy Harness.app` and remove the legacy `~/.agent-deck/Joy Harness.app` copy.
+- The right stick now scrolls in every Harness without holding LT, at the same speed and direction as LT + left stick, and works while the left stick moves the pointer. LT + left stick scrolling stays for single Joy-Con, and LT + right stick directions still trigger their mappings. Codex radial input now comes only from D-pad Left/Down/Right.
+
+### Fixed
+- Keep DualSense R2 adaptive resistance active when the Xiaomi remote is the selected mapping profile, avoid redundant controller reattachment, and restore the effect over Bluetooth while Joy Harness is in the background.
+- Warm the Xiaomi remote virtual microphone when its voice service becomes ready and reuse the CoreAudio output engine across consecutive sessions, avoiding frequent silent recordings caused by rebuilding the device path for every press.
+- Release active mapped outputs while the Harness switcher is open and prevent non-Codex Harnesses from sending Codex Micro press or radial input.
+- Detect the DualSense PS button from HID input reports over USB and Bluetooth.
+- Open the Harness switcher on every PS press: the continuous DualSense report stream no longer postpones the HID release, the GameController and HID copies of one press count once even when one arrives late or loses its release, and a press is handled before GameController lists the controller.
+- Close the Harness switcher when the controller that opened it disconnects, and record the newly selected Harness in the status file.
+- Keep a connected Joy-Con's grip orientation, stick and battery readings while another device is shown.
+- Reopen the main window from the Dock after it was closed; clicking the Dock icon previously did nothing.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added

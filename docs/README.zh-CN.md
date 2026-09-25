@@ -122,10 +122,6 @@ shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
 - Xbox RT 提供 Impulse Trigger 分级反馈；DualSense R2 使用自适应扳机阻力墙。
 - 简体中文和 English 界面可跟随系统，也可在设置中手动切换。
 
-![Xbox 手柄布局](../Sources/JoyHarness/Resources/controller-dashboard.png)
-
-![PS5 DualSense 手柄布局](../Sources/JoyHarness/Resources/controller-dashboard-dualsense.png)
-
 ## 能达到什么效果
 
 安装完成后，可以获得以下能力：
@@ -138,14 +134,14 @@ shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
   默认输入；Joy Harness 不抢占录音设备，也不改动全局声音设置。
 - **DualSense R2 强反馈**：R2 轻触时给一次轻震，中段形成明显阻力墙，完全按下越过触发点
   时释放阻力并补一次短促强震，形成分级的操作确认。
-- **用手柄控制 macOS**：左摇杆移动鼠标，LT + 左摇杆滚动，L3 加速；DualSense/DualShock 触控板滑动可精细瞄准；A/B 负责左右键，R3 负责
+- **用手柄控制 macOS**：左摇杆移动鼠标，右摇杆滚动（也可 LT + 左摇杆），L3 加速；DualSense/DualShock 触控板滑动可精细瞄准；A/B 负责左右键，R3 负责
   中键，X/Y 负责 Backspace 和 Esc；LT 功能层还提供回车、复制和粘贴。
 - **管理六个任务槽**：LB/RB 顺序切换，或用 LT 组合键直接跳到 1–6 号槽位；切换后以
   对应次数的短震确认当前槽号。
 - **全局键盘槽位快捷键**：在“设置 → 槽位快捷键”中为六个槽位分别录制或清除快捷键，默认不设置；修改自动保存并立即生效，应用在后台时同样可用。需要应用保持运行并连接 RP2040，无需连接手柄。
 - **可视化诊断**：macOS 控制台展示当前槽位、手柄电量与震动能力、
   RP2040 连接状态以及辅助功能授权状态，并可打开当前任务。
-- **原生手柄模式（直通模式）**：切换到指定应用（如 JoyDSH、Steam 或独立游戏）时自动暂停 Joy Harness 模拟鼠标与按键映射，让目标应用直接接收原生手柄事件，离开时自动恢复；也可随时按手柄上的 **PS / Home** 键手动进出原生/映射模式，并伴有触觉反馈。
+- **原生手柄模式（直通模式）**：切换到指定应用（如 JoyDSH、Steam 或独立游戏）时自动暂停 Joy Harness 模拟鼠标与按键映射，让目标应用直接接收原生手柄事件，离开时自动恢复；如需手动切换，可为按键分配 **切换原生/映射模式**（小米遥控器的菜单键默认如此），切换时伴有触觉反馈。手柄的 **PS / Home** 键在映射模式下呼出 Harness 切换浮层，在原生手柄模式下返回映射模式。
 - **自定义按键**：在应用的“设置”中为基础按键、十字键和 LT 功能层分别选择鼠标、
   系统、Codex Micro、槽位控制或禁用操作；修改即时生效并自动保存。
 - **小米 RC003-MS 遥控器**：通过 macOS IOHID 直接识别 Xiaomi Bluetooth Remote 2 Pro，
@@ -272,7 +268,7 @@ HID 事件服务延迟出现时会自动重试屏蔽；切换到原生模式或�
 ```
 
 验证器会先检查当前 Joy-Con 模式，再依次测量实体上、右、下、左造成的鼠标位移。双支模式只验证
-左 Joy-Con 摇杆，因为右摇杆属于 secondary/radial 输入路径，不控制鼠标。
+左 Joy-Con 摇杆，因为右摇杆负责滚动，不控制鼠标。
 
 DualSense 的标准按键、触控板按键和震动由 Apple 的 `GCDualSenseGamepad` / Core Haptics
 接口支持。若要使用手柄内置麦克风，应通过支持数据传输的 USB 线连接，并在“系统设置 →
@@ -291,8 +287,9 @@ DualSense 上启用，不改变 Xbox、DualShock 4 或通用手柄的 RT/R2 输�
 使用 Impulse Trigger 细微震动：进入约 8% 行程时轻触提示一次，越过 72% 并向 Codex Micro
 发送 `ACT12` 时再确认一次；松开到 18% 以下后重新待命。macOS 暴露 `.rightTrigger` locality
 时反馈只在 RT 马达播放，否则回退为更轻的全手柄震动。macOS 会在
-Joy Harness 退到后台时关闭 GameController 的扳机效果；USB 连接的 DualSense 会通过原始
-HID 输出自动恢复，因此在 Codex Desktop 前台也能保持阻力。蓝牙连接暂不支持后台恢复。
+Joy Harness 退到后台时关闭 GameController 的扳机效果；USB 或蓝牙连接的 DualSense 会
+通过对应的原始 HID 输出自动恢复，因此在 Codex Desktop 前台也能保持阻力。R2 反馈跟随
+已连接的 DualSense，不会因为当前映射配置页选中了小米遥控器而被关闭。
 
 ### 构建 RP2040 固件所需工具
 
@@ -452,7 +449,8 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 |---|---|---|
 | 左摇杆 | 以 120Hz 平滑移动 macOS 鼠标，带死区和渐进加速 | 是 |
 | DualSense / DualShock 触控板滑动 | 慢速相对移动指针，适合精细瞄准；无需按住任何修饰键。触控板按下仍走映射（默认鼠标左键） | 是 |
-| LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度；可在设置中选择自然滚动或传统滚动 | 是 |
+| 右摇杆 | 上下纵向滚动、左右横向滚动，所有 Harness 通用，无需按键；可与左摇杆移动鼠标同时进行。速度和滚动方向与 LT + 左摇杆相同 | 是 |
+| LT + 左摇杆 | 上下纵向滚动、左右横向滚动，摇杆幅度控制速度；可在设置中选择自然滚动或传统滚动。单只 Joy-Con 只能用这种方式滚动 | 是 |
 | L3 按住 | 临时使用可配置的快速灵敏度（默认 `1.8x`），松开恢复普通灵敏度 | 是 |
 | A 按下 / 松开 | 鼠标左键按下 / 松开，可单击、长按或拖动 | 是 |
 | B 按下 / 松开 | 鼠标右键按下 / 松开，可右击或拖动 | 是 |
@@ -469,7 +467,7 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 
 这些操作发给当前前台应用，不只限于 Codex Desktop。LT 是功能修饰键：按住 LT 时左摇杆
 改为滚动，L3/R3 执行复制/粘贴，LT + 右摇杆左/右执行网页上一页/下一页。单独按住 L3
-可加速指针。按住 LT 时，右摇杆不再发送 Codex 径向输入。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
+可加速指针。按住 LT 时，右摇杆停止滚动，改为触发四个方向的映射。Xbox 的 `Options / View`、PlayStation 的 `Create` 当前
 默认单按触发飞书截图；如果手柄驱动未向 macOS 暴露该键，可在设置中把“飞书截图”改配到
 其他按键。该功能要求飞书正在运行，并将截图快捷键设置为 `Command-Shift-A`。
 
@@ -487,7 +485,7 @@ Options / View 与 Home 只有在手柄驱动通过 macOS `GameController` 暴�
 | Menu / Options 按住 / 松开 | `ACT10` 按下 / 松开 | Codex Desktop 原生按住说话 |
 | DualSense / DualShock 触控板按住 / 松开（映射为按住说话时） | `ACT10` 按下 / 松开 | PlayStation 手柄的可选按住说话入口 |
 | RT / R2 扣过阻力墙 | `ACT12` | 到达确认行程后聚焦 Codex Desktop；轻按不会触发 |
-| 十字键左 / 下 / 右（未按 LT）及右摇杆 | `v.oai.rad` | 发送角度和力度形式的径向输入；十字键上默认映射为右侧 Command |
+| 十字键左 / 下 / 右（未按 LT） | `v.oai.rad` | 发送角度和力度形式的径向输入；十字键上默认映射为右侧 Command；右摇杆改为滚动 |
 
 右侧 Command 与其他系统操作一样，也可在“设置”的任意可映射按键菜单中选择；修改后会
 即时生效并保存。升级前仍使用默认径向输入的十字键上会自动迁移为右侧 Command，自定义为
@@ -518,14 +516,16 @@ Joy Harness 是带窗口的后台应用。关闭窗口不会结束进程；主�
 - 辅助功能权限诊断。
 - 打开当前任务和震动状态测试按钮。
 
-连接多个设备时，打开“设置 → 自定义按键”，在顶部“设置设备”选择器中选择要查看和编辑的
-已连接设备。切换选择只改变当前展示的 profile，不会停用其他设备的输入；小米遥控器和
-Joy-Con profile 独立保存，Xbox 与 PlayStation 标准手柄共用标准手柄映射 profile，以保持
-共同按键的一致行为。
+连接多个设备时，Dashboard 顶部会显示设备切换器，并自动展示最近按下按键的设备，也可以
+在该切换器中手动选择；同名设备会自动编号。切换展示设备只改变 Dashboard 的展示内容：每个
+在线设备继续按自己的映射和扳机反馈接收输入，“设置 → 自定义按键”顶部“设置设备”选择器选中
+的设备也保持不变。按键不会改变该选择器，它只在手动选择或所选设备断开时改变，因此可以用
+一个手柄操作设置界面，同时配置另一台设备。小米遥控器和 Joy-Con profile 独立保存，Xbox 与
+PlayStation 标准手柄共用标准手柄映射 profile，以保持共同按键的一致行为。
 
 `~/.agent-deck/status.json` 的 `controller_family` 表示当前展示的设备类型；新增的
 `controller_devices` 数组列出每个在线设备的进程内 `id`、`name`、`family`、`source` 和
-`selected`。其中 `id` 只在本次应用运行期间有效，用于界面和状态关联，不是持久化硬件标识。
+标记展示设备的 `selected`。其中 `id` 只在本次应用运行期间有效，用于界面和状态关联，不是持久化硬件标识。
 
 控制台中的任务命令同样依赖 RP2040 已连接。任务名称来自 Codex app-server；未命名任务会
 回退显示首条消息摘要。
@@ -573,7 +573,7 @@ python3 bin/joy-harness-send error --note manual-test
 ```
 
 该脚本会构建签名应用，停止已有的 Joy Harness / AgentDeck 进程，并原地更新唯一测试路径
-`~/.agent-deck/Joy Harness.app`；启动前会打印完整路径和签名身份。所有真机测试都从这个
+`/Applications/Joy Harness.app`；启动前会打印完整路径和签名身份。所有真机测试都从这个
 路径启动，不要打开 `dist/` 中由 DMG 打包任务留下的副本。
 
 Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可以直接使用项目的
@@ -606,7 +606,7 @@ Developer ID 签名并通过 Apple 公证。
 
 | 路径 | 内容 |
 |---|---|
-| `~/.agent-deck/Joy Harness.app` | 测试和源码安装共用的 Developer ID 签名应用 |
+| `/Applications/Joy Harness.app` | 测试和源码安装共用的 Developer ID 签名应用 |
 | `~/.agent-deck/signing-identity` | 首次本机签名成功后锁定的证书身份 |
 | `~/.agent-deck/bin/` | 应用入口和 CLI |
 | `~/.local/bin/joy-harness-send` | 指向已安装 CLI 的符号链接 |
@@ -666,7 +666,7 @@ AGENT_DECK_RP2040_PORT=/dev/cu.usbmodemXXXX task run
 影响鼠标与回车、复制、粘贴、截图等系统快捷键，不影响通过 RP2040 发送的 Codex Micro 操作。
 
 开发和安装脚本会在最终 `.app` 组装完成后统一使用同一个 Developer ID 身份签名，并固定更新
-`~/.agent-deck/Joy Harness.app`。本机首次签名成功后会锁定证书身份，后续身份变化会直接报错。
+`/Applications/Joy Harness.app`。本机首次签名成功后会锁定证书身份，后续身份变化会直接报错。
 请给这个路径授予“输入监控”和“辅助功能”权限；固定路径和签名要求有助于保留重建后的权限。
 从旧签名切换到 Developer ID 时，macOS 可能要求重新授权一次，实际权限以应用中的状态为准。
 “设置 → 通用 → 当前应用”会显示实际运行路径，并可在 Finder 中定位，避免选错同名副本。
@@ -694,8 +694,11 @@ scripts/verify_joycon_pointer.sh
                                 实机摇杆到鼠标四向验证器
 tests/                          Swift 和 Python 测试
 docs/research/                  手柄音频、无线方案与 agent 接入可行性研究
+docs/adr/                       架构决策记录（ADR）
 Taskfile.yml                    常用任务入口
 ```
+
+映射参考：[所有控制器 × Harness 的默认映射、测试清单与待调整项](controller-mappings.md)
 
 研究记录：
 

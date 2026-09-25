@@ -10,15 +10,19 @@ struct DashboardControllerView: View {
     private var presentation: DashboardPresentation {
         DashboardPresentation(status: store.status, freshness: store.freshness)
     }
+    /// The displayed device's family. Settings may be editing another
+    /// device's profile at the same time.
+    private var family: ControllerFamily { presentation.family }
+    private var displayedInputs: Set<ControllerInput> { mappingStore.displayedInputs(for: family) }
     private var inputs: [ControllerInput] {
         ControllerInput.allCases.filter {
-            mappingStore.availableInputs.contains($0) && (($0.group == .functionLayer) == functionLayer)
+            displayedInputs.contains($0) && (($0.group == .functionLayer) == functionLayer)
         }
     }
     private var activeInputs: Set<ControllerInput> {
         presentation.connected == true ? store.pressedControllerInputs : []
     }
-    private var hasFunctionLayer: Bool { mappingStore.availableInputs.contains { $0.group == .functionLayer } }
+    private var hasFunctionLayer: Bool { displayedInputs.contains { $0.group == .functionLayer } }
 
     var body: some View {
         if presentation.connected != true {
@@ -40,20 +44,21 @@ struct DashboardControllerView: View {
         } else {
             let layout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: DashboardStyle.Space.section))
                 : AnyLayout(HStackLayout(alignment: .top, spacing: DashboardStyle.Space.section))
+            let profile = mappingStore.profile(for: family)
             layout {
-                device.frame(maxWidth: .infinity)
-                mapping.frame(maxWidth: .infinity)
+                device(profile).frame(maxWidth: .infinity)
+                mapping(profile).frame(maxWidth: .infinity)
             }
-            .onChange(of: mappingStore.controllerFamily) { _ in functionLayer = false }
-            .onChange(of: mappingStore.joyConOrientation) { _ in store.clearControllerInputs() }
+            .onChange(of: family) { _ in functionLayer = false }
         }
     }
 
-    private var device: some View {
+    private func device(_ profile: ControllerMappingProfile) -> some View {
         VStack(spacing: DashboardStyle.Space.medium) {
-            if mappingStore.controllerFamily == .joyConLeft || mappingStore.controllerFamily == .joyConRight {
+            if family == .joyConLeft || family == .joyConRight {
                 Picker(L10n.text("握持方向", "Grip Orientation"), selection: Binding(
-                    get: { mappingStore.joyConOrientation }, set: { mappingStore.setJoyConOrientation($0) }
+                    get: { mappingStore.joyConOrientation(for: family) },
+                    set: { mappingStore.setJoyConOrientation($0, for: family) }
                 )) {
                     ForEach(JoyConOrientation.allCases, id: \.rawValue) { orientation in
                         Text(orientation.displayName).tag(orientation)
@@ -63,13 +68,13 @@ struct DashboardControllerView: View {
                 .labelsHidden()
                 .frame(width: DashboardStyle.gripPickerWidth)
             }
-            ControllerArtwork(family: mappingStore.controllerFamily, orientation: mappingStore.joyConOrientation,
+            ControllerArtwork(family: family, orientation: profile.joyConOrientation,
                 pressedInputs: activeInputs)
                 .frame(maxWidth: DashboardStyle.artworkWidth)
                 .frame(height: DashboardStyle.artworkHeight)
                 .accessibilityHidden(true)
             VStack(spacing: DashboardStyle.Space.small) {
-                Label(inputTitle, systemImage: activeInputs.isEmpty ? "hand.tap" : "smallcircle.filled.circle")
+                Label(inputTitle(profile), systemImage: activeInputs.isEmpty ? "hand.tap" : "smallcircle.filled.circle")
                     .font(.body.weight(.medium))
                     .foregroundStyle(activeInputs.isEmpty ? Color.secondary : DashboardStyle.input)
                 Text(store.status.isNativeMode
@@ -82,14 +87,14 @@ struct DashboardControllerView: View {
         }
     }
 
-    private var inputTitle: String {
+    private func inputTitle(_ profile: ControllerMappingProfile) -> String {
         let current = activeInputs.isEmpty ? store.lastControllerInputs : activeInputs
         guard !current.isEmpty else { return L10n.text("等待输入", "Waiting for input") }
-        let names = Set(current.map { mappingStore.displayName(for: $0) }).sorted().joined(separator: " + ")
+        let names = Set(current.map { profile.displayName(for: $0) }).sorted().joined(separator: " + ")
         return names + " · " + (activeInputs.isEmpty ? L10n.text("已释放", "Released") : L10n.text("按下", "Pressed"))
     }
 
-    private var mapping: some View {
+    private func mapping(_ profile: ControllerMappingProfile) -> some View {
         VStack(alignment: .leading, spacing: DashboardStyle.Space.medium) {
             HStack {
                 Text(L10n.text("按键映射", "Button Mappings")).font(.headline)
@@ -109,7 +114,7 @@ struct DashboardControllerView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(inputs, id: \.rawValue) { input in
-                        mappingRow(input)
+                        mappingRow(input, profile: profile)
                         Divider()
                     }
                 }
@@ -120,15 +125,16 @@ struct DashboardControllerView: View {
         }
     }
 
-    private func mappingRow(_ input: ControllerInput) -> some View {
+    private func mappingRow(_ input: ControllerInput, profile: ControllerMappingProfile) -> some View {
         let active = activeInputs.contains(input) && !presentation.mappingPaused
+        let actionTitle = Self.actionTitle(input, profile: profile)
         return HStack(alignment: .firstTextBaseline, spacing: DashboardStyle.Space.small) {
-            Text(mappingStore.displayName(for: input))
+            Text(profile.displayName(for: input))
                 .font(.body.weight(.medium))
                 .frame(width: DashboardStyle.keyWidth, alignment: .leading)
             Image(systemName: active ? "smallcircle.filled.circle" : "arrow.right")
                 .foregroundStyle(active ? DashboardStyle.input : .secondary).accessibilityHidden(true)
-            Text(actionTitle(input)).frame(maxWidth: .infinity, alignment: .leading)
+            Text(actionTitle).frame(maxWidth: .infinity, alignment: .leading)
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(DashboardStyle.Space.small)
@@ -136,16 +142,17 @@ struct DashboardControllerView: View {
         .background(active ? DashboardStyle.input.opacity(DashboardStyle.highlightFillOpacity) : .clear)
         .animation(reduceMotion || active ? nil : .easeOut(duration: DashboardStyle.keyRelease), value: active)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(mappingStore.displayName(for: input) + ", " + actionTitle(input))
+        .accessibilityLabel(profile.displayName(for: input) + ", " + actionTitle)
         .accessibilityValue(active ? L10n.text("输入按下", "Input pressed") : "")
     }
 
-    private func actionTitle(_ input: ControllerInput) -> String {
-        if mappingStore.action(for: input) == .openApplication,
-           let name = mappingStore.openApplicationDisplayName(for: input) {
+    static func actionTitle(_ input: ControllerInput, profile: ControllerMappingProfile) -> String {
+        if !profile.isReservedForHarnessSwitcher(input),
+           profile.action(for: input) == .openApplication,
+           let name = profile.openApplicationDisplayName(for: input) {
             return L10n.text("打开 ", "Open ") + name
         }
-        return mappingStore.mappedActionDisplayName(for: input)
+        return profile.mappedActionDisplayName(for: input)
     }
 
     @ViewBuilder private var actionFeedback: some View {

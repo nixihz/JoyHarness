@@ -12,7 +12,8 @@ esac
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${PROJECT_ROOT}/Sources/JoyHarness/Info.plist")"
 VERSION="$(tr -d '[:space:]' < "${PROJECT_ROOT}/Sources/JoyHarness/Resources/VERSION")"
-APP_BUNDLE="${HOME}/.agent-deck/${DISPLAY_NAME}.app"
+APP_BUNDLE="/Applications/${DISPLAY_NAME}.app"
+LEGACY_USER_APP_BUNDLE="${HOME}/.agent-deck/${DISPLAY_NAME}.app"
 APP_CONTENTS="${APP_BUNDLE}/Contents"
 APP_BINARY="${APP_CONTENTS}/MacOS/${APP_NAME}"
 STAGE_ROOT=""
@@ -77,9 +78,21 @@ PLIST
 "${PROJECT_ROOT}/scripts/sign_macos_app.sh" "${STAGED_APP_BUNDLE}" "${BUNDLE_ID}" local
 python3 "${PROJECT_ROOT}/scripts/verify_packaged_app.py" "${STAGED_APP_BUNDLE}"
 "${PROJECT_ROOT}/scripts/stop_joy_harness_instances.sh"
-mkdir -p "${APP_CONTENTS}"
-/usr/bin/rsync -a --delete "${STAGED_CONTENTS}/" "${APP_CONTENTS}/"
-codesign --verify --deep --strict "${APP_BUNDLE}"
+PREVIOUS_APP_BUNDLE="${STAGE_ROOT}/Previous ${DISPLAY_NAME}.app"
+FAILED_APP_BUNDLE="${STAGE_ROOT}/Failed ${DISPLAY_NAME}.app"
+if [[ -e "${APP_BUNDLE}" ]]; then
+  mv "${APP_BUNDLE}" "${PREVIOUS_APP_BUNDLE}"
+fi
+if ! mv "${STAGED_APP_BUNDLE}" "${APP_BUNDLE}"; then
+  [[ ! -e "${PREVIOUS_APP_BUNDLE}" ]] || mv "${PREVIOUS_APP_BUNDLE}" "${APP_BUNDLE}"
+  exit 1
+fi
+if ! codesign --verify --deep --strict "${APP_BUNDLE}"; then
+  mv "${APP_BUNDLE}" "${FAILED_APP_BUNDLE}"
+  [[ ! -e "${PREVIOUS_APP_BUNDLE}" ]] || mv "${PREVIOUS_APP_BUNDLE}" "${APP_BUNDLE}"
+  exit 1
+fi
+rm -rf "${LEGACY_USER_APP_BUNDLE}"
 # Keep the canonical local app out of the quarantine path used by downloaded
 # bundles. The path and designated requirement stay stable across test builds.
 xattr -cr "${APP_BUNDLE}" 2>/dev/null || true

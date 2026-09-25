@@ -12,7 +12,11 @@ struct ControllerArtwork: View {
         return Set(families.flatMap { $0.dashboardArtworkDescriptors().map(\.resource) })
     }
 
-    static var missingResources: Set<String> { resourceNames.subtracting(images.keys) }
+    static var missingResources: Set<String> {
+        var missing = resourceNames.subtracting(images.keys)
+        if xiaomiWordmark == nil { missing.insert("xiaomi-wordmark") }
+        return missing
+    }
 
     private static let images: [String: NSImage] = {
         var result: [String: NSImage] = [:]
@@ -22,6 +26,12 @@ struct ControllerArtwork: View {
             if let url, let image = NSImage(contentsOf: url) { result[name] = image }
         }
         return result
+    }()
+
+    private static let xiaomiWordmark: NSImage? = {
+        let url = Bundle.main.url(forResource: "xiaomi-wordmark", withExtension: "svg")
+            ?? AppResources.bundle.url(forResource: "xiaomi-wordmark", withExtension: "svg")
+        return url.flatMap(NSImage.init(contentsOf:))
     }()
 
     var body: some View {
@@ -48,6 +58,22 @@ struct ControllerArtwork: View {
                             }
                         }
                     }
+                    xiaomiWordmarkOverlay(canvas: canvas)
+                    if let brandMark {
+                        Image(systemName: brandMark.symbolName)
+                            .resizable()
+                            .scaledToFit()
+                            .symbolRenderingMode(.monochrome)
+                            .foregroundStyle(brandMark.color)
+                            .frame(
+                                width: canvas.width * brandMark.widthRatio,
+                                height: canvas.width * brandMark.heightRatio
+                            )
+                            .position(
+                                x: canvas.width * brandMark.center.x,
+                                y: canvas.height * brandMark.center.y
+                            )
+                    }
                     ForEach(highlights) { highlight in
                         marker(highlight, canvas: canvas)
                     }
@@ -61,6 +87,92 @@ struct ControllerArtwork: View {
     private var highlights: [ControllerInputHighlightModel] {
         ControllerInputHighlightModel.layout(for: family, orientation: orientation).values.sorted { $0.input.rawValue < $1.input.rawValue }
     }
+
+    private struct BrandMark {
+        let symbolName: String
+        let center: CGPoint
+        let widthRatio: CGFloat
+        let heightRatio: CGFloat
+        let color: Color
+    }
+
+    private enum XiaomiWordmarkLayout {
+        static let center = CGPoint(x: 0.50, y: 0.9193)
+        static let texturePatchSize = CGSize(width: 0.370, height: 0.021)
+        static let textureSourceOffsetRatio = 0.0293
+        static let wordmarkWidthRatio = 0.335
+        static let wordmarkHeightRatio = 0.056
+    }
+
+    private var brandMark: BrandMark? {
+        guard let homeCenter = ControllerInputHighlightModel.layout(
+            for: family,
+            orientation: orientation
+        )[.home]?.center else { return nil }
+
+        return switch family {
+        case .xbox:
+            BrandMark(
+                symbolName: "xbox.logo",
+                center: homeCenter,
+                widthRatio: 0.042,
+                heightRatio: 0.042,
+                color: Color.white.opacity(0.90)
+            )
+        case .dualSense:
+            BrandMark(
+                symbolName: "playstation.logo",
+                center: homeCenter,
+                widthRatio: 0.034,
+                heightRatio: 0.026,
+                color: Color.black.opacity(0.72)
+            )
+        default:
+            nil
+        }
+    }
+
+    @ViewBuilder
+    private func xiaomiWordmarkOverlay(canvas: CGSize) -> some View {
+        if family == .xiaomiRemote,
+           let remoteArtwork = Self.images["controller-dashboard-xiaomi-remote"] {
+            Image(nsImage: remoteArtwork)
+                .resizable()
+                .scaledToFit()
+                .frame(width: canvas.width, height: canvas.height)
+                .offset(y: canvas.height * XiaomiWordmarkLayout.textureSourceOffsetRatio)
+                .mask {
+                    Rectangle()
+                        .frame(
+                            width: canvas.width * XiaomiWordmarkLayout.texturePatchSize.width,
+                            height: canvas.height * XiaomiWordmarkLayout.texturePatchSize.height
+                        )
+                        .position(
+                            x: canvas.width * XiaomiWordmarkLayout.center.x,
+                            y: canvas.height * XiaomiWordmarkLayout.center.y
+                        )
+                }
+                .accessibilityHidden(true)
+
+            if let wordmark = Self.xiaomiWordmark {
+                Image(nsImage: wordmark)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color.black.opacity(0.60))
+                    .frame(
+                        width: canvas.width * XiaomiWordmarkLayout.wordmarkWidthRatio,
+                        height: canvas.width * XiaomiWordmarkLayout.wordmarkHeightRatio
+                    )
+                    .position(
+                        x: canvas.width * XiaomiWordmarkLayout.center.x,
+                        y: canvas.height * XiaomiWordmarkLayout.center.y
+                    )
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
     private func canvasSize(in available: CGSize) -> CGSize {
         let ratio: CGFloat
         switch family {

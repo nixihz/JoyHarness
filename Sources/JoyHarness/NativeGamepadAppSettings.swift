@@ -71,18 +71,42 @@ struct NativeGamepadApp: Identifiable, Codable, Hashable {
             localizedName: runningApp.localizedName
         )
     }
+
+    func representsSameApplication(as other: NativeGamepadApp) -> Bool {
+        if !bundleIdentifier.isEmpty, !other.bundleIdentifier.isEmpty {
+            return bundleIdentifier.caseInsensitiveCompare(other.bundleIdentifier) == .orderedSame
+        }
+
+        return !appName.isEmpty &&
+            !other.appName.isEmpty &&
+            appName.caseInsensitiveCompare(other.appName) == .orderedSame
+    }
 }
 
 final class NativeGamepadAppSettings: ObservableObject {
     static let storageKey = "nativeGamepadAppSettings.v1"
+    private static let defaultCatalogVersionKey = "\(storageKey).defaultCatalogVersion"
+    private static let defaultCatalogVersion = 3
 
-    static let defaultApps: [NativeGamepadApp] = [
-        NativeGamepadApp(
-            bundleIdentifier: "com.joydsh.desktop",
-            appName: "JoyDSH",
-            isEnabled: true
-        )
+    private static let defaultAppDefinitions: [(app: NativeGamepadApp, introducedInVersion: Int)] = [
+        (
+            NativeGamepadApp(
+                bundleIdentifier: "com.joydsh.desktop",
+                appName: "JoyDSH",
+                isEnabled: true
+            ),
+            1
+        ),
+        (
+            NativeGamepadApp(
+                bundleIdentifier: "com.google.antigravity",
+                appName: "Antigravity",
+                isEnabled: false
+            ),
+            2
+        ),
     ]
+    static let defaultApps = defaultAppDefinitions.map { $0.app }
 
     @Published var autoSwitchEnabled: Bool {
         didSet {
@@ -101,23 +125,40 @@ final class NativeGamepadAppSettings: ObservableObject {
     var onChange: (() -> Void)?
 
     private let userDefaults: UserDefaults
+    private let isApplicationInstalled: (String) -> Bool
+    private var unavailableDefaultApps: [NativeGamepadApp]
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        isApplicationInstalled: @escaping (String) -> Bool = {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+        }
+    ) {
+        let loadedApps = Self.loadApps(
+            from: userDefaults,
+            key: "\(Self.storageKey).apps",
+            isApplicationInstalled: isApplicationInstalled
+        )
         self.userDefaults = userDefaults
+        self.isApplicationInstalled = isApplicationInstalled
+        self.unavailableDefaultApps = loadedApps.unavailableDefaults
         let storedAutoSwitch = userDefaults.object(forKey: "\(Self.storageKey).autoSwitch") as? Bool
         self.autoSwitchEnabled = storedAutoSwitch ?? true
-        self.apps = Self.loadApps(from: userDefaults, key: "\(Self.storageKey).apps")
+        self.apps = loadedApps.visible
     }
 
     func addApp(bundleIdentifier: String, appName: String) {
         let trimmedBundleID = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBundleID.isEmpty || !trimmedName.isEmpty else { return }
+        let incomingApp = NativeGamepadApp(
+            bundleIdentifier: trimmedBundleID,
+            appName: trimmedName
+        )
 
-        if let index = apps.firstIndex(where: {
-            (!trimmedBundleID.isEmpty && $0.bundleIdentifier.caseInsensitiveCompare(trimmedBundleID) == .orderedSame) ||
-            (!trimmedName.isEmpty && $0.appName.caseInsensitiveCompare(trimmedName) == .orderedSame)
-        }) {
+        unavailableDefaultApps.removeAll { $0.representsSameApplication(as: incomingApp) }
+
+        if let index = apps.firstIndex(where: { $0.representsSameApplication(as: incomingApp) }) {
             var updated = apps[index]
             if !trimmedBundleID.isEmpty { updated.bundleIdentifier = trimmedBundleID }
             if !trimmedName.isEmpty { updated.appName = trimmedName }
@@ -159,22 +200,138 @@ final class NativeGamepadAppSettings: ObservableObject {
     }
 
     func resetDefaults() {
+        let loadedDefaults = Self.partitionApps(
+            Self.defaultApps,
+            isApplicationInstalled: isApplicationInstalled
+        )
+        unavailableDefaultApps = loadedDefaults.unavailableDefaults
+        apps = loadedDefaults.visible
         autoSwitchEnabled = true
-        apps = Self.defaultApps
+    }
+
+    func refreshInstalledDefaultApps() {
+        let loadedApps = Self.partitionApps(
+            apps + unavailableDefaultApps,
+            isApplicationInstalled: isApplicationInstalled
+        )
+        guard loadedApps.visible != apps ||
+              loadedApps.unavailableDefaults != unavailableDefaultApps else { return }
+        unavailableDefaultApps = loadedApps.unavailableDefaults
+        apps = loadedApps.visible
+    }
+
+    /// A running app is installed, so its hidden default entry can be shown
+    /// without the LaunchServices lookups of a full refresh. This runs on
+    /// every app activation.
+    func revealDefaultApp(runningWithBundleIdentifier bundleIdentifier: String?) {
+        guard let bundleIdentifier,
+              let index = unavailableDefaultApps.firstIndex(where: {
+                  $0.bundleIdentifier.caseInsensitiveCompare(bundleIdentifier) == .orderedSame
+              }) else { return }
+        let app = unavailableDefaultApps.remove(at: index)
+        apps.append(app)
     }
 
     private func persist() {
         userDefaults.set(autoSwitchEnabled, forKey: "\(Self.storageKey).autoSwitch")
-        if let data = try? JSONEncoder().encode(apps) {
+        if let data = try? JSONEncoder().encode(apps + unavailableDefaultApps) {
             userDefaults.set(data, forKey: "\(Self.storageKey).apps")
         }
     }
 
-    private static func loadApps(from userDefaults: UserDefaults, key: String) -> [NativeGamepadApp] {
+    private struct LoadedApps {
+        let visible: [NativeGamepadApp]
+        let unavailableDefaults: [NativeGamepadApp]
+    }
+
+    private static func loadApps(
+        from userDefaults: UserDefaults,
+        key: String,
+        isApplicationInstalled: (String) -> Bool
+    ) -> LoadedApps {
         guard let data = userDefaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode([NativeGamepadApp].self, from: data) else {
-            return defaultApps
+            userDefaults.set(defaultCatalogVersion, forKey: defaultCatalogVersionKey)
+            return partitionApps(defaultApps, isApplicationInstalled: isApplicationInstalled)
         }
-        return decoded
+
+        var configuredApps = normalizedApps(decoded)
+        let storedCatalogVersion = userDefaults.object(forKey: defaultCatalogVersionKey) as? Int ?? 1
+        if storedCatalogVersion == 2 {
+            // Version 2 enabled Antigravity by default before it gained its
+            // own Harness mappings. Existing development installs need the
+            // same opt-in default as fresh installs.
+            for index in configuredApps.indices where
+                configuredApps[index].bundleIdentifier.caseInsensitiveCompare("com.google.antigravity") == .orderedSame &&
+                configuredApps[index].appName.caseInsensitiveCompare("Antigravity") == .orderedSame {
+                configuredApps[index].isEnabled = false
+            }
+        }
+        if storedCatalogVersion < defaultCatalogVersion {
+            for definition in defaultAppDefinitions where definition.introducedInVersion > storedCatalogVersion {
+                let app = definition.app
+                guard !configuredApps.contains(where: { $0.representsSameApplication(as: app) }) else { continue }
+                configuredApps.append(app)
+            }
+        }
+
+        if storedCatalogVersion < defaultCatalogVersion || configuredApps != decoded {
+            if let migratedData = try? JSONEncoder().encode(configuredApps) {
+                userDefaults.set(migratedData, forKey: key)
+            }
+        }
+
+        if storedCatalogVersion < defaultCatalogVersion {
+            userDefaults.set(defaultCatalogVersion, forKey: defaultCatalogVersionKey)
+        }
+
+        return partitionApps(configuredApps, isApplicationInstalled: isApplicationInstalled)
+    }
+
+    private static func normalizedApps(_ configuredApps: [NativeGamepadApp]) -> [NativeGamepadApp] {
+        var result: [NativeGamepadApp] = []
+
+        for configuredApp in configuredApps {
+            var candidate = configuredApp
+            if candidate.bundleIdentifier.isEmpty,
+               let defaultApp = defaultApps.first(where: { $0.representsSameApplication(as: candidate) }) {
+                candidate.bundleIdentifier = defaultApp.bundleIdentifier
+                if candidate.appName.isEmpty {
+                    candidate.appName = defaultApp.appName
+                }
+            }
+
+            if let existingIndex = result.firstIndex(where: { $0.representsSameApplication(as: candidate) }) {
+                if result[existingIndex].bundleIdentifier.isEmpty {
+                    result[existingIndex].bundleIdentifier = candidate.bundleIdentifier
+                }
+                if result[existingIndex].appName.isEmpty {
+                    result[existingIndex].appName = candidate.appName
+                }
+                continue
+            }
+
+            result.append(candidate)
+        }
+
+        return result
+    }
+
+    private static func partitionApps(
+        _ configuredApps: [NativeGamepadApp],
+        isApplicationInstalled: (String) -> Bool
+    ) -> LoadedApps {
+        let defaultBundleIdentifiers = Set(defaultApps.map { $0.bundleIdentifier.lowercased() })
+        var visible: [NativeGamepadApp] = []
+        var unavailableDefaults: [NativeGamepadApp] = []
+        for app in configuredApps {
+            if defaultBundleIdentifiers.contains(app.bundleIdentifier.lowercased()),
+               !isApplicationInstalled(app.bundleIdentifier) {
+                unavailableDefaults.append(app)
+            } else {
+                visible.append(app)
+            }
+        }
+        return LoadedApps(visible: visible, unavailableDefaults: unavailableDefaults)
     }
 }

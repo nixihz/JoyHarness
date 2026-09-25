@@ -60,6 +60,16 @@ extension SystemKey {
             return SystemKeyEventDescriptor(keyCode: 0x21, flags: pressed ? .maskCommand : [])
         case .browserForward:
             return SystemKeyEventDescriptor(keyCode: 0x1E, flags: pressed ? .maskCommand : [])
+        // Claude desktop's Go menu: Previous/Next Session and Search….
+        case .claudePreviousSession:
+            let flags: CGEventFlags = [.maskCommand, .maskShift]
+            return SystemKeyEventDescriptor(keyCode: 0x21, flags: pressed ? flags : [])
+        case .claudeNextSession:
+            let flags: CGEventFlags = [.maskCommand, .maskShift]
+            return SystemKeyEventDescriptor(keyCode: 0x1E, flags: pressed ? flags : [])
+        case .claudeSearch:
+            let flags: CGEventFlags = [.maskCommand, .maskShift]
+            return SystemKeyEventDescriptor(keyCode: 0x28, flags: pressed ? flags : [])
         }
     }
 }
@@ -159,21 +169,71 @@ private struct PointerDisplay: Sendable {
 }
 
 private struct PointerMotionFrame: Sendable {
-    let delta: CGPoint
-    let scrolling: Bool
+    let pointerDelta: CGPoint
+    let scrollDelta: CGPoint
     let pressedMouseButtons: Set<MouseButton>
     let displays: [PointerDisplay]
 }
 
-private final class PointerMotionEngine: @unchecked Sendable {
-    private let lock = NSLock()
-    private var targetVelocity = CGPoint.zero
+/// Target velocities for the two stick-driven outputs, which can run at the same time.
+struct StickMotionVelocities: Equatable, Sendable {
+    var pointer: CGPoint
+    var scroll: CGPoint
+}
+
+/// One smoothed motion output (pointer or scroll) with its own sub-pixel remainder.
+private struct MotionChannel {
+    var targetVelocity = CGPoint.zero
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
+
+    var isIdle: Bool {
+        targetVelocity == .zero && hypot(smoothedVelocity.x, smoothedVelocity.y) < 1
+    }
+
+    mutating func reset() {
+        smoothedVelocity = .zero
+        fractionalDelta = .zero
+    }
+
+    mutating func advance(deltaTime: CGFloat) -> CGPoint {
+        if isIdle {
+            reset()
+            return .zero
+        }
+        let responseTime = targetVelocity == .zero
+            ? MouseBridge.pointerDecelerationResponseTime
+            : MouseBridge.pointerAccelerationResponseTime
+        let smoothing = MouseBridge.smoothingFactor(
+            deltaTime: deltaTime,
+            responseTime: responseTime
+        )
+        smoothedVelocity.x += (targetVelocity.x - smoothedVelocity.x) * smoothing
+        smoothedVelocity.y += (targetVelocity.y - smoothedVelocity.y) * smoothing
+
+        let accumulatedDelta = CGPoint(
+            x: fractionalDelta.x + smoothedVelocity.x * deltaTime,
+            y: fractionalDelta.y + smoothedVelocity.y * deltaTime
+        )
+        let wholeDelta = CGPoint(
+            x: accumulatedDelta.x.rounded(.towardZero),
+            y: accumulatedDelta.y.rounded(.towardZero)
+        )
+        fractionalDelta = CGPoint(
+            x: accumulatedDelta.x - wholeDelta.x,
+            y: accumulatedDelta.y - wholeDelta.y
+        )
+        return wholeDelta
+    }
+}
+
+private final class PointerMotionEngine: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pointer = MotionChannel()
+    private var scroll = MotionChannel()
     private var timeAccumulator = MotionTimeAccumulator()
     private var clockWatchdog = PointerMotionClockWatchdog()
     private var lastTickTime: TimeInterval?
-    private var scrolling = false
     private var accessibilityGranted = false
     private var pressedMouseButtons: Set<MouseButton> = []
     private var displays: [PointerDisplay] = []
@@ -188,20 +248,18 @@ private final class PointerMotionEngine: @unchecked Sendable {
 
     func stop() {
         lock.lock()
-        targetVelocity = .zero
+        pointer.targetVelocity = .zero
+        scroll.targetVelocity = .zero
         lastTickTime = nil
         clockWatchdog.reset()
         resetMotionLocked()
         lock.unlock()
     }
 
-    func setTargetVelocity(_ velocity: CGPoint, scrolling: Bool) {
+    func setTargetVelocities(_ velocities: StickMotionVelocities) {
         lock.lock()
-        if scrolling != self.scrolling {
-            resetMotionLocked()
-            self.scrolling = scrolling
-        }
-        targetVelocity = velocity
+        pointer.targetVelocity = velocities.pointer
+        scroll.targetVelocity = velocities.scroll
         lock.unlock()
     }
 
@@ -244,15 +302,15 @@ private final class PointerMotionEngine: @unchecked Sendable {
         frameDuration: TimeInterval
     ) -> CGDirectDisplayID? {
         guard let frame = advance(at: now, frameDuration: frameDuration) else { return nil }
-        if frame.scrolling {
-            MouseBridge.postScroll(delta: frame.delta)
-            return nil
+        if frame.scrollDelta != .zero {
+            MouseBridge.postScroll(delta: frame.scrollDelta)
         }
-        guard let location = MouseBridge.postPointerMove(
-            delta: frame.delta,
-            pressedMouseButtons: frame.pressedMouseButtons,
-            displays: frame.displays.map(\.bounds)
-        ) else { return nil }
+        guard frame.pointerDelta != .zero,
+              let location = MouseBridge.postPointerMove(
+                  delta: frame.pointerDelta,
+                  pressedMouseButtons: frame.pressedMouseButtons,
+                  displays: frame.displays.map(\.bounds)
+              ) else { return nil }
         return frame.displays.first(where: { $0.bounds.contains(location) })?.id
     }
 
@@ -273,7 +331,7 @@ private final class PointerMotionEngine: @unchecked Sendable {
             return nil
         }
 
-        if targetVelocity == .zero, hypot(smoothedVelocity.x, smoothedVelocity.y) < 1 {
+        if pointer.isIdle, scroll.isIdle {
             resetMotionLocked()
             return nil
         }
@@ -282,40 +340,20 @@ private final class PointerMotionEngine: @unchecked Sendable {
             elapsed: now - previousTick,
             frameDuration: frameDuration
         ))
-        let responseTime = targetVelocity == .zero
-            ? MouseBridge.pointerDecelerationResponseTime
-            : MouseBridge.pointerAccelerationResponseTime
-        let smoothing = MouseBridge.smoothingFactor(
-            deltaTime: deltaTime,
-            responseTime: responseTime
-        )
-        smoothedVelocity.x += (targetVelocity.x - smoothedVelocity.x) * smoothing
-        smoothedVelocity.y += (targetVelocity.y - smoothedVelocity.y) * smoothing
-
-        let accumulatedDelta = CGPoint(
-            x: fractionalDelta.x + smoothedVelocity.x * deltaTime,
-            y: fractionalDelta.y + smoothedVelocity.y * deltaTime
-        )
-        let wholeDelta = CGPoint(
-            x: accumulatedDelta.x.rounded(.towardZero),
-            y: accumulatedDelta.y.rounded(.towardZero)
-        )
-        fractionalDelta = CGPoint(
-            x: accumulatedDelta.x - wholeDelta.x,
-            y: accumulatedDelta.y - wholeDelta.y
-        )
-        guard wholeDelta != .zero else { return nil }
+        let pointerDelta = pointer.advance(deltaTime: deltaTime)
+        let scrollDelta = scroll.advance(deltaTime: deltaTime)
+        guard pointerDelta != .zero || scrollDelta != .zero else { return nil }
         return PointerMotionFrame(
-            delta: wholeDelta,
-            scrolling: scrolling,
+            pointerDelta: pointerDelta,
+            scrollDelta: scrollDelta,
             pressedMouseButtons: pressedMouseButtons,
             displays: displays
         )
     }
 
     private func resetMotionLocked() {
-        smoothedVelocity = .zero
-        fractionalDelta = .zero
+        pointer.reset()
+        scroll.reset()
         timeAccumulator.reset()
     }
 }
@@ -324,6 +362,7 @@ private final class PointerMotionEngine: @unchecked Sendable {
 final class MouseBridge: NSObject {
     private var fractionalTouchDelta = CGPoint.zero
     private var stickInput = CGPoint.zero
+    private var scrollStickInput = CGPoint.zero
     private var scrolling = false
     private var speedBoostActive = false
     private var precisionActive = false
@@ -409,6 +448,7 @@ final class MouseBridge: NSObject {
         pressedMouseButtons.removeAll()
         pressedSystemKeys.removeAll()
         stickInput = .zero
+        scrollStickInput = .zero
         motionEngine.setPressedMouseButtons([])
         motionEngine.stop()
         resetMotion()
@@ -420,6 +460,12 @@ final class MouseBridge: NSObject {
             self.scrolling = scrolling
         }
         stickInput = CGPoint(x: CGFloat(x), y: CGFloat(y))
+        updateTargetVelocity()
+    }
+
+    /// Dedicated scroll stick (the right stick); scrolls without holding LT.
+    func updateScrollStick(x: Float, y: Float) {
+        scrollStickInput = CGPoint(x: CGFloat(x), y: CGFloat(y))
         updateTargetVelocity()
     }
 
@@ -645,6 +691,32 @@ final class MouseBridge: NSObject {
         return CGPoint(
             x: x / magnitude * speed * polarity,
             y: y / magnitude * speed * polarity
+        )
+    }
+
+    /// The right stick always scrolls; the left stick moves the pointer, or
+    /// scrolls instead while LT is held (the only scroll path on a single Joy-Con).
+    nonisolated static func stickMotionVelocities(
+        leftStick: CGPoint,
+        leftStickScrolls: Bool,
+        scrollStick: CGPoint,
+        pointerSpeedMultiplier: CGFloat,
+        scrollDirection: ScrollDirectionPreference
+    ) -> StickMotionVelocities {
+        let scrollInput = leftStickScrolls
+            ? CGPoint(x: leftStick.x + scrollStick.x, y: leftStick.y + scrollStick.y)
+            : scrollStick
+        return StickMotionVelocities(
+            pointer: leftStickScrolls ? .zero : pointerVelocity(
+                x: leftStick.x,
+                y: leftStick.y,
+                speedMultiplier: pointerSpeedMultiplier
+            ),
+            scroll: scrollVelocity(
+                x: scrollInput.x,
+                y: scrollInput.y,
+                direction: scrollDirection
+            )
         )
     }
 
@@ -984,25 +1056,17 @@ final class MouseBridge: NSObject {
     }
 
     private func updateTargetVelocity() {
-        let targetVelocity: CGPoint
-        if scrolling {
-            targetVelocity = Self.scrollVelocity(
-                x: stickInput.x,
-                y: stickInput.y,
-                direction: scrollDirection
-            )
-        } else {
-            targetVelocity = Self.pointerVelocity(
-                x: stickInput.x,
-                y: stickInput.y,
-                speedMultiplier: Self.pointerSpeedMultiplier(
-                    precisionActive: precisionActive,
-                    speedBoostActive: speedBoostActive,
-                    sensitivities: pointerSensitivities
-                )
-            )
-        }
-        motionEngine.setTargetVelocity(targetVelocity, scrolling: scrolling)
+        motionEngine.setTargetVelocities(Self.stickMotionVelocities(
+            leftStick: stickInput,
+            leftStickScrolls: scrolling,
+            scrollStick: scrollStickInput,
+            pointerSpeedMultiplier: Self.pointerSpeedMultiplier(
+                precisionActive: precisionActive,
+                speedBoostActive: speedBoostActive,
+                sensitivities: pointerSensitivities
+            ),
+            scrollDirection: scrollDirection
+        ))
     }
 
     private func requestAccessibilityPermission() {

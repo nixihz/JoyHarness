@@ -5,7 +5,12 @@ import Foundation
 
 protocol RemoteMicrophonePlayback: AnyObject {
     func schedule(_ pcm: [Int16], completion: @escaping () -> Void) -> Bool
+    func recoverFromInterruption() -> Bool
     func stop()
+}
+
+extension RemoteMicrophonePlayback {
+    func recoverFromInterruption() -> Bool { false }
 }
 
 /// A dedicated loopback output, never the user's speakers. Codex (or another
@@ -13,13 +18,17 @@ protocol RemoteMicrophonePlayback: AnyObject {
 final class RemoteMicrophoneOutput {
     static let deviceName = "Joy Harness 遥控器麦克风"
     static let deviceUID = "tech.keli.joyharness.microphone.device"
+    private static let maximumQueuedSamples = 8_000
+    private static let maximumScheduledBuffers = 4
     private let makePlayback: () throws -> RemoteMicrophonePlayback
     private let streamEndTimeout: TimeInterval
     private var playback: RemoteMicrophonePlayback?
     private var generation = 0
     private var buttonPressed = false
     private var buttonGeneration: Int?
-    private var queuedSamples = 0
+    private var bufferedPCM: [[Int16]] = []
+    private var scheduledBufferCount = 0
+    private(set) var queuedSamples = 0
     private var accepting = false
     private var draining = false
     private var drainCompletions: [() -> Void] = []
@@ -27,6 +36,7 @@ final class RemoteMicrophoneOutput {
     private var drainTimeout: DispatchWorkItem?
     private var drainCompletion: DispatchWorkItem?
     private(set) var deliveredSamples = 0
+    private(set) var droppedSamples = 0
     private(set) var failure: String?
 
     init(
@@ -52,14 +62,29 @@ final class RemoteMicrophoneOutput {
         guard result == noErr else { throw outputError("无法选择遥控器语音输入（\(result)）") }
     }
 
+    func warmUp() {
+        guard playback == nil, !accepting, !draining else { return }
+        do {
+            playback = try makePlayback()
+            failure = nil
+            print("[agent-deck] Xiaomi voice output prepared")
+        } catch {
+            failure = error.localizedDescription
+            print("[agent-deck] Xiaomi voice output: \(error.localizedDescription)")
+        }
+    }
+
     func begin() {
-        stop()
+        if accepting || draining || queuedSamples > 0 || scheduledBufferCount > 0 || !drainCompletions.isEmpty {
+            stop()
+        }
         generation += 1
         queuedSamples = 0
         deliveredSamples = 0
+        droppedSamples = 0
         failure = nil
         do {
-            playback = try makePlayback()
+            if playback == nil { playback = try makePlayback() }
             accepting = true
             if buttonPressed, buttonGeneration == nil { buttonGeneration = generation }
         } catch {
@@ -69,27 +94,58 @@ final class RemoteMicrophoneOutput {
     }
 
     func append(_ pcm: [Int16]) {
-        guard accepting, let playback, !pcm.isEmpty else { return }
+        guard accepting, playback != nil, !pcm.isEmpty else { return }
         // Bound latency; stale speech must never spill into the next recording.
-        guard queuedSamples + pcm.count <= 8_000 else {
-            stop()
-            failure = "语音输出积压，已停止本次录音"
-            print("[agent-deck] Xiaomi voice output backlog exceeded")
-            return
+        var retained = pcm
+        var overflow = max(0, queuedSamples + retained.count - Self.maximumQueuedSamples)
+        let wasTrimming = droppedSamples > 0
+        while overflow > 0, !bufferedPCM.isEmpty {
+            let count = min(overflow, bufferedPCM[0].count)
+            bufferedPCM[0].removeFirst(count)
+            if bufferedPCM[0].isEmpty { bufferedPCM.removeFirst() }
+            queuedSamples -= count
+            droppedSamples += count
+            overflow -= count
         }
-        queuedSamples += pcm.count
-        let current = generation
-        let scheduled = playback.schedule(pcm) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self, self.generation == current else { return }
-                self.queuedSamples -= pcm.count
-                self.deliveredSamples += pcm.count
-                self.completeDrainIfReady()
+        if overflow > 0 {
+            let count = min(overflow, retained.count)
+            retained.removeFirst(count)
+            droppedSamples += count
+        }
+        if !wasTrimming, droppedSamples > 0 {
+            print("[agent-deck] Xiaomi voice output backlog trimming started pending=\(queuedSamples)")
+        }
+        guard !retained.isEmpty else { return }
+        bufferedPCM.append(retained)
+        queuedSamples += retained.count
+        scheduleBufferedAudio()
+    }
+
+    private func scheduleBufferedAudio() {
+        guard let playback else { return }
+        while scheduledBufferCount < Self.maximumScheduledBuffers, !bufferedPCM.isEmpty {
+            let pcm = bufferedPCM.removeFirst()
+            let current = generation
+            scheduledBufferCount += 1
+            let completion = { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self, self.generation == current else { return }
+                    self.scheduledBufferCount -= 1
+                    self.queuedSamples -= pcm.count
+                    self.deliveredSamples += pcm.count
+                    self.scheduleBufferedAudio()
+                    self.completeDrainIfReady()
+                }
             }
-        }
-        if !scheduled {
-            stop()
-            failure = "无法写入遥控器音频"
+            let scheduled = playback.schedule(pcm, completion: completion)
+            guard !scheduled else { continue }
+            guard playback.recoverFromInterruption(),
+                  playback.schedule(pcm, completion: completion) else {
+                stop()
+                failure = "无法写入遥控器音频"
+                return
+            }
+            print("[agent-deck] Xiaomi voice output resumed after audio device reconfiguration")
         }
     }
 
@@ -99,7 +155,10 @@ final class RemoteMicrophoneOutput {
         let releasedGeneration = buttonGeneration
         buttonPressed = false
         buttonGeneration = nil
-        guard playback != nil, releasedGeneration == generation else { completion(); return }
+        guard playback != nil, releasedGeneration == generation, accepting || draining else {
+            completion()
+            return
+        }
         drainCompletions.append(completion)
         guard accepting, releaseTimeout == nil else { return }
         let current = generation
@@ -144,8 +203,8 @@ final class RemoteMicrophoneOutput {
         let current = generation
         let completion = DispatchWorkItem { [weak self] in
             guard let self, self.generation == current else { return }
-            print("[agent-deck] Xiaomi voice output played_samples=\(self.deliveredSamples) pending=0")
-            self.stop()
+            print("[agent-deck] Xiaomi voice output played_samples=\(self.deliveredSamples) dropped_samples=\(self.droppedSamples) pending=0")
+            self.finishSession()
         }
         drainCompletion = completion
         // Allow the virtual input to consume the final output buffers.
@@ -155,20 +214,26 @@ final class RemoteMicrophoneOutput {
     func prepareForPress() {
         if draining || !drainCompletions.isEmpty { stop() }
         buttonPressed = true
-        buttonGeneration = playback == nil ? nil : generation
+        buttonGeneration = accepting || draining ? generation : nil
     }
 
     func stop() {
-        accepting = false
         generation += 1
+        playback?.stop()
+        playback = nil
+        finishSession()
+    }
+
+    private func finishSession() {
+        accepting = false
         releaseTimeout?.cancel()
         releaseTimeout = nil
         drainTimeout?.cancel()
         drainTimeout = nil
         drainCompletion?.cancel()
         drainCompletion = nil
-        playback?.stop()
-        playback = nil
+        bufferedPCM.removeAll()
+        scheduledBufferCount = 0
         queuedSamples = 0
         draining = false
         let completions = drainCompletions
@@ -220,6 +285,15 @@ private final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback 
     private let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
 
     init() throws {
+        try selectOutputDevice()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        engine.prepare()
+        try engine.start()
+        player.play()
+    }
+
+    private func selectOutputDevice() throws {
         guard var device = RemoteMicrophoneOutput.deviceID() else {
             throw RemoteMicrophoneOutput.outputError("请在设置中启用 Joy Harness 麦克风组件")
         }
@@ -227,11 +301,6 @@ private final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback 
         let result = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
             kAudioUnitScope_Global, 0, &device, UInt32(MemoryLayout<AudioDeviceID>.size))
         guard result == noErr else { throw RemoteMicrophoneOutput.outputError("无法打开 Joy Harness 麦克风（\(result)）") }
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
-        engine.prepare()
-        try engine.start()
-        player.play()
     }
 
     func schedule(_ pcm: [Int16], completion: @escaping () -> Void) -> Bool {
@@ -242,6 +311,23 @@ private final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback 
         for (index, value) in pcm.enumerated() { samples[index] = Float(value) / 32768 }
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in completion() }
         return true
+    }
+
+    func recoverFromInterruption() -> Bool {
+        do {
+            if !engine.isRunning {
+                try selectOutputDevice()
+                engine.prepare()
+                try engine.start()
+                player.play()
+            } else if !player.isPlaying {
+                player.play()
+            }
+            return engine.isRunning
+        } catch {
+            print("[agent-deck] Xiaomi voice output resume failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     func stop() {

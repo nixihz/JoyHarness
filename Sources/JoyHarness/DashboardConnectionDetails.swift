@@ -5,7 +5,7 @@ struct DashboardConnectionDetails: View {
     @ObservedObject var mappingStore: ControllerMappingStore
 
     private var presentation: DashboardPresentation {
-        DashboardPresentation(status: store.status, freshness: store.freshness, orientation: mappingStore.joyConOrientation)
+        DashboardPresentation(status: store.status, freshness: store.freshness, mappingStore: mappingStore)
     }
     private var status: DashboardStatus { store.status }
 

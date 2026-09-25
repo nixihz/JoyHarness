@@ -110,10 +110,47 @@ struct ConnectedControllerDescriptor: Identifiable, Equatable {
     let name: String
     let family: ControllerFamily
     let source: ControllerConnectionSource
+    /// Inputs this device can report. A Joy-Con composition may expose fewer
+    /// than its family supports, for example when a stick is unreadable.
+    let availableInputs: Set<ControllerInput>
+
+    init(
+        id: String,
+        name: String,
+        family: ControllerFamily,
+        source: ControllerConnectionSource,
+        availableInputs: Set<ControllerInput>? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.family = family
+        self.source = source
+        let supported = ControllerInput.availableInputs(for: family)
+        self.availableInputs = availableInputs?.intersection(supported) ?? supported
+    }
 
     var displayName: String {
         if name.isEmpty { return family.displayName }
         return name
+    }
+
+    /// Picker titles keyed by device ID. Devices with the same name, such as
+    /// two identical gamepads, are numbered in list order.
+    static func pickerTitles(for devices: [ConnectedControllerDescriptor]) -> [String: String] {
+        let counts = Dictionary(devices.map { ($0.displayName, 1) }, uniquingKeysWith: +)
+        var ordinals: [String: Int] = [:]
+        var titles: [String: String] = [:]
+        for device in devices {
+            let name = device.displayName
+            guard counts[name, default: 0] > 1 else {
+                titles[device.id] = name
+                continue
+            }
+            let ordinal = ordinals[name, default: 0] + 1
+            ordinals[name] = ordinal
+            titles[device.id] = "\(name) \(ordinal)"
+        }
+        return titles
     }
 }
 

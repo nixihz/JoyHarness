@@ -9,6 +9,28 @@
 
 ## [Unreleased]
 
+### 新增
+- 新增按下 PS/Home 即时呼出的 Harness 切换浮层，支持 Codex、Claude、Cursor 和 Antigravity 的独立映射、应用关联及唯一前台应用匹配。浮层宽度随已启用的 Harness 数量扩展，macOS 26 上使用 Liquid Glass 玻璃背景。卡片显示关联应用的真实图标；再次按 PS/Home 或 B、点击任意位置、切换应用或桌面空间都会关闭浮层且不切换 Harness。末尾的“主窗口”卡片可直接用手柄显示 Joy Harness 主窗口，关闭后也能重新打开。
+- 原生模式应用列表新增 Antigravity，默认关闭以保留其 Harness 映射；旧开发版的默认开启状态会迁移为关闭。默认应用仅在已安装时列出。
+- 新增 Claude Harness 默认映射：L1/R1 切换到上一个/下一个 Claude 会话（`⌘⇧[` / `⌘⇧]`），RT 打开 Claude 搜索（`⌘⇧K`）。已保存的 Claude 配置中这些键若仍为“不执行操作”，会一次性补上新默认值。
+- Dashboard 手柄图示显示 Xbox、PlayStation 品牌标识和小米字标。
+- 连接多个设备时，Dashboard 顶部显示设备切换器，并自动切换到最近按下按键的设备；同名设备会自动编号。切换器只影响展示，与设置中的“设置设备”选择器相互独立。
+
+### 变更
+- 游戏手柄的 PS/Home 在映射模式下改为呼出 Harness 切换浮层；原生手柄模式下按 PS/Home 返回映射模式，与小米遥控器主页键一致。
+- 安装和本地测试构建改为写入 `/Applications/Joy Harness.app`，并移除旧的 `~/.agent-deck/Joy Harness.app` 副本。
+- 右摇杆在所有 Harness 中直接滚动，无需按住 LT；速度和方向与 LT + 左摇杆相同，并可与左摇杆移动鼠标同时进行。LT + 左摇杆滚动继续保留，供单只 Joy-Con 使用；LT + 右摇杆四个方向仍触发各自的映射。Codex 径向输入改为只由十字键左/下/右发送。
+
+### 修复
+- 当前映射配置页选中小米遥控器时仍保持 DualSense R2 自适应阻力，避免重复挂载手柄，并支持 Joy Harness 在后台时通过蓝牙恢复扳机效果。
+- 小米遥控器语音服务就绪时预热虚拟麦克风，并在连续语音会话间复用 CoreAudio 输出引擎，避免反复重建设备链路造成大概率无声。
+- Harness 切换浮层显示期间释放已激活的映射输出，并阻止非 Codex Harness 发送 Codex Micro 按下或径向输入。
+- 通过 USB 和蓝牙 HID 输入报告识别 DualSense PS 键。
+- 每次按下 PS 都能呼出 Harness 切换浮层：DualSense 持续发送的输入报告不再推迟 HID 松开判定；同一次按压经 GameController 与 HID 两路到达时只计一次，即使其中一路延迟或丢失松开事件；GameController 尚未列出手柄时也能响应。
+- 呼出 Harness 切换浮层的手柄断开时自动关闭浮层，并在状态文件中记录新选中的 Harness。
+- 展示其他设备期间，已连接的 Joy-Con 保持自己的握持方向、摇杆和电量读数。
+- 主窗口关闭后点击 Dock 图标可重新打开；此前点击没有反应。
+
 ## [0.7.0] - 2026-09-21
 
 ### 新增

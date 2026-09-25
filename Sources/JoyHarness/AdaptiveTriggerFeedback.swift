@@ -75,8 +75,11 @@ final class AdaptiveTriggerFeedback {
         })
     }
 
+    func startHIDInputMonitoring() {
+        _ = hidOutput.connect()
+    }
+
     func attach(_ controller: GCController?) {
-        hidOutput.disconnect()
         trigger?.setModeOff()
         trigger = nil
         pressState = RightTriggerPressState()
@@ -84,8 +87,9 @@ final class AdaptiveTriggerFeedback {
         guard let dualSense = controller?.extendedGamepad as? GCDualSenseGamepad else { return }
         let rightTrigger = dualSense.rightTrigger
         trigger = rightTrigger
-        _ = hidOutput.connectUSB()
+        _ = hidOutput.connect()
         applyGameControllerEffect()
+        applyBackgroundEffectIfNeeded()
         print("[agent-deck] DualSense R2 adaptive feedback ready")
     }
 

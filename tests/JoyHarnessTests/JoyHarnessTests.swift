@@ -1229,6 +1229,37 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func dualSenseBluetoothWeaponReportUsesWirelessEnvelopeAndCRC() {
+        let report = DualSenseBluetoothOutputReport.weapon(
+            startPosition: 0.35,
+            endPosition: 0.72,
+            strength: 0.90
+        )
+
+        #expect(report.count == 78)
+        #expect(Array(report[0...3]) == [0x31, 0x00, 0x10, 0x04])
+        #expect(Array(report[13...16]) == [0x25, 0x48, 0x00, 0x06])
+        #expect(Array(report[74...77]) == [0x46, 0x96, 0x8c, 0xfc])
+    }
+
+    @Test
+    func dualSenseBluetoothOffReportClearsRightTriggerWithValidCRC() {
+        let report = DualSenseBluetoothOutputReport.off()
+
+        #expect(report.count == 78)
+        #expect(Array(report[0...3]) == [0x31, 0x00, 0x10, 0x04])
+        #expect(report[13] == 0x05)
+        #expect(Array(report[74...77]) == [0x15, 0x09, 0x99, 0xac])
+    }
+
+    @Test
+    func dualSenseHIDTransportRecognizesBluetoothAndUSB() {
+        #expect(DualSenseHIDTransport(ioKitValue: "Bluetooth") == .bluetooth)
+        #expect(DualSenseHIDTransport(ioKitValue: "USB") == .usb)
+        #expect(DualSenseHIDTransport(ioKitValue: "Audio") == nil)
+    }
+
+    @Test
     func fastAdaptiveTriggerPressSkipsTheLightPulse() {
         var state = RightTriggerPressState()
         let feedback = state.update(value: 0.90)
@@ -2406,15 +2437,47 @@ struct JoyHarnessTests {
         }
 
         bridge.applyJoyConSnapshot(JoyConInputSnapshot(
-            buttons: [:],
+            buttons: [.dpadRight: true],
             primaryStick: .neutral,
-            secondaryStick: JoyConStick(x: 0.6, y: -0.8)
+            secondaryStick: .neutral
         ))
         bridge.resetInputState()
 
         #expect(joystickEvents.first?.distance == 1)
         #expect(joystickEvents.last?.angle == 0)
         #expect(joystickEvents.last?.distance == 0)
+    }
+
+    @Test
+    func harnessSwitcherConsumesJoyConLeftStickBeforePointerMotion() {
+        let bridge = ButtonBridge()
+        var switcherPresented = true
+        var switcherSamples: [JoyConStick] = []
+        var pointerSamples: [JoyConStick] = []
+        bridge.overlayStickHandler = { x, y in
+            switcherSamples.append(JoyConStick(x: x, y: y))
+            return switcherPresented
+        }
+        bridge.leftStickHandler = { x, y, _ in
+            pointerSamples.append(JoyConStick(x: x, y: y))
+        }
+
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [:],
+            primaryStick: JoyConStick(x: 0.8, y: 0.1),
+            secondaryStick: .neutral
+        ))
+        #expect(switcherSamples == [JoyConStick(x: 0.8, y: 0.1)])
+        #expect(pointerSamples.isEmpty)
+
+        switcherPresented = false
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [:],
+            primaryStick: JoyConStick(x: 0.2, y: -0.3),
+            secondaryStick: .neutral
+        ))
+        #expect(switcherSamples.last == JoyConStick(x: 0.2, y: -0.3))
+        #expect(pointerSamples == [JoyConStick(x: 0.2, y: -0.3)])
     }
 
     @Test
@@ -2543,10 +2606,16 @@ struct JoyHarnessTests {
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = ControllerMappingStore(userDefaults: defaults)
-        store.setControllerFamily(.joyConLeft)
 
-        store.setAvailableInputs([])
+        store.setConnectedDevices([ConnectedControllerDescriptor(
+            id: "joycon",
+            name: "",
+            family: .joyConLeft,
+            source: .gameController,
+            availableInputs: []
+        )])
 
+        #expect(store.controllerFamily == .joyConLeft)
         #expect(store.availableInputs.isEmpty)
     }
 
@@ -2783,13 +2852,389 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func nativeGamepadAppSettingsIncludesJoyDSHByDefault() {
-        let settings = NativeGamepadAppSettings(userDefaults: UserDefaults(suiteName: "JoyHarnessTests.\(UUID().uuidString)")!)
+    func nativeGamepadAppSettingsIncludesOnlyInstalledDefaultApps() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+
         #expect(settings.autoSwitchEnabled == true)
-        #expect(settings.apps.contains { $0.appName == "JoyDSH" && $0.bundleIdentifier == "com.joydsh.desktop" })
-        #expect(settings.matches(bundleIdentifier: "com.joydsh.desktop", localizedName: "JoyDSH"))
-        #expect(settings.matches(bundleIdentifier: "COM.JOYDSH.DESKTOP", localizedName: nil))
-        #expect(settings.matches(bundleIdentifier: nil, localizedName: "joydsh"))
+        #expect(settings.apps.map(\.bundleIdentifier) == ["com.google.antigravity"])
+        #expect(settings.apps.first?.appName == "Antigravity")
+        #expect(settings.apps.first?.isEnabled == false)
+        #expect(!settings.matches(bundleIdentifier: "COM.GOOGLE.ANTIGRAVITY", localizedName: nil))
+        #expect(!settings.matches(bundleIdentifier: "com.joydsh.desktop", localizedName: "JoyDSH"))
+
+        settings.setAppEnabled(id: settings.apps[0].id, isEnabled: true)
+        #expect(settings.matches(bundleIdentifier: "COM.GOOGLE.ANTIGRAVITY", localizedName: nil))
+    }
+
+    @Test
+    func nativeGamepadAppSettingsDisablesOldAntigravityDefaultOnce() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(2, forKey: "\(NativeGamepadAppSettings.storageKey).defaultCatalogVersion")
+        defaults.set(
+            try JSONEncoder().encode([NativeGamepadApp(
+                bundleIdentifier: "com.google.antigravity",
+                appName: "Antigravity",
+                isEnabled: true
+            )]),
+            forKey: "\(NativeGamepadAppSettings.storageKey).apps"
+        )
+
+        let migrated = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in true }
+        )
+        let antigravity = try #require(migrated.apps.first {
+            $0.bundleIdentifier == "com.google.antigravity"
+        })
+        #expect(!antigravity.isEnabled)
+
+        migrated.setAppEnabled(id: antigravity.id, isEnabled: true)
+        let reloaded = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in true }
+        )
+        #expect(reloaded.matches(bundleIdentifier: "com.google.antigravity", localizedName: nil))
+    }
+
+    @Test
+    func nativeGamepadAppSettingsOmitsDefaultsWhenNoneAreInstalled() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in false }
+        )
+
+        #expect(settings.apps.isEmpty)
+        #expect(!settings.matches(bundleIdentifier: "com.google.antigravity", localizedName: "Antigravity"))
+        #expect(!settings.matches(bundleIdentifier: "com.joydsh.desktop", localizedName: "JoyDSH"))
+    }
+
+    @Test
+    func nativeGamepadAppSettingsResetRechecksInstalledDefaultApps() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var installedBundleIdentifiers: Set<String> = ["com.joydsh.desktop"]
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { installedBundleIdentifiers.contains($0) }
+        )
+
+        #expect(settings.apps.map(\.bundleIdentifier) == ["com.joydsh.desktop"])
+
+        installedBundleIdentifiers = ["com.google.antigravity"]
+        settings.resetDefaults()
+
+        #expect(settings.apps.map(\.bundleIdentifier) == ["com.google.antigravity"])
+    }
+
+    @Test
+    func nativeGamepadAppSettingsRefreshesInstallationChangesAndKeepsCustomApps() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var installedBundleIdentifiers: Set<String> = ["com.joydsh.desktop"]
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { installedBundleIdentifiers.contains($0) }
+        )
+        settings.addApp(bundleIdentifier: "com.example.game", appName: "Example Game")
+        let customAppID = try #require(
+            settings.apps.first { $0.bundleIdentifier == "com.example.game" }?.id
+        )
+        settings.setAppEnabled(id: customAppID, isEnabled: false)
+
+        installedBundleIdentifiers = ["com.google.antigravity"]
+        settings.refreshInstalledDefaultApps()
+
+        #expect(settings.apps.map(\.bundleIdentifier) == [
+            "com.example.game",
+            "com.google.antigravity",
+        ])
+        #expect(settings.apps.first?.isEnabled == false)
+
+        installedBundleIdentifiers = []
+        settings.refreshInstalledDefaultApps()
+
+        #expect(settings.apps.map(\.bundleIdentifier) == ["com.example.game"])
+    }
+
+    @Test
+    func nativeGamepadAppSettingsRevealsRunningDefaultAppWithoutInstallLookup() {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var installLookups = 0
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in
+                installLookups += 1
+                return false
+            }
+        )
+        settings.addApp(bundleIdentifier: "com.example.game", appName: "Example Game")
+        installLookups = 0
+
+        settings.revealDefaultApp(runningWithBundleIdentifier: "com.example.game")
+        settings.revealDefaultApp(runningWithBundleIdentifier: nil)
+        #expect(settings.apps.map(\.bundleIdentifier) == ["com.example.game"])
+        #expect(!settings.matches(bundleIdentifier: "com.google.antigravity", localizedName: nil))
+
+        settings.revealDefaultApp(runningWithBundleIdentifier: "COM.GOOGLE.ANTIGRAVITY")
+
+        #expect(settings.apps.map(\.bundleIdentifier) == [
+            "com.example.game",
+            "com.google.antigravity",
+        ])
+        #expect(!settings.matches(bundleIdentifier: "com.google.antigravity", localizedName: nil))
+        #expect(installLookups == 0)
+
+        let reloaded = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in true }
+        )
+        #expect(reloaded.apps.map(\.bundleIdentifier) == [
+            "com.example.game",
+            "com.google.antigravity",
+            "com.joydsh.desktop",
+        ])
+    }
+
+    @Test
+    func nativeGamepadAppSettingsMigratesStoredDefaultsAndKeepsCustomApps() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storedApps = [
+            NativeGamepadApp(
+                bundleIdentifier: "com.joydsh.desktop",
+                appName: "JoyDSH"
+            ),
+            NativeGamepadApp(
+                bundleIdentifier: "com.google.Chrome",
+                appName: "Google Chrome",
+                isEnabled: false
+            ),
+        ]
+        defaults.set(
+            try JSONEncoder().encode(storedApps),
+            forKey: "\(NativeGamepadAppSettings.storageKey).apps"
+        )
+
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+
+        #expect(settings.apps.map(\.bundleIdentifier) == [
+            "com.google.Chrome",
+            "com.google.antigravity",
+        ])
+        #expect(settings.apps.first?.isEnabled == false)
+
+        let reloaded = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in true }
+        )
+        #expect(reloaded.apps.map(\.bundleIdentifier) == [
+            "com.joydsh.desktop",
+            "com.google.Chrome",
+            "com.google.antigravity",
+        ])
+
+        let antigravityID = try #require(
+            reloaded.apps.first { $0.bundleIdentifier == "com.google.antigravity" }?.id
+        )
+        reloaded.removeApp(id: antigravityID)
+
+        let afterRemoval = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in true }
+        )
+        #expect(afterRemoval.apps.map(\.bundleIdentifier) == [
+            "com.joydsh.desktop",
+            "com.google.Chrome",
+        ])
+    }
+
+    @Test
+    func nativeGamepadAppSettingsMigratesAntigravityAlongsideSameNamedCustomApp() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            try JSONEncoder().encode([
+                NativeGamepadApp(
+                    bundleIdentifier: "com.example.antigravity",
+                    appName: "Antigravity"
+                ),
+            ]),
+            forKey: "\(NativeGamepadAppSettings.storageKey).apps"
+        )
+
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+
+        #expect(settings.apps.map(\.bundleIdentifier) == [
+            "com.example.antigravity",
+            "com.google.antigravity",
+        ])
+    }
+
+    @Test
+    func nativeGamepadAppSettingsMigratesNameOnlyAntigravityWithoutDuplication() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let legacyID = UUID()
+        defaults.set(
+            try JSONEncoder().encode([
+                NativeGamepadApp(
+                    id: legacyID,
+                    bundleIdentifier: "",
+                    appName: "antigravity",
+                    isEnabled: false
+                ),
+            ]),
+            forKey: "\(NativeGamepadAppSettings.storageKey).apps"
+        )
+
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+
+        let migratedApp = try #require(settings.apps.first)
+        #expect(settings.apps.count == 1)
+        #expect(migratedApp.id == legacyID)
+        #expect(migratedApp.bundleIdentifier == "com.google.antigravity")
+        #expect(migratedApp.isEnabled == false)
+        #expect(!settings.matches(bundleIdentifier: "com.google.antigravity", localizedName: nil))
+    }
+
+    @Test
+    func nativeGamepadAppSettingsReplacesUnavailableDefaultWhenAddedByName() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in false }
+        )
+
+        settings.addApp(bundleIdentifier: "", appName: "ANTIGRAVITY")
+
+        let storedData = try #require(
+            defaults.data(forKey: "\(NativeGamepadAppSettings.storageKey).apps")
+        )
+        let storedApps = try JSONDecoder().decode([NativeGamepadApp].self, from: storedData)
+        #expect(storedApps.filter {
+            $0.appName.caseInsensitiveCompare("Antigravity") == .orderedSame
+        }.count == 1)
+
+        let afterInstallation = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+        #expect(afterInstallation.apps.count == 1)
+        #expect(afterInstallation.apps.first?.bundleIdentifier == "com.google.antigravity")
+        #expect(afterInstallation.matches(bundleIdentifier: "com.google.antigravity", localizedName: nil))
+    }
+
+    @Test
+    func nativeGamepadAppSettingsRepairsPersistedDuplicateBeforeDefaultReappears() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        _ = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in false }
+        )
+
+        let legacyID = UUID()
+        defaults.set(
+            try JSONEncoder().encode([
+                NativeGamepadApp(
+                    id: legacyID,
+                    bundleIdentifier: "",
+                    appName: "Antigravity",
+                    isEnabled: false
+                ),
+                NativeGamepadApp(
+                    bundleIdentifier: "com.google.antigravity",
+                    appName: "Antigravity"
+                ),
+            ]),
+            forKey: "\(NativeGamepadAppSettings.storageKey).apps"
+        )
+
+        let whileUnavailable = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in false }
+        )
+        #expect(whileUnavailable.apps.isEmpty)
+
+        let afterInstallation = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+        let restoredApp = try #require(afterInstallation.apps.first)
+        #expect(afterInstallation.apps.count == 1)
+        #expect(restoredApp.id == legacyID)
+        #expect(restoredApp.bundleIdentifier == "com.google.antigravity")
+        #expect(restoredApp.isEnabled == false)
+    }
+
+    @Test
+    func nativeGamepadAppSettingsShowsDefaultInstalledAfterMigration() throws {
+        let suiteName = "JoyHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            try JSONEncoder().encode([
+                NativeGamepadApp(
+                    bundleIdentifier: "com.joydsh.desktop",
+                    appName: "JoyDSH"
+                ),
+                NativeGamepadApp(
+                    bundleIdentifier: "com.example.custom",
+                    appName: "Custom App"
+                ),
+            ]),
+            forKey: "\(NativeGamepadAppSettings.storageKey).apps"
+        )
+
+        let beforeInstallation = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in false }
+        )
+        #expect(beforeInstallation.apps.map(\.bundleIdentifier) == ["com.example.custom"])
+
+        beforeInstallation.autoSwitchEnabled = false
+
+        let afterInstallation = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.google.antigravity" }
+        )
+        #expect(afterInstallation.apps.map(\.bundleIdentifier) == [
+            "com.example.custom",
+            "com.google.antigravity",
+        ])
     }
 
     @Test
@@ -2798,7 +3243,10 @@ struct JoyHarnessTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = NativeGamepadAppSettings(userDefaults: defaults)
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { $0 == "com.joydsh.desktop" }
+        )
         settings.addApp(bundleIdentifier: "com.valvesoftware.steam", appName: "Steam")
 
         #expect(settings.matches(bundleIdentifier: "com.valvesoftware.steam", localizedName: "Steam"))
@@ -2813,15 +3261,19 @@ struct JoyHarnessTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = NativeGamepadAppSettings(userDefaults: defaults)
-        let joyDshApp = settings.apps.first { $0.bundleIdentifier == "com.joydsh.desktop" }!
-        settings.setAppEnabled(id: joyDshApp.id, isEnabled: false)
+        let settings = NativeGamepadAppSettings(
+            userDefaults: defaults,
+            isApplicationInstalled: { _ in false }
+        )
+        settings.addApp(bundleIdentifier: "com.example.game", appName: "Example Game")
+        let app = settings.apps.first { $0.bundleIdentifier == "com.example.game" }!
+        settings.setAppEnabled(id: app.id, isEnabled: false)
 
-        #expect(!settings.matches(bundleIdentifier: "com.joydsh.desktop", localizedName: "JoyDSH"))
+        #expect(!settings.matches(bundleIdentifier: "com.example.game", localizedName: "Example Game"))
 
         settings.autoSwitchEnabled = false
-        settings.setAppEnabled(id: joyDshApp.id, isEnabled: true)
-        #expect(!settings.matches(bundleIdentifier: "com.joydsh.desktop", localizedName: "JoyDSH"))
+        settings.setAppEnabled(id: app.id, isEnabled: true)
+        #expect(!settings.matches(bundleIdentifier: "com.example.game", localizedName: "Example Game"))
     }
 
     @Test
@@ -2892,14 +3344,14 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func buttonBridgeHomeButtonTogglesNativeModeAndFiresCallback() {
+    func buttonBridgeHomePressPresentsSwitcherImmediatelyAndReleaseKeepsItOpen() {
         let bridge = ButtonBridge()
+        var presentedCount = 0
         var toggledCount = 0
+        bridge.onHarnessSwitcherPresent = { presentedCount += 1 }
         bridge.onToggleOperationMode = { toggledCount += 1 }
 
         #expect(bridge.operationMode == .mapping)
-        bridge.setOperationMode(.native)
-        #expect(bridge.operationMode == .native)
 
         bridge.applyJoyConSnapshot(JoyConInputSnapshot(
             buttons: [.home: true],
@@ -2907,8 +3359,308 @@ struct JoyHarnessTests {
             secondaryStick: .neutral
         ))
 
+        #expect(presentedCount == 1)
+        #expect(toggledCount == 0)
+
+        // A repeated pressed snapshot is not another gesture edge.
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [.home: true],
+            primaryStick: .neutral,
+            secondaryStick: .neutral
+        ))
+        bridge.applyJoyConSnapshot(.neutral)
+
+        #expect(presentedCount == 1)
+        #expect(toggledCount == 0)
         #expect(bridge.operationMode == .mapping)
-        #expect(toggledCount == 1)
+    }
+
+    @Test
+    func buttonBridgeHomePressInNativeModeReturnsToMappingInsteadOfPresentingSwitcher() {
+        let bridge = ButtonBridge()
+        var presentedCount = 0
+        bridge.onHarnessSwitcherPresent = { presentedCount += 1 }
+        bridge.setOperationMode(.native)
+
+        bridge.handleHomeButton(isPressed: true)
+        bridge.handleHomeButton(isPressed: false)
+
+        #expect(bridge.operationMode == .mapping)
+        #expect(presentedCount == 0)
+
+        // Back in mapping mode, the next press opens the switcher again.
+        bridge.handleHomeButton(isPressed: true)
+
+        #expect(bridge.operationMode == .mapping)
+        #expect(presentedCount == 1)
+    }
+
+    @Test
+    func openSwitcherConsumesHomeBeforeNativeModeCanToggle() {
+        let bridge = ButtonBridge()
+        bridge.setOperationMode(.native)
+        bridge.inputInterceptor = { input, _ in input == .home }
+
+        bridge.handleHomeButton(isPressed: true)
+
+        #expect(bridge.operationMode == .native)
+    }
+
+    @Test
+    func presentingOverlayReleasesHeldActionUntilPhysicalButtonIsPressedAgain() {
+        let bridge = ButtonBridge { input in
+            input == .buttonA ? .mouseLeft : .disabled
+        }
+        var mouseEvents: [Bool] = []
+        bridge.mouseButtonHandler = { _, pressed in mouseEvents.append(pressed) }
+        let pressed = JoyConInputSnapshot(
+            buttons: [.buttonA: true],
+            primaryStick: .neutral,
+            secondaryStick: .neutral
+        )
+
+        bridge.applyJoyConSnapshot(pressed)
+        bridge.suspendMappedOutputs()
+        bridge.applyJoyConSnapshot(pressed)
+
+        #expect(mouseEvents == [true, false])
+
+        bridge.applyJoyConSnapshot(.neutral)
+        bridge.applyJoyConSnapshot(pressed)
+
+        #expect(mouseEvents == [true, false, true])
+    }
+
+    @Test
+    func consumedJoyConInputDoesNotRunItsMappedAction() {
+        let bridge = ButtonBridge { input in
+            input == .buttonA ? .mouseLeft : .disabled
+        }
+        var mouseEvents: [Bool] = []
+        var interceptedEdges: [(ControllerInput, Bool)] = []
+        bridge.mouseButtonHandler = { _, pressed in mouseEvents.append(pressed) }
+        bridge.inputInterceptor = { input, pressed in
+            interceptedEdges.append((input, pressed))
+            return true
+        }
+
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [.buttonA: true],
+            primaryStick: .neutral,
+            secondaryStick: .neutral
+        ))
+        bridge.applyJoyConSnapshot(.neutral)
+
+        #expect(mouseEvents.isEmpty)
+        #expect(interceptedEdges.count == 2)
+        #expect(interceptedEdges[0].0 == .buttonA)
+        #expect(interceptedEdges[0].1)
+        #expect(interceptedEdges[1].0 == .buttonA)
+        #expect(!interceptedEdges[1].1)
+    }
+
+    @Test
+    func dualSenseHomeSourcesPresentSwitcherOncePerPhysicalPress() {
+        let bridge = ButtonBridge()
+        var now: TimeInterval = 0
+        bridge.homeButtonClock = { now }
+        var presentedCount = 0
+        bridge.onHarnessSwitcherPresent = { presentedCount += 1 }
+
+        bridge.handleHomeButton(isPressed: true)
+        bridge.handleRawHomeButton(isPressed: true)
+        bridge.handleRawHomeButton(isPressed: false)
+        bridge.handleHomeButton(isPressed: false)
+
+        #expect(presentedCount == 1)
+
+        now = 2
+        bridge.handleRawHomeButton(isPressed: true)
+        bridge.handleHomeButton(isPressed: true)
+        bridge.handleHomeButton(isPressed: false)
+        bridge.handleRawHomeButton(isPressed: false)
+
+        #expect(presentedCount == 2)
+
+        // GameController Home can trail raw HID by the system gesture delay
+        // and land after the raw release; it is still the same press.
+        now = 4
+        bridge.handleRawHomeButton(isPressed: true)
+        bridge.handleRawHomeButton(isPressed: false)
+        now = 4.6
+        bridge.handleHomeButton(isPressed: true)
+        bridge.handleHomeButton(isPressed: false)
+
+        #expect(presentedCount == 3)
+    }
+
+    @Test
+    func homeButtonMergerCountsBothSourcesOfOnePressOnce() {
+        var merger = HomeButtonPressMerger(echoWindow: 1.0)
+        var edges: [Bool] = []
+        func report(_ source: HomeButtonPressMerger.Source, _ pressed: Bool, at timestamp: TimeInterval) {
+            if let edge = merger.update(source, isPressed: pressed, at: timestamp) { edges.append(edge) }
+        }
+
+        // GameController reports one press through several handlers.
+        report(.gameController, true, at: 0.00)
+        report(.gameController, true, at: 0.00)
+        report(.rawHID, true, at: 0.05)
+        report(.gameController, false, at: 0.10)
+        report(.rawHID, false, at: 0.30)
+
+        #expect(edges == [true, false])
+
+        // Raw HID can be the one that trails, even past the other release.
+        report(.gameController, true, at: 2.00)
+        report(.gameController, false, at: 2.10)
+        report(.rawHID, true, at: 2.15)
+        report(.rawHID, false, at: 2.35)
+
+        #expect(edges == [true, false, true, false])
+    }
+
+    @Test
+    func homeButtonMergerRecoversWhenOneSourceLosesItsRelease() {
+        var merger = HomeButtonPressMerger(echoWindow: 1.0)
+        var edges: [Bool] = []
+        func report(_ source: HomeButtonPressMerger.Source, _ pressed: Bool, at timestamp: TimeInterval) {
+            if let edge = merger.update(source, isPressed: pressed, at: timestamp) { edges.append(edge) }
+        }
+
+        report(.gameController, true, at: 0.00)
+        report(.rawHID, true, at: 0.01)
+        report(.rawHID, false, at: 0.20)
+        // The GameController release never arrives.
+
+        report(.gameController, true, at: 3.00)
+        report(.gameController, false, at: 3.10)
+
+        #expect(edges == [true, false, true, false])
+    }
+
+    @Test
+    func homeButtonMergerPairsEachQuickPressWithItsOwnLateCopy() {
+        var merger = HomeButtonPressMerger(echoWindow: 1.0)
+        var edges: [Bool] = []
+        func report(_ source: HomeButtonPressMerger.Source, _ pressed: Bool, at timestamp: TimeInterval) {
+            if let edge = merger.update(source, isPressed: pressed, at: timestamp) { edges.append(edge) }
+        }
+
+        report(.rawHID, true, at: 0.00)
+        report(.rawHID, false, at: 0.20)
+        report(.rawHID, true, at: 0.40)
+        report(.rawHID, false, at: 0.60)
+
+        #expect(edges == [true, false, true, false])
+
+        // Both presses reach GameController late, after the system gesture.
+        report(.gameController, true, at: 0.80)
+        report(.gameController, false, at: 0.85)
+        report(.gameController, true, at: 0.90)
+        report(.gameController, false, at: 0.95)
+
+        #expect(edges == [true, false, true, false])
+
+        // Once the window has passed, a GameController-only press is new.
+        report(.gameController, true, at: 2.00)
+
+        #expect(edges == [true, false, true, false, true])
+        #expect(merger.isPressed)
+    }
+
+    @Test
+    func dualSenseHomeButtonIsReadOnlyFromTheTransportsFullInputReport() {
+        func report(id: UInt8, length: Int, setting index: Int? = nil) -> [UInt8] {
+            var bytes = [UInt8](repeating: 0, count: length)
+            bytes[0] = id
+            if let index { bytes[index] = 0x01 }
+            return bytes
+        }
+        func homePressed(_ bytes: [UInt8], _ transport: DualSenseHIDTransport) -> Bool? {
+            bytes.withUnsafeBufferPointer {
+                DualSenseInputReport.isHomeButtonPressed(in: $0, transport: transport)
+            }
+        }
+
+        #expect(homePressed(report(id: 0x01, length: 64, setting: 10), .usb) == true)
+        #expect(homePressed(report(id: 0x01, length: 64), .usb) == false)
+        #expect(homePressed(report(id: 0x31, length: 78, setting: 11), .bluetooth) == true)
+        #expect(homePressed(report(id: 0x31, length: 78, setting: 10), .bluetooth) == false)
+
+        // Reports with another ID use a different layout, so the PS byte of
+        // the expected report must not be read from them.
+        #expect(homePressed(report(id: 0x01, length: 78, setting: 11), .bluetooth) == nil)
+        #expect(homePressed(report(id: 0x31, length: 78, setting: 10), .usb) == nil)
+        #expect(homePressed(report(id: 0x31, length: 11), .bluetooth) == nil)
+    }
+
+    @Test
+    func dualSenseHomeButtonFilterCollapsesReleaseChatter() {
+        var filter = DualSenseHomeButtonFilter(releaseDelay: 0.2)
+        var events: [Bool] = []
+
+        if let event = filter.ingest(isPressed: true, at: 1.00) { events.append(event) }
+        if let event = filter.ingest(isPressed: false, at: 1.01) { events.append(event) }
+        if let event = filter.ingest(isPressed: true, at: 1.02) { events.append(event) }
+        if let event = filter.ingest(isPressed: false, at: 1.03) { events.append(event) }
+        if let event = filter.ingest(isPressed: true, at: 1.04) { events.append(event) }
+        if let event = filter.ingest(isPressed: false, at: 1.05) { events.append(event) }
+        if let event = filter.flush(at: 1.24) { events.append(event) }
+
+        #expect(events == [true])
+        #expect(filter.isPressed)
+
+        if let event = filter.flush(at: 1.26) { events.append(event) }
+        if let event = filter.ingest(isPressed: true, at: 1.50) { events.append(event) }
+
+        #expect(events == [true, false, true])
+        #expect(filter.isPressed)
+    }
+
+    @Test
+    func dualSenseHomeButtonReleasesWhileReportsKeepStreaming() throws {
+        var filter = DualSenseHomeButtonFilter(releaseDelay: 0.2)
+        var events: [(isPressed: Bool, timestamp: TimeInterval)] = []
+        // Mirrors DualSenseHIDOutput, which flushes after every report.
+        func sample(_ isPressed: Bool, at timestamp: TimeInterval) {
+            if let event = filter.ingest(isPressed: isPressed, at: timestamp) {
+                events.append((event, timestamp))
+            }
+            if let event = filter.flush(at: timestamp) {
+                events.append((event, timestamp))
+            }
+        }
+
+        // The pad sends a full input report about every 4 ms, idle or not.
+        sample(true, at: 1.0)
+        for step in 1...150 {
+            sample(false, at: 1.0 + Double(step) * 0.004)
+        }
+
+        #expect(events.map { $0.isPressed } == [true, false])
+        let releasedAt = try #require(events.last?.timestamp)
+        #expect(abs(releasedAt - 1.204) < 0.005)
+        #expect(!filter.isPressed)
+    }
+
+    @Test
+    func manualNativeModeIsNotUndoneByFrontmostAppActivation() {
+        #expect(OperationModeAutoSwitchPolicy.targetMode(
+            currentMode: .native,
+            frontmostMatches: false,
+            manuallyForcedNative: true
+        ) == nil)
+        #expect(OperationModeAutoSwitchPolicy.targetMode(
+            currentMode: .mapping,
+            frontmostMatches: true,
+            manuallyForcedNative: false
+        ) == .native)
+        #expect(OperationModeAutoSwitchPolicy.targetMode(
+            currentMode: .native,
+            frontmostMatches: false,
+            manuallyForcedNative: false
+        ) == .mapping)
     }
 
     @Test

@@ -300,6 +300,9 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case mousePrecision
     case browserBack
     case browserForward
+    case claudePreviousSession
+    case claudeNextSession
+    case claudeSearch
     case openApplication
     case recordedShortcut
     case toggleOperationMode
@@ -345,6 +348,9 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .mousePrecision: L10n.text("按住精细鼠标", "Hold for Precise Pointer")
         case .browserBack: L10n.text("网页上一页", "Browser Back")
         case .browserForward: L10n.text("网页下一页", "Browser Forward")
+        case .claudePreviousSession: L10n.text("上一个 Claude 会话", "Previous Claude Session")
+        case .claudeNextSession: L10n.text("下一个 Claude 会话", "Next Claude Session")
+        case .claudeSearch: L10n.text("Claude 搜索", "Claude Search")
         case .openApplication: L10n.text("打开应用…", "Open Application…")
         case .recordedShortcut: L10n.text("录制按键…", "Record Shortcut…")
         case .toggleOperationMode: L10n.text("切换原生/映射模式", "Toggle Native/Mapping Mode")
@@ -370,6 +376,9 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .screenshotTool: .systemKey(.screenshotTool)
         case .browserBack: .systemKey(.browserBack)
         case .browserForward: .systemKey(.browserForward)
+        case .claudePreviousSession: .systemKey(.claudePreviousSession)
+        case .claudeNextSession: .systemKey(.claudeNextSession)
+        case .claudeSearch: .systemKey(.claudeSearch)
         case .answerYes: .textInput("yes")
         case .answerNo: .textInput("no")
         case .approve: .microKey("ACT07")
@@ -474,6 +483,59 @@ struct RecordedShortcutConfiguration: Codable, Hashable {
     var note: String
 }
 
+/// A read-only snapshot of one controller family's mappings for the current
+/// Harness. The Dashboard reads the displayed device's profile through it, so
+/// showing a device never changes the profile edited in Settings.
+struct ControllerMappingProfile {
+    let family: ControllerFamily
+    let joyConOrientation: JoyConOrientation
+    let mappings: [ControllerInput: ControllerMappedAction]
+    let defaults: [ControllerInput: ControllerMappedAction]
+    let openApplicationTargets: [ControllerInput: String]
+    let recordedShortcutConfigurations: [ControllerInput: RecordedShortcutConfiguration]
+
+    func action(for input: ControllerInput) -> ControllerMappedAction {
+        mappings[input] ?? defaults[input] ?? .disabled
+    }
+
+    func displayName(for input: ControllerInput) -> String {
+        input.displayName(for: family, joyConOrientation: joyConOrientation)
+    }
+
+    /// Gamepad PS/Home always opens the Harness switcher, so its stored mapping
+    /// never runs. The Xiaomi remote's Home stays an ordinary mapped key.
+    func isReservedForHarnessSwitcher(_ input: ControllerInput) -> Bool {
+        input == .home && family != .xiaomiRemote
+    }
+
+    func openApplicationDisplayName(for input: ControllerInput) -> String? {
+        guard let bundleIdentifier = openApplicationTargets[input] else { return nil }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            let name = ApplicationPresentation.name(forApplicationAt: url)
+            if !name.isEmpty {
+                return name
+            }
+        }
+        return bundleIdentifier
+    }
+
+    func recordedShortcutConfiguration(for input: ControllerInput) -> RecordedShortcutConfiguration {
+        recordedShortcutConfigurations[input] ?? RecordedShortcutConfiguration(shortcut: nil, note: "")
+    }
+
+    func mappedActionDisplayName(for input: ControllerInput) -> String {
+        if isReservedForHarnessSwitcher(input) {
+            return L10n.text("Harness 切换", "Harness Switcher")
+        }
+        let mappedAction = action(for: input)
+        guard mappedAction == .recordedShortcut else { return mappedAction.displayName }
+        let configuration = recordedShortcutConfiguration(for: input)
+        let note = configuration.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty { return note }
+        return configuration.shortcut?.displayName ?? mappedAction.displayName
+    }
+}
+
 final class ControllerMappingStore: ObservableObject {
     private static let currentSchemaVersion = 8
     private static let legacyMigrationFlagSuffixes = [
@@ -529,6 +591,38 @@ final class ControllerMappingStore: ObservableObject {
     static let defaultMappings = defaultMappings(for: .xbox)
 
     static func defaultMappings(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        defaultMappings(for: family, provider: .codex)
+    }
+
+    static func defaultMappings(
+        for family: ControllerFamily,
+        provider: HarnessProviderID
+    ) -> [ControllerInput: ControllerMappedAction] {
+        let defaults = codexDefaultMappings(for: family)
+        guard provider != .codex else { return defaults }
+        var providerDefaults = defaults.mapValues { action in
+            isCodexSpecificDefault(action) ? .disabled : action
+        }
+        if provider == .claude {
+            let available = ControllerInput.availableInputs(for: family)
+            for (input, action) in claudeSessionDefaults where available.contains(input) {
+                providerDefaults[input] = action
+            }
+        }
+        return providerDefaults
+    }
+
+    /// Claude reuses the Codex slot-cycling shoulders for its own session
+    /// shortcuts; RT takes the place of Focus Codex.
+    private static let claudeSessionDefaults: [ControllerInput: ControllerMappedAction] = [
+        .leftShoulder: .claudePreviousSession,
+        .rightShoulder: .claudeNextSession,
+        .rightTrigger: .claudeSearch,
+    ]
+
+    private static func codexDefaultMappings(
+        for family: ControllerFamily
+    ) -> [ControllerInput: ControllerMappedAction] {
         if family == .xiaomiRemote {
             var defaults: [ControllerInput: ControllerMappedAction] = [:]
             for input in ControllerInput.allCases {
@@ -557,48 +651,73 @@ final class ControllerMappingStore: ObservableObject {
         return defaults
     }
 
+    private static func isCodexSpecificDefault(_ action: ControllerMappedAction) -> Bool {
+        if action == .radialInput { return true }
+        switch action.controllerAction {
+        case .microKey, .slotOffset, .selectSlot:
+            return true
+        default:
+            return false
+        }
+    }
+
     @Published private(set) var mappings: [ControllerInput: ControllerMappedAction]
+    @Published private(set) var harnessProvider: HarnessProviderID
     @Published private(set) var controllerFamily: ControllerFamily
     @Published private(set) var availableInputs: Set<ControllerInput>
     @Published private(set) var joyConOrientation: JoyConOrientation
     @Published private(set) var openApplicationTargets: [ControllerInput: String]
     @Published private(set) var recordedShortcutConfigurations: [ControllerInput: RecordedShortcutConfiguration]
     @Published private(set) var connectedDevices: [ConnectedControllerDescriptor] = []
+    /// The device whose profile Settings edits. Only the Settings picker and
+    /// connection changes move it; button presses never do.
     @Published private(set) var selectedConnectedDeviceID = ""
+    /// The device the Dashboard shows, mirrored from the controller hub. It is
+    /// display state only and never changes the profile edited in Settings.
+    @Published private(set) var displayedDeviceID = ""
 
     var onJoyConOrientationChange: ((JoyConOrientation) -> Void)?
-    var onConnectedDeviceSelectionChange: ((String) -> Void)?
+    var onDisplayedDeviceRequest: ((String) -> Void)?
 
     private let userDefaults: UserDefaults
     private let storageKey: String
     private var activeStorageKey: String {
-        Self.storageKey(base: storageKey, family: controllerFamily)
+        Self.storageKey(base: storageKey, family: controllerFamily, provider: harnessProvider)
     }
     private var schemaVersionStorageKey: String { "\(activeStorageKey).schemaVersion" }
     private var openApplicationStorageKey: String { "\(activeStorageKey).openApplications" }
     private var recordedShortcutsStorageKey: String { "\(activeStorageKey).recordedShortcuts" }
-    private var joyConOrientationStorageKey: String { "\(activeStorageKey).orientation" }
+    private var joyConOrientationStorageKey: String {
+        "\(Self.storageKey(base: storageKey, family: controllerFamily)).orientation"
+    }
 
     init(
         userDefaults: UserDefaults = .standard,
-        storageKey: String = "controllerMappings.v1"
+        storageKey: String = "controllerMappings.v1",
+        harnessProvider: HarnessProviderID = .codex
     ) {
         self.userDefaults = userDefaults
         self.storageKey = storageKey
+        self.harnessProvider = harnessProvider
         let storedFamily = userDefaults.string(forKey: "\(storageKey).controllerFamily")
             .flatMap(ControllerFamily.init(rawValue:)) ?? .xbox
         Self.migrateRemoteProfile(from: userDefaults, base: storageKey, family: storedFamily)
-        let activeStorageKey = Self.storageKey(base: storageKey, family: storedFamily)
+        let familyStorageKey = Self.storageKey(base: storageKey, family: storedFamily)
+        let activeStorageKey = Self.storageKey(
+            base: storageKey,
+            family: storedFamily,
+            provider: harnessProvider
+        )
         self.controllerFamily = storedFamily
         self.availableInputs = ControllerInput.availableInputs(for: storedFamily)
         self.joyConOrientation = Self.loadJoyConOrientation(
             from: userDefaults,
-            key: "\(activeStorageKey).orientation"
+            key: "\(familyStorageKey).orientation"
         )
         self.mappings = Self.loadMappings(
             from: userDefaults,
             key: activeStorageKey,
-            defaults: Self.defaultMappings(for: storedFamily)
+            defaults: Self.defaultMappings(for: storedFamily, provider: harnessProvider)
         )
         self.openApplicationTargets = Self.loadOpenApplicationTargets(
             from: userDefaults,
@@ -608,13 +727,18 @@ final class ControllerMappingStore: ObservableObject {
             from: userDefaults,
             key: "\(activeStorageKey).recordedShortcuts"
         )
-        if !storedFamily.isJoyCon && storedFamily != .xiaomiRemote {
+        if harnessProvider == .codex && !storedFamily.isJoyCon && storedFamily != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
+        }
+        if harnessProvider == .claude {
+            migrateClaudeSessionDefaultsIfNeeded()
         }
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
-        mappings[input] ?? Self.defaultMappings(for: controllerFamily)[input] ?? .disabled
+        mappings[input]
+            ?? Self.defaultMappings(for: controllerFamily, provider: harnessProvider)[input]
+            ?? .disabled
     }
 
     /// Returns the mapping for a connected device without changing the profile
@@ -626,20 +750,64 @@ final class ControllerMappingStore: ObservableObject {
         family: ControllerFamily
     ) -> ControllerMappedAction {
         guard family != controllerFamily else { return action(for: input) }
-        let key = Self.storageKey(base: storageKey, family: family)
+        return storedMappings(for: family)[input]
+            ?? Self.defaultMappings(for: family, provider: harnessProvider)[input]
+            ?? .disabled
+    }
+
+    /// Returns a family's profile for the current Harness without changing
+    /// the profile edited in Settings.
+    func profile(for family: ControllerFamily) -> ControllerMappingProfile {
+        let defaults = Self.defaultMappings(for: family, provider: harnessProvider)
+        guard family != controllerFamily else {
+            return ControllerMappingProfile(
+                family: family,
+                joyConOrientation: joyConOrientation,
+                mappings: mappings,
+                defaults: defaults,
+                openApplicationTargets: openApplicationTargets,
+                recordedShortcutConfigurations: recordedShortcutConfigurations
+            )
+        }
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
+        return ControllerMappingProfile(
+            family: family,
+            joyConOrientation: joyConOrientation(for: family),
+            mappings: storedMappings(for: family),
+            defaults: defaults,
+            openApplicationTargets: Self.loadOpenApplicationTargets(
+                from: userDefaults,
+                key: "\(key).openApplications"
+            ),
+            recordedShortcutConfigurations: Self.loadRecordedShortcutConfigurations(
+                from: userDefaults,
+                key: "\(key).recordedShortcuts"
+            )
+        )
+    }
+
+    private func storedMappings(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         let stored = Self.loadMappings(
             from: userDefaults,
             key: key,
-            defaults: Self.defaultMappings(for: family)
+            defaults: Self.defaultMappings(for: family, provider: harnessProvider)
         )
-        return stored[input] ?? Self.defaultMappings(for: family)[input] ?? .disabled
+        guard harnessProvider == .claude else { return stored }
+        return Self.migrateClaudeSessionDefaults(
+            in: stored,
+            family: family,
+            key: key,
+            userDefaults: userDefaults
+        )
     }
 
     func displayName(for input: ControllerInput) -> String {
-        input.displayName(
-            for: controllerFamily,
-            joyConOrientation: joyConOrientation
-        )
+        profile(for: controllerFamily).displayName(for: input)
+    }
+
+    func isReservedForHarnessSwitcher(_ input: ControllerInput) -> Bool {
+        profile(for: controllerFamily).isReservedForHarnessSwitcher(input)
     }
 
     func openApplicationTarget(for input: ControllerInput) -> String? {
@@ -651,7 +819,7 @@ final class ControllerMappingStore: ObservableObject {
         family: ControllerFamily
     ) -> String? {
         guard family != controllerFamily else { return openApplicationTarget(for: input) }
-        let key = Self.storageKey(base: storageKey, family: family)
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         return Self.loadOpenApplicationTargets(
             from: userDefaults,
             key: "\(key).openApplications"
@@ -659,14 +827,7 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     func openApplicationDisplayName(for input: ControllerInput) -> String? {
-        guard let bundleIdentifier = openApplicationTargets[input] else { return nil }
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
-            let name = FileManager.default.displayName(atPath: url.path)
-            if !name.isEmpty {
-                return name.replacingOccurrences(of: ".app", with: "")
-            }
-        }
-        return bundleIdentifier
+        profile(for: controllerFamily).openApplicationDisplayName(for: input)
     }
 
     func setOpenApplicationTarget(_ bundleIdentifier: String?, for input: ControllerInput) {
@@ -688,7 +849,7 @@ final class ControllerMappingStore: ObservableObject {
         family: ControllerFamily
     ) -> RecordedShortcutConfiguration {
         guard family != controllerFamily else { return recordedShortcutConfiguration(for: input) }
-        let key = Self.storageKey(base: storageKey, family: family)
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         return Self.loadRecordedShortcutConfigurations(
             from: userDefaults,
             key: "\(key).recordedShortcuts"
@@ -696,12 +857,7 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     func mappedActionDisplayName(for input: ControllerInput) -> String {
-        let mappedAction = action(for: input)
-        guard mappedAction == .recordedShortcut else { return mappedAction.displayName }
-        let configuration = recordedShortcutConfiguration(for: input)
-        let note = configuration.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !note.isEmpty { return note }
-        return configuration.shortcut?.displayName ?? mappedAction.displayName
+        profile(for: controllerFamily).mappedActionDisplayName(for: input)
     }
 
     func setRecordedShortcut(_ shortcut: RecordedKeyboardShortcut?, for input: ControllerInput) {
@@ -720,10 +876,10 @@ final class ControllerMappingStore: ObservableObject {
         guard family != controllerFamily else { return }
         persistAll()
         let previousFamily = controllerFamily
-        let previousDefaults = Self.defaultMappings(for: controllerFamily)
-        let newDefaults = Self.defaultMappings(for: family)
+        let previousDefaults = Self.defaultMappings(for: controllerFamily, provider: harnessProvider)
+        let newDefaults = Self.defaultMappings(for: family, provider: harnessProvider)
         controllerFamily = family
-        availableInputs = ControllerInput.availableInputs(for: family)
+        refreshAvailableInputs()
         joyConOrientation = Self.loadJoyConOrientation(
             from: userDefaults,
             key: joyConOrientationStorageKey
@@ -747,11 +903,39 @@ final class ControllerMappingStore: ObservableObject {
                 mappings[input] = newDefaults[input]
             }
         }
-        if !family.isJoyCon && family != .xiaomiRemote {
+        if harnessProvider == .codex && !family.isJoyCon && family != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
+        }
+        if harnessProvider == .claude {
+            migrateClaudeSessionDefaultsIfNeeded()
         }
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
         persistAll()
+    }
+
+    func setHarnessProvider(_ provider: HarnessProviderID) {
+        guard provider != harnessProvider else { return }
+        persistAll()
+        harnessProvider = provider
+        mappings = Self.loadMappings(
+            from: userDefaults,
+            key: activeStorageKey,
+            defaults: Self.defaultMappings(for: controllerFamily, provider: provider)
+        )
+        openApplicationTargets = Self.loadOpenApplicationTargets(
+            from: userDefaults,
+            key: openApplicationStorageKey
+        )
+        recordedShortcutConfigurations = Self.loadRecordedShortcutConfigurations(
+            from: userDefaults,
+            key: recordedShortcutsStorageKey
+        )
+        if provider == .codex && !controllerFamily.isJoyCon && controllerFamily != .xiaomiRemote {
+            migrateStoredMappingsIfNeeded()
+        }
+        if provider == .claude {
+            migrateClaudeSessionDefaultsIfNeeded()
+        }
     }
 
     func setConnectedDevices(_ devices: [ConnectedControllerDescriptor]) {
@@ -760,6 +944,7 @@ final class ControllerMappingStore: ObservableObject {
             result.append(device)
         }
         connectedDevices = deduplicated
+        defer { refreshAvailableInputs() }
 
         if let selected = deduplicated.first(where: { $0.id == selectedConnectedDeviceID }) {
             if selected.family != controllerFamily {
@@ -778,11 +963,59 @@ final class ControllerMappingStore: ObservableObject {
         }
     }
 
+    /// Chooses the device whose profile Settings edits. The Dashboard keeps
+    /// showing its own device.
     func selectConnectedDevice(_ id: String) {
         guard let device = connectedDevices.first(where: { $0.id == id }) else { return }
         selectedConnectedDeviceID = device.id
         setControllerFamily(device.family)
-        onConnectedDeviceSelectionChange?(device.id)
+        refreshAvailableInputs()
+    }
+
+    /// Asks the controller hub to show a device on the Dashboard. The hub
+    /// reports back through `setDisplayedDevice`.
+    func requestDisplayedDevice(_ id: String) {
+        guard id != displayedDeviceID,
+              connectedDevices.contains(where: { $0.id == id }) else { return }
+        onDisplayedDeviceRequest?(id)
+    }
+
+    /// Mirrors the device the controller hub shows on the Dashboard.
+    func setDisplayedDevice(_ id: String?) {
+        let next = id ?? ""
+        guard next != displayedDeviceID else { return }
+        displayedDeviceID = next
+    }
+
+    /// Inputs the Dashboard lists while it shows a device of `family`.
+    func displayedInputs(for family: ControllerFamily) -> Set<ControllerInput> {
+        inputs(ofDevice: displayedDeviceID, family: family)
+    }
+
+    private func inputs(ofDevice id: String, family: ControllerFamily) -> Set<ControllerInput> {
+        guard let device = connectedDevices.first(where: { $0.id == id }),
+              device.family == family else {
+            return ControllerInput.availableInputs(for: family)
+        }
+        return device.availableInputs
+    }
+
+    private func refreshAvailableInputs() {
+        let next = inputs(ofDevice: selectedConnectedDeviceID, family: controllerFamily)
+        guard next != availableInputs else { return }
+        availableInputs = next
+    }
+
+    /// Returns the stored grip orientation of a Joy-Con family without changing
+    /// the profile currently shown. A connected Joy-Con keeps its orientation
+    /// while another device is displayed.
+    func joyConOrientation(for family: ControllerFamily) -> JoyConOrientation {
+        guard family != controllerFamily else { return joyConOrientation }
+        guard family == .joyConLeft || family == .joyConRight else { return .horizontal }
+        return Self.loadJoyConOrientation(
+            from: userDefaults,
+            key: "\(Self.storageKey(base: storageKey, family: family)).orientation"
+        )
     }
 
     func setJoyConOrientation(_ orientation: JoyConOrientation) {
@@ -793,11 +1026,18 @@ final class ControllerMappingStore: ObservableObject {
         onJoyConOrientationChange?(orientation)
     }
 
-    func setAvailableInputs(_ inputs: Set<ControllerInput>) {
-        let supported = ControllerInput.availableInputs(for: controllerFamily)
-        let next = inputs.intersection(supported)
-        guard next != availableInputs else { return }
-        availableInputs = next
+    /// Changes a Joy-Con's grip from the Dashboard while Settings may be
+    /// editing another device's profile.
+    func setJoyConOrientation(_ orientation: JoyConOrientation, for family: ControllerFamily) {
+        guard family != controllerFamily else { return setJoyConOrientation(orientation) }
+        guard family == .joyConLeft || family == .joyConRight,
+              orientation != joyConOrientation(for: family) else { return }
+        objectWillChange.send()
+        userDefaults.set(
+            orientation.rawValue,
+            forKey: "\(Self.storageKey(base: storageKey, family: family)).orientation"
+        )
+        onJoyConOrientationChange?(orientation)
     }
 
     func setAction(_ newAction: ControllerMappedAction, for input: ControllerInput) {
@@ -807,7 +1047,7 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     func resetDefaults() {
-        mappings = Self.defaultMappings(for: controllerFamily)
+        mappings = Self.defaultMappings(for: controllerFamily, provider: harnessProvider)
         persist()
     }
 
@@ -981,6 +1221,43 @@ final class ControllerMappingStore: ObservableObject {
         userDefaults.bool(forKey: "\(storageKey).\(suffix)")
     }
 
+    private func migrateClaudeSessionDefaultsIfNeeded() {
+        let migrated = Self.migrateClaudeSessionDefaults(
+            in: mappings,
+            family: controllerFamily,
+            key: activeStorageKey,
+            userDefaults: userDefaults
+        )
+        if migrated != mappings { mappings = migrated }
+    }
+
+    /// Claude profiles saved before the session shortcuts existed hold No
+    /// Action on these inputs. Fill them once per profile; later choices stay
+    /// untouched. Profiles of connected controllers that Settings is not
+    /// showing migrate on first read.
+    private static func migrateClaudeSessionDefaults(
+        in mappings: [ControllerInput: ControllerMappedAction],
+        family: ControllerFamily,
+        key: String,
+        userDefaults: UserDefaults
+    ) -> [ControllerInput: ControllerMappedAction] {
+        let completedKey = "\(key).claudeSessionDefaultsMigrated"
+        guard !userDefaults.bool(forKey: completedKey) else { return mappings }
+
+        let defaults = defaultMappings(for: family, provider: .claude)
+        var migrated = mappings
+        for input in claudeSessionDefaults.keys where migrated[input] == .disabled {
+            guard let action = defaults[input], action != .disabled else { continue }
+            migrated[input] = action
+        }
+        if migrated != mappings {
+            let encoded = Dictionary(uniqueKeysWithValues: migrated.map { ($0.key.rawValue, $0.value.rawValue) })
+            userDefaults.set(encoded, forKey: key)
+        }
+        userDefaults.set(true, forKey: completedKey)
+        return migrated
+    }
+
     private func migrateHomeButtonToToggleOperationModeIfNeeded() {
         guard !legacyMigrationCompleted("homeButtonToggleOperationModeMigrated") else { return }
 
@@ -1010,6 +1287,16 @@ final class ControllerMappingStore: ObservableObject {
 
     private static func storageKey(base: String, family: ControllerFamily) -> String {
         family.isJoyCon || family == .xiaomiRemote ? "\(base).profiles.\(family.rawValue)" : base
+    }
+
+    private static func storageKey(
+        base: String,
+        family: ControllerFamily,
+        provider: HarnessProviderID
+    ) -> String {
+        let familyKey = storageKey(base: base, family: family)
+        guard provider != .codex else { return familyKey }
+        return "\(familyKey).providers.\(provider.rawValue)"
     }
 
     private static func migrateRemoteProfile(from defaults: UserDefaults, base: String, family: ControllerFamily) {
