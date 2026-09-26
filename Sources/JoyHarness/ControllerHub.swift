@@ -44,6 +44,7 @@ final class ControllerHub {
     private var precisionSources: Set<String> = []
     private var lastPublishedStick: StickState?
     private var lastPublishedJoystick: JoystickState?
+    private var harnessSwitcherOwnerID: String?
 
     private(set) var selectedSlot = 0
     private(set) var operationMode: ControllerOperationMode = .mapping
@@ -57,6 +58,7 @@ final class ControllerHub {
     var keyHandler: ((String, Int) -> Bool)?
     var joystickHandler: ((Float, Float) -> Bool)?
     var leftStickHandler: ((Float, Float, Bool) -> Void)?
+    var overlayStickHandler: ((Float, Float) -> Bool)?
     var touchpadPointerHandler: ((CGFloat, CGFloat) -> Void)?
     var mouseButtonHandler: ((MouseButton, Bool) -> Void)?
     var systemKeyHandler: ((SystemKey, Bool) -> Void)?
@@ -79,6 +81,9 @@ final class ControllerHub {
     var onInputStateChange: ((ControllerInput, Bool) -> Void)?
     var onOperationModeChange: ((ControllerOperationMode) -> Void)?
     var onConnectedDevicesChange: (([ConnectedControllerDescriptor]) -> Void)?
+    var inputInterceptor: ((ControllerInput, Bool) -> Bool)?
+    var onHarnessSwitcherPresent: (() -> Void)?
+    var onHarnessSwitcherCancel: (() -> Void)?
 
     var batterySnapshot: ControllerBatterySnapshot? {
         selectedSession?.batterySnapshot
@@ -106,9 +111,7 @@ final class ControllerHub {
             !precisionSources.isEmpty
     }
 
-    init(
-        mappingProvider: @escaping FamilyMappingProvider
-    ) {
+    init(mappingProvider: @escaping FamilyMappingProvider) {
         self.mappingProvider = mappingProvider
     }
 
@@ -170,6 +173,10 @@ final class ControllerHub {
         joyConFallback = nil
         joyConFallbackFamily = .generic
         selectedControllerID = nil
+        if harnessSwitcherOwnerID != nil {
+            harnessSwitcherOwnerID = nil
+            onHarnessSwitcherCancel?()
+        }
         selectedSlot = 0
         connectedDevices = []
         onControllerChange?(nil, .generic)
@@ -232,6 +239,21 @@ final class ControllerHub {
         selectedSession?.handleRawHomeButton(isPressed: isPressed)
     }
 
+    func handleRawHomeButton(for family: ControllerFamily, isPressed: Bool) {
+        let matchingID = families.first(where: { $0.value == family })?.key
+        matchingID.flatMap { sessions[$0] }?.handleRawHomeButton(isPressed: isPressed)
+    }
+
+    func finishHarnessSwitcher() {
+        harnessSwitcherOwnerID = nil
+    }
+
+    func suspendMappedOutputs() {
+        for session in sessions.values { session.suspendMappedOutputs() }
+        remoteSession?.suspendMappedOutputs()
+        joyConFallback?.suspendMappedOutputs()
+    }
+
     func updateJoyConHIDShoulders(side: JoyConSide, snapshot: JoyConHIDShoulderSnapshot?) {
         selectedSession?.updateJoyConHIDShoulders(side: side, snapshot: snapshot)
     }
@@ -248,6 +270,7 @@ final class ControllerHub {
             remote.setRemoteControllerActive(true)
             remote.setOperationMode(operationMode)
         } else {
+            cancelHarnessSwitcherIfOwned(by: Self.remoteID)
             remoteSession?.stop()
             releaseSourceState(Self.remoteID)
             remoteSession = nil
@@ -314,6 +337,7 @@ final class ControllerHub {
         // key view can trap at runtime when a controller disconnects.
         let staleIDs = controllers.keys.filter { !liveIDs.contains($0) }
         for id in staleIDs {
+            cancelHarnessSwitcherIfOwned(by: id)
             sessions[id]?.stop()
             releaseSourceState(id)
             sessions.removeValue(forKey: id)
@@ -357,6 +381,7 @@ final class ControllerHub {
     private func switchToJoyConFallback() {
         if !sessions.isEmpty {
             onControllerSetChange?([])
+            for id in sessions.keys { cancelHarnessSwitcherIfOwned(by: id) }
             for session in sessions.values { session.stop() }
             for id in sessions.keys { releaseSourceState(id) }
             sessions.removeAll()
@@ -364,10 +389,12 @@ final class ControllerHub {
             families.removeAll()
         }
         guard joyConFallback == nil else { return }
-        let fallback = ButtonBridge(mappingProvider: { [weak self] input in
-            let family = self?.joyConFallbackFamily ?? .generic
-            return self?.mappingProvider(family, input) ?? .disabled
-        })
+        let fallback = ButtonBridge(
+            mappingProvider: { [weak self] input in
+                let family = self?.joyConFallbackFamily ?? .generic
+                return self?.mappingProvider(family, input) ?? .disabled
+            }
+        )
         bind(
             fallback,
             id: Self.joyConFallbackID,
@@ -380,6 +407,7 @@ final class ControllerHub {
 
     private func stopJoyConFallbackIfNeeded() {
         guard let fallback = joyConFallback else { return }
+        cancelHarnessSwitcherIfOwned(by: Self.joyConFallbackID)
         fallback.stop()
         releaseSourceState(Self.joyConFallbackID)
         joyConFallback = nil
@@ -390,9 +418,11 @@ final class ControllerHub {
     private var joyConFallbackFamily: ControllerFamily = .generic
 
     private func makeSession(id: String, family: ControllerFamily) -> ButtonBridge {
-        let session = ButtonBridge(mappingProvider: { [weak self] input in
-            self?.mappingProvider(family, input) ?? .disabled
-        })
+        let session = ButtonBridge(
+            mappingProvider: { [weak self] input in
+                self?.mappingProvider(family, input) ?? .disabled
+            }
+        )
         bind(session, id: id, family: family)
         return session
     }
@@ -412,6 +442,9 @@ final class ControllerHub {
         }
         session.leftStickHandler = { [weak self] x, y, scrolling in
             self?.handleStick(source: id, x: x, y: y, scrolling: scrolling)
+        }
+        session.overlayStickHandler = { [weak self] x, y in
+            self?.overlayStickHandler?(x, y) ?? false
         }
         session.touchpadPointerHandler = { [weak self] x, y in self?.touchpadPointerHandler?(x, y) }
         session.mouseButtonHandler = { [weak self] button, pressed in
@@ -444,6 +477,14 @@ final class ControllerHub {
         session.onInputStateChange = { [weak self] input, pressed in
             self?.handleInputState(source: id, input: input, pressed: pressed)
         }
+        session.inputInterceptor = { [weak self] input, pressed in
+            self?.inputInterceptor?(input, pressed) ?? false
+        }
+        session.onHarnessSwitcherPresent = { [weak self] in
+            guard let self, self.harnessSwitcherOwnerID == nil else { return }
+            self.harnessSwitcherOwnerID = id
+            self.onHarnessSwitcherPresent?()
+        }
         session.onAvailableInputsChange = { [weak self] inputs in
             guard let self, self.selectedControllerID == id || id == Self.joyConFallbackID else { return }
             self.onAvailableInputsChange?(inputs)
@@ -466,6 +507,12 @@ final class ControllerHub {
         session.onJoyConChange = { [weak self] snapshot in
             self?.onJoyConChange?(snapshot)
         }
+    }
+
+    private func cancelHarnessSwitcherIfOwned(by id: String) {
+        guard harnessSwitcherOwnerID == id else { return }
+        harnessSwitcherOwnerID = nil
+        onHarnessSwitcherCancel?()
     }
 
     private func handleKey(source: String, key: String, action: Int) -> Bool {

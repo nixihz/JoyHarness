@@ -23,21 +23,21 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.7.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.7.1** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.7.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256)
-- [View the v0.7.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.7.0)
+- [Download Joy-Harness-v0.7.1-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.7.1/Joy-Harness-v0.7.1-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.7.1/Joy-Harness-v0.7.1-macOS-arm64.dmg.sha256)
+- [View the v0.7.1 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.7.1)
 
 The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. See the release notes for signing and notarization details.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.7.1-macOS-arm64.dmg.sha256
 ```
 
-## What's New in v0.7.0
+## What's New in v0.7.1
 
 - Keeps standard game controllers and the Xiaomi RC003-MS remote connected at the same time with independent input sessions and selectable mapping profiles.
 - Adds a fixed 744 x 600 dashboard workspace, an on-demand connection inspector, and System, Light, and Dark appearance preferences.
@@ -352,6 +352,12 @@ task demo
 
 Finally, open a task in Codex Desktop and verify approval with `LT + A`, rejection with `LT + B`, slot switching with LB/RB, and push-to-talk by holding Menu/Options.
 
+## Harness Switching
+
+Joy Harness keeps independent controller mappings for Codex, Claude, Cursor, and Pi. Press PS/Home to open the persistent Harness switcher, move with D-pad Left/Right, LB/RB, or the left stick, then press A or PS/Home again to confirm; B cancels.
+
+Use **Settings > Harness** to enable Harnesses, associate macOS applications, and choose whether a confirmed selection activates the associated app. A uniquely matched foreground application switches the active Harness automatically; ambiguous terminal apps keep the current manual selection. Codex retains existing mapping storage, while the other Harnesses start without Codex Micro, task-slot, or radial actions and can be customized independently.
+
 ## Default Controls
 
 Open **Joy Harness > Settings** from the macOS menu bar, or select the gear in the mapping area, to customize buttons and LT combinations. Settings apply immediately and are stored in the current user's preferences. **Restore Default Mapping** restores the behavior below.
@@ -436,7 +442,7 @@ Run this audit separately from the full test suite: native view rendering occupi
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.7.0` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.7.1` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Build and launch the canonical signed app |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -480,8 +486,8 @@ The script first builds a signed app, stops installed Joy Harness/AgentDeck proc
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.7.0
-# Or: bash scripts/package_dmg.sh 0.7.0
+task dmg -- 0.7.1
+# Or: bash scripts/package_dmg.sh 0.7.1
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.

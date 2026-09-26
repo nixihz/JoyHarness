@@ -33,6 +33,13 @@ enum DualSenseUSBOutputReport {
     }
 }
 
+enum DualSenseUSBInputReport {
+    static func homePressed(in report: UnsafeBufferPointer<UInt8>) -> Bool? {
+        guard report.count > 10 else { return nil }
+        return (report[10] & 0x01) != 0
+    }
+}
+
 final class DualSenseHIDOutput {
     private static let sonyVendorID = 0x054c
     private static let dualSenseProductID = 0x0ce6
@@ -45,7 +52,7 @@ final class DualSenseHIDOutput {
     var onHomeButtonChange: ((Bool) -> Void)?
 
     func connectUSB() -> Bool {
-        disconnect()
+        guard device == nil else { return true }
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matching: [String: Any] = [
             kIOHIDVendorIDKey as String: Self.sonyVendorID,
@@ -85,9 +92,8 @@ final class DualSenseHIDOutput {
     }
 
     private func handleInputReport(report: UnsafeMutablePointer<UInt8>, length: CFIndex) {
-        guard length > 10 else { return }
         let bytes = UnsafeBufferPointer(start: report, count: length)
-        let ps = (bytes[10] & 0x01) != 0
+        guard let ps = DualSenseUSBInputReport.homePressed(in: bytes) else { return }
         if ps != lastPSPressed {
             lastPSPressed = ps
             DispatchQueue.main.async { [weak self] in

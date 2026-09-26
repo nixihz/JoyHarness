@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 
@@ -63,6 +64,7 @@ struct JoyHarnessApp: App {
                 scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
                 pointerSensitivitySettings: appDelegate.runtime.pointerSensitivitySettings,
                 nativeModeSettings: appDelegate.runtime.nativeGamepadAppSettings,
+                harnessProviderSettings: appDelegate.runtime.harnessProviderSettings,
                 settingsCoordinator: settingsCoordinator,
                 slotShortcutSettings: appDelegate.runtime.slotShortcutSettings
             )
@@ -115,6 +117,7 @@ final class JoyHarnessRuntime {
     let scrollDirectionSettings: ScrollDirectionSettings
     let pointerSensitivitySettings: PointerSensitivitySettings
     let nativeGamepadAppSettings: NativeGamepadAppSettings
+    let harnessProviderSettings: HarnessProviderSettings
     private(set) var operationMode: ControllerOperationMode = .mapping
     private var frontmostAppName: String?
     private var frontmostAppBundleID: String?
@@ -124,6 +127,7 @@ final class JoyHarnessRuntime {
     private let statusURL: URL
     private let socketPath: String
     private let haptics = HapticEngine()
+    private let harnessSwitcher = HarnessSwitcherCoordinator()
     private let adaptiveTrigger = AdaptiveTriggerFeedback()
     private var xboxTriggerPressState = RightTriggerPressState()
     private let threads = CodexThreadProvider()
@@ -149,6 +153,7 @@ final class JoyHarnessRuntime {
     private var batteryTimer: Timer?
     private var server: SocketServer?
     private var instanceLock: SingleInstanceLock?
+    private var harnessProviderCancellable: AnyCancellable?
     private var hasStarted = false
 
     init() {
@@ -159,7 +164,11 @@ final class JoyHarnessRuntime {
         self.statusURL = URL(fileURLWithPath: "\(home)/.agent-deck/status.json")
         self.socketPath = ProcessInfo.processInfo.environment["AGENT_DECK_SOCK"]
             ?? "\(home)/.agent-deck/pad.sock"
-        let mappings = ControllerMappingStore()
+        let harnessProviderSettings = HarnessProviderSettings()
+        self.harnessProviderSettings = harnessProviderSettings
+        let mappings = ControllerMappingStore(
+            harnessProvider: harnessProviderSettings.activeProviderID ?? .codex
+        )
         self.mappings = mappings
         let scrollDirectionSettings = ScrollDirectionSettings()
         self.scrollDirectionSettings = scrollDirectionSettings
@@ -187,6 +196,35 @@ final class JoyHarnessRuntime {
                 self?.checkFrontmostAppMode()
             }
         }
+        harnessProviderCancellable = harnessProviderSettings.$activeProviderID
+            .removeDuplicates()
+            .sink { [weak self] providerID in
+                guard let self else { return }
+                if providerID == self.mappings.harnessProvider {
+                    if self.hasStarted, let providerID {
+                        self.writeStatus(
+                            self.current,
+                            note: "harness-change: \(providerID.rawValue)"
+                        )
+                    }
+                    return
+                }
+                self.buttons.suspendMappedOutputs()
+                _ = self.rp2040.sendJoystick(angle: 0, distance: 0)
+                guard let providerID else {
+                    if self.hasStarted {
+                        self.writeStatus(self.current, note: "harness-change: none")
+                    }
+                    return
+                }
+                self.mappings.setHarnessProvider(providerID)
+                if self.hasStarted {
+                    self.writeStatus(self.current, note: "harness-change: \(providerID.rawValue)")
+                }
+            }
+        harnessProviderSettings.onSelectionRequest = { [weak self] providerID in
+            self?.selectHarness(providerID) ?? false
+        }
     }
 
     func start() {
@@ -201,6 +239,7 @@ final class JoyHarnessRuntime {
         self.instanceLock = instanceLock
         hasStarted = true
         configureBridge()
+        adaptiveTrigger.startHIDInputMonitoring()
         threads.onUpdate = { [weak self] summaries in
             self?.updateThreads(summaries)
         }
@@ -262,17 +301,22 @@ final class JoyHarnessRuntime {
             writeStatus(current, note: "status-refreshed")
             return true
         case .selectSlot(let index):
-            guard (0..<6).contains(index), rp2040.isConnected else { return false }
+            guard isCodexHarnessActive,
+                  (0..<6).contains(index),
+                  rp2040.isConnected else { return false }
             buttons.selectSlot(index)
             return true
         case .approve:
+            guard isCodexHarnessActive else { return false }
             return tapMicroKey("ACT07")
         case .deny:
+            guard isCodexHarnessActive else { return false }
             return tapMicroKey("ACT08")
         case .toggleFastMode:
+            guard isCodexHarnessActive else { return false }
             return tapMicroKey("ACT06")
         case .openThread:
-            guard rp2040.isConnected else { return false }
+            guard isCodexHarnessActive, rp2040.isConnected else { return false }
             buttons.openSelectedSlot()
             return true
         case .testHaptics(let state):
@@ -285,15 +329,32 @@ final class JoyHarnessRuntime {
         }
     }
 
+    private var isCodexHarnessActive: Bool {
+        harnessProviderSettings.activeProviderID == .codex
+    }
+
     private func configureBridge() {
         buttons.keyHandler = { [weak self] key, action in
-            self?.rp2040.sendKey(key, action: action) ?? false
+            guard let self else { return false }
+            guard action == 0 || (self.isCodexHarnessActive && !self.harnessSwitcher.isPresented) else {
+                return false
+            }
+            return self.rp2040.sendKey(key, action: action)
         }
         buttons.joystickHandler = { [weak self] angle, distance in
-            self?.rp2040.sendJoystick(angle: angle, distance: distance) ?? false
+            guard let self else { return false }
+            if distance > 0,
+               (!self.isCodexHarnessActive || self.harnessSwitcher.isPresented) {
+                return true
+            }
+            return self.rp2040.sendJoystick(angle: angle, distance: distance)
         }
         buttons.leftStickHandler = { [weak self] x, y, scrolling in
-            self?.mouse.updateStick(x: x, y: y, scrolling: scrolling)
+            guard let self, !self.harnessSwitcher.isPresented else { return }
+            self.mouse.updateStick(x: x, y: y, scrolling: scrolling)
+        }
+        buttons.overlayStickHandler = { [weak self] x, _ in
+            self?.harnessSwitcher.handleLeftStick(x: x) ?? false
         }
         buttons.mouseButtonHandler = { [weak self] button, pressed in
             self?.mouse.setMouseButton(button, pressed: pressed)
@@ -311,7 +372,14 @@ final class JoyHarnessRuntime {
             self?.mouse.setPrecisionActive(active)
         }
         buttons.touchpadPointerHandler = { [weak self] x, y in
-            self?.mouse.applyPointerDelta(x: x, y: y)
+            guard let self, !self.harnessSwitcher.isPresented else { return }
+            self.mouse.applyPointerDelta(x: x, y: y)
+        }
+        buttons.inputInterceptor = { [weak self] input, pressed in
+            self?.interceptHarnessSwitcherInput(input, pressed: pressed) ?? false
+        }
+        buttons.onHarnessSwitcherPresent = { [weak self] in
+            self?.presentHarnessSwitcher()
         }
         buttons.openApplicationTargetProvider = { [weak self] family, input in
             self?.mappings.openApplicationTarget(for: input, family: family)
@@ -348,7 +416,7 @@ final class JoyHarnessRuntime {
             self?.haptics.playAdaptiveTriggerFeedback(event)
         }
         adaptiveTrigger.onHomeButtonChange = { [weak self] isPressed in
-            self?.buttons.handleRawHomeButton(isPressed: isPressed)
+            self?.buttons.handleRawHomeButton(for: .dualSense, isPressed: isPressed)
         }
         buttons.onSlotSelected = { [weak self] index in
             guard let self else { return }
@@ -460,12 +528,75 @@ final class JoyHarnessRuntime {
         }
     }
 
+    private func presentHarnessSwitcher() {
+        guard !harnessSwitcher.isPresented else { return }
+        let runningApplications = NSWorkspace.shared.runningApplications
+        let options = harnessProviderSettings.enabledProviders.map { provider in
+            HarnessSwitcherOption(
+                configuration: provider,
+                isApplicationConnected: runningApplications.contains { application in
+                    if let bundleIdentifier = provider.bundleIdentifier,
+                       application.bundleIdentifier?.caseInsensitiveCompare(bundleIdentifier) == .orderedSame {
+                        return true
+                    }
+                    if let appName = provider.appName,
+                       application.localizedName?.caseInsensitiveCompare(appName) == .orderedSame {
+                        return true
+                    }
+                    return false
+                }
+            )
+        }
+
+        buttons.suspendMappedOutputs()
+        mouse.updateStick(x: 0, y: 0, scrolling: false)
+        _ = rp2040.sendJoystick(angle: 0, distance: 0)
+        harnessSwitcher.present(
+            options: options,
+            current: harnessProviderSettings.activeProviderID
+        ) { [weak self] providerID in
+            _ = self?.selectHarness(providerID)
+        }
+    }
+
+    private func interceptHarnessSwitcherInput(
+        _ input: ControllerInput,
+        pressed: Bool
+    ) -> Bool {
+        let wasPresented = harnessSwitcher.isPresented
+        let consumed = harnessSwitcher.handleControllerInput(input, pressed: pressed)
+        if wasPresented, !harnessSwitcher.isPresented {
+            buttons.finishHarnessSwitcher()
+        }
+        return consumed
+    }
+
+    @discardableResult
+    private func selectHarness(_ providerID: HarnessProviderID) -> Bool {
+        guard harnessProviderSettings.select(providerID),
+              let provider = harnessProviderSettings.provider(for: providerID) else { return false }
+        mappings.setHarnessProvider(providerID)
+        if provider.activateApplicationOnSelection,
+           let bundleIdentifier = provider.bundleIdentifier {
+            _ = openApplication(bundleIdentifier: bundleIdentifier)
+        }
+        writeStatus(current, note: "harness-selected: \(providerID.rawValue)")
+        print("[agent-deck] harness=\(providerID.rawValue)")
+        return true
+    }
+
     func checkFrontmostAppMode() {
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         let bundleID = app.bundleIdentifier
         let appName = app.localizedName
         self.frontmostAppName = appName
         self.frontmostAppBundleID = bundleID
+        if let matchedProvider = harnessProviderSettings.match(
+            bundleIdentifier: bundleID,
+            appName: appName
+        ) {
+            _ = harnessProviderSettings.select(matchedProvider.id)
+        }
         guard nativeGamepadAppSettings.autoSwitchEnabled else { return }
 
         let matches = nativeGamepadAppSettings.matches(runningApp: app)
@@ -541,6 +672,7 @@ final class JoyHarnessRuntime {
     }
 
     private func tapMicroKey(_ key: String) -> Bool {
+        guard isCodexHarnessActive else { return false }
         guard rp2040.sendKey(key, action: 1) else { return false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
             _ = self?.rp2040.sendKey(key, action: 0)
@@ -629,6 +761,8 @@ final class JoyHarnessRuntime {
             "rp2040": rp2040.isConnected,
             "mode": "physical-codex-micro",
             "operation_mode": operationMode.rawValue,
+            "active_harness": harnessProviderSettings.activeProviderID?.rawValue ?? "",
+            "active_harness_name": harnessProviderSettings.activeProvider?.displayName ?? "",
             "frontmost_app_name": frontmostAppName ?? "",
             "frontmost_app_bundle_id": frontmostAppBundleID ?? "",
             "note": note ?? "",

@@ -221,4 +221,22 @@ struct XiaomiRemoteTests {
         hub.setRemoteControllerActive(false)
         #expect(devices.isEmpty)
     }
+
+    @Test
+    @MainActor
+    func controllerHubCancelsTheSwitcherWhenItsOwnerDisconnects() {
+        let hub = ControllerHub { family, input in
+            ControllerMappingStore.defaultMappings(for: family)[input] ?? .disabled
+        }
+        var events: [String] = []
+        hub.onHarnessSwitcherPresent = { events.append("present") }
+        hub.onHarnessSwitcherCancel = { events.append("cancel") }
+        hub.setRemoteControllerActive(true)
+
+        hub.handleRawHomeButton(isPressed: true)
+        #expect(events == ["present"])
+
+        hub.setRemoteControllerActive(false)
+        #expect(events == ["present", "cancel"])
+    }
 }

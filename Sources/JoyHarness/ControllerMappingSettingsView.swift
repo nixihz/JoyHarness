@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ControllerMappingSettingsPane: View {
     @ObservedObject var store: ControllerMappingStore
+    @ObservedObject var harnessProviderSettings: HarnessProviderSettings
     @State private var isResetConfirmationPresented = false
     @State private var recordingInput: ControllerInput?
     private var joyConOrientationBinding: Binding<JoyConOrientation> {
@@ -15,6 +16,10 @@ struct ControllerMappingSettingsPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ActiveHarnessPickerBar(settings: harnessProviderSettings)
+
+            Divider()
+
             if !store.connectedDevices.isEmpty {
                 HStack(spacing: 12) {
                     Label(

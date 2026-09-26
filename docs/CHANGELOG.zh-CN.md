@@ -7,7 +7,16 @@
 
 [English](CHANGELOG.md)
 
-## [Unreleased]
+## [0.7.1] - 2026-09-26
+
+### 新增
+- 新增按下 PS/Home 即时呼出的 Harness 切换浮层，支持 Codex、Claude、Cursor 和 Pi 的独立映射、应用关联及唯一前台应用匹配。
+
+### 修复
+- Harness 切换浮层显示期间释放已激活的映射输出，并阻止非 Codex Harness 发送 Codex Micro 按下或径向输入。
+
+### 变更
+- 日常维护与性能优化。
 
 ## [0.7.0] - 2026-09-21
 
@@ -150,6 +159,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.7.1]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0

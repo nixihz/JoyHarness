@@ -10,8 +10,8 @@ import Testing
 struct JoyHarnessTests {
     @Test
     func appVersionLoadsFromTheBundledVersionResource() {
-        #expect(AppVersion.current == "0.7.0")
-        #expect(AppVersion.displayName == "Joy Harness v0.7.0")
+        #expect(AppVersion.current == "0.7.1")
+        #expect(AppVersion.displayName == "Joy Harness v0.7.1")
     }
 
     @Test
@@ -1229,6 +1229,27 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func dualSenseUSBInputReportReadsThePSButtonBit() {
+        let released = [UInt8](repeating: 0, count: 64)
+        var pressed = released
+        pressed[10] = 0x01
+
+        let releasedState = released.withUnsafeBufferPointer {
+            DualSenseUSBInputReport.homePressed(in: $0)
+        }
+        let pressedState = pressed.withUnsafeBufferPointer {
+            DualSenseUSBInputReport.homePressed(in: $0)
+        }
+        let truncatedState = Array(released.prefix(10)).withUnsafeBufferPointer {
+            DualSenseUSBInputReport.homePressed(in: $0)
+        }
+
+        #expect(releasedState == false)
+        #expect(pressedState == true)
+        #expect(truncatedState == nil)
+    }
+
+    @Test
     func fastAdaptiveTriggerPressSkipsTheLightPulse() {
         var state = RightTriggerPressState()
         let feedback = state.update(value: 0.90)
@@ -2418,6 +2439,38 @@ struct JoyHarnessTests {
     }
 
     @Test
+    func harnessSwitcherConsumesJoyConLeftStickBeforePointerMotion() {
+        let bridge = ButtonBridge()
+        var switcherPresented = true
+        var switcherSamples: [JoyConStick] = []
+        var pointerSamples: [JoyConStick] = []
+        bridge.overlayStickHandler = { x, y in
+            switcherSamples.append(JoyConStick(x: x, y: y))
+            return switcherPresented
+        }
+        bridge.leftStickHandler = { x, y, _ in
+            pointerSamples.append(JoyConStick(x: x, y: y))
+        }
+
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [:],
+            primaryStick: JoyConStick(x: 0.8, y: 0.1),
+            secondaryStick: .neutral
+        ))
+        #expect(switcherSamples == [JoyConStick(x: 0.8, y: 0.1)])
+        #expect(pointerSamples.isEmpty)
+
+        switcherPresented = false
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [:],
+            primaryStick: JoyConStick(x: 0.2, y: -0.3),
+            secondaryStick: .neutral
+        ))
+        #expect(switcherSamples.last == JoyConStick(x: 0.2, y: -0.3))
+        #expect(pointerSamples == [JoyConStick(x: 0.2, y: -0.3)])
+    }
+
+    @Test
     func changingJoyConOrientationReleasesHeldActionsAndNeutralizesAxes() {
         let bridge = ButtonBridge { input in
             input == .buttonA ? .mouseLeft : .disabled
@@ -2892,9 +2945,11 @@ struct JoyHarnessTests {
     }
 
     @Test
-    func buttonBridgeHomeButtonTogglesNativeModeAndFiresCallback() {
+    func buttonBridgeHomePressPresentsSwitcherImmediatelyAndReleaseKeepsItOpen() {
         let bridge = ButtonBridge()
+        var presentedCount = 0
         var toggledCount = 0
+        bridge.onHarnessSwitcherPresent = { presentedCount += 1 }
         bridge.onToggleOperationMode = { toggledCount += 1 }
 
         #expect(bridge.operationMode == .mapping)
@@ -2907,8 +2962,73 @@ struct JoyHarnessTests {
             secondaryStick: .neutral
         ))
 
-        #expect(bridge.operationMode == .mapping)
-        #expect(toggledCount == 1)
+        #expect(presentedCount == 1)
+        #expect(toggledCount == 0)
+
+        // A repeated pressed snapshot is not another gesture edge.
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [.home: true],
+            primaryStick: .neutral,
+            secondaryStick: .neutral
+        ))
+        bridge.applyJoyConSnapshot(.neutral)
+
+        #expect(presentedCount == 1)
+        #expect(toggledCount == 0)
+        #expect(bridge.operationMode == .native)
+    }
+
+    @Test
+    func presentingOverlayReleasesHeldActionUntilPhysicalButtonIsPressedAgain() {
+        let bridge = ButtonBridge { input in
+            input == .buttonA ? .mouseLeft : .disabled
+        }
+        var mouseEvents: [Bool] = []
+        bridge.mouseButtonHandler = { _, pressed in mouseEvents.append(pressed) }
+        let pressed = JoyConInputSnapshot(
+            buttons: [.buttonA: true],
+            primaryStick: .neutral,
+            secondaryStick: .neutral
+        )
+
+        bridge.applyJoyConSnapshot(pressed)
+        bridge.suspendMappedOutputs()
+        bridge.applyJoyConSnapshot(pressed)
+
+        #expect(mouseEvents == [true, false])
+
+        bridge.applyJoyConSnapshot(.neutral)
+        bridge.applyJoyConSnapshot(pressed)
+
+        #expect(mouseEvents == [true, false, true])
+    }
+
+    @Test
+    func consumedJoyConInputDoesNotRunItsMappedAction() {
+        let bridge = ButtonBridge { input in
+            input == .buttonA ? .mouseLeft : .disabled
+        }
+        var mouseEvents: [Bool] = []
+        var interceptedEdges: [(ControllerInput, Bool)] = []
+        bridge.mouseButtonHandler = { _, pressed in mouseEvents.append(pressed) }
+        bridge.inputInterceptor = { input, pressed in
+            interceptedEdges.append((input, pressed))
+            return true
+        }
+
+        bridge.applyJoyConSnapshot(JoyConInputSnapshot(
+            buttons: [.buttonA: true],
+            primaryStick: .neutral,
+            secondaryStick: .neutral
+        ))
+        bridge.applyJoyConSnapshot(.neutral)
+
+        #expect(mouseEvents.isEmpty)
+        #expect(interceptedEdges.count == 2)
+        #expect(interceptedEdges[0].0 == .buttonA)
+        #expect(interceptedEdges[0].1)
+        #expect(interceptedEdges[1].0 == .buttonA)
+        #expect(!interceptedEdges[1].1)
     }
 
     @Test

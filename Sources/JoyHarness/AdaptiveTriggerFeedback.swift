@@ -75,8 +75,11 @@ final class AdaptiveTriggerFeedback {
         })
     }
 
+    func startHIDInputMonitoring() {
+        _ = hidOutput.connectUSB()
+    }
+
     func attach(_ controller: GCController?) {
-        hidOutput.disconnect()
         trigger?.setModeOff()
         trigger = nil
         pressState = RightTriggerPressState()

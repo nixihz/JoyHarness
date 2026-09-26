@@ -529,6 +529,23 @@ final class ControllerMappingStore: ObservableObject {
     static let defaultMappings = defaultMappings(for: .xbox)
 
     static func defaultMappings(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        defaultMappings(for: family, provider: .codex)
+    }
+
+    static func defaultMappings(
+        for family: ControllerFamily,
+        provider: HarnessProviderID
+    ) -> [ControllerInput: ControllerMappedAction] {
+        let defaults = codexDefaultMappings(for: family)
+        guard provider != .codex else { return defaults }
+        return defaults.mapValues { action in
+            isCodexSpecificDefault(action) ? .disabled : action
+        }
+    }
+
+    private static func codexDefaultMappings(
+        for family: ControllerFamily
+    ) -> [ControllerInput: ControllerMappedAction] {
         if family == .xiaomiRemote {
             var defaults: [ControllerInput: ControllerMappedAction] = [:]
             for input in ControllerInput.allCases {
@@ -557,7 +574,18 @@ final class ControllerMappingStore: ObservableObject {
         return defaults
     }
 
+    private static func isCodexSpecificDefault(_ action: ControllerMappedAction) -> Bool {
+        if action == .radialInput { return true }
+        switch action.controllerAction {
+        case .microKey, .slotOffset, .selectSlot:
+            return true
+        default:
+            return false
+        }
+    }
+
     @Published private(set) var mappings: [ControllerInput: ControllerMappedAction]
+    @Published private(set) var harnessProvider: HarnessProviderID
     @Published private(set) var controllerFamily: ControllerFamily
     @Published private(set) var availableInputs: Set<ControllerInput>
     @Published private(set) var joyConOrientation: JoyConOrientation
@@ -572,33 +600,42 @@ final class ControllerMappingStore: ObservableObject {
     private let userDefaults: UserDefaults
     private let storageKey: String
     private var activeStorageKey: String {
-        Self.storageKey(base: storageKey, family: controllerFamily)
+        Self.storageKey(base: storageKey, family: controllerFamily, provider: harnessProvider)
     }
     private var schemaVersionStorageKey: String { "\(activeStorageKey).schemaVersion" }
     private var openApplicationStorageKey: String { "\(activeStorageKey).openApplications" }
     private var recordedShortcutsStorageKey: String { "\(activeStorageKey).recordedShortcuts" }
-    private var joyConOrientationStorageKey: String { "\(activeStorageKey).orientation" }
+    private var joyConOrientationStorageKey: String {
+        "\(Self.storageKey(base: storageKey, family: controllerFamily)).orientation"
+    }
 
     init(
         userDefaults: UserDefaults = .standard,
-        storageKey: String = "controllerMappings.v1"
+        storageKey: String = "controllerMappings.v1",
+        harnessProvider: HarnessProviderID = .codex
     ) {
         self.userDefaults = userDefaults
         self.storageKey = storageKey
+        self.harnessProvider = harnessProvider
         let storedFamily = userDefaults.string(forKey: "\(storageKey).controllerFamily")
             .flatMap(ControllerFamily.init(rawValue:)) ?? .xbox
         Self.migrateRemoteProfile(from: userDefaults, base: storageKey, family: storedFamily)
-        let activeStorageKey = Self.storageKey(base: storageKey, family: storedFamily)
+        let familyStorageKey = Self.storageKey(base: storageKey, family: storedFamily)
+        let activeStorageKey = Self.storageKey(
+            base: storageKey,
+            family: storedFamily,
+            provider: harnessProvider
+        )
         self.controllerFamily = storedFamily
         self.availableInputs = ControllerInput.availableInputs(for: storedFamily)
         self.joyConOrientation = Self.loadJoyConOrientation(
             from: userDefaults,
-            key: "\(activeStorageKey).orientation"
+            key: "\(familyStorageKey).orientation"
         )
         self.mappings = Self.loadMappings(
             from: userDefaults,
             key: activeStorageKey,
-            defaults: Self.defaultMappings(for: storedFamily)
+            defaults: Self.defaultMappings(for: storedFamily, provider: harnessProvider)
         )
         self.openApplicationTargets = Self.loadOpenApplicationTargets(
             from: userDefaults,
@@ -608,13 +645,15 @@ final class ControllerMappingStore: ObservableObject {
             from: userDefaults,
             key: "\(activeStorageKey).recordedShortcuts"
         )
-        if !storedFamily.isJoyCon && storedFamily != .xiaomiRemote {
+        if harnessProvider == .codex && !storedFamily.isJoyCon && storedFamily != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
         }
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
-        mappings[input] ?? Self.defaultMappings(for: controllerFamily)[input] ?? .disabled
+        mappings[input]
+            ?? Self.defaultMappings(for: controllerFamily, provider: harnessProvider)[input]
+            ?? .disabled
     }
 
     /// Returns the mapping for a connected device without changing the profile
@@ -626,13 +665,15 @@ final class ControllerMappingStore: ObservableObject {
         family: ControllerFamily
     ) -> ControllerMappedAction {
         guard family != controllerFamily else { return action(for: input) }
-        let key = Self.storageKey(base: storageKey, family: family)
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         let stored = Self.loadMappings(
             from: userDefaults,
             key: key,
-            defaults: Self.defaultMappings(for: family)
+            defaults: Self.defaultMappings(for: family, provider: harnessProvider)
         )
-        return stored[input] ?? Self.defaultMappings(for: family)[input] ?? .disabled
+        return stored[input]
+            ?? Self.defaultMappings(for: family, provider: harnessProvider)[input]
+            ?? .disabled
     }
 
     func displayName(for input: ControllerInput) -> String {
@@ -651,7 +692,7 @@ final class ControllerMappingStore: ObservableObject {
         family: ControllerFamily
     ) -> String? {
         guard family != controllerFamily else { return openApplicationTarget(for: input) }
-        let key = Self.storageKey(base: storageKey, family: family)
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         return Self.loadOpenApplicationTargets(
             from: userDefaults,
             key: "\(key).openApplications"
@@ -688,7 +729,7 @@ final class ControllerMappingStore: ObservableObject {
         family: ControllerFamily
     ) -> RecordedShortcutConfiguration {
         guard family != controllerFamily else { return recordedShortcutConfiguration(for: input) }
-        let key = Self.storageKey(base: storageKey, family: family)
+        let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         return Self.loadRecordedShortcutConfigurations(
             from: userDefaults,
             key: "\(key).recordedShortcuts"
@@ -720,8 +761,8 @@ final class ControllerMappingStore: ObservableObject {
         guard family != controllerFamily else { return }
         persistAll()
         let previousFamily = controllerFamily
-        let previousDefaults = Self.defaultMappings(for: controllerFamily)
-        let newDefaults = Self.defaultMappings(for: family)
+        let previousDefaults = Self.defaultMappings(for: controllerFamily, provider: harnessProvider)
+        let newDefaults = Self.defaultMappings(for: family, provider: harnessProvider)
         controllerFamily = family
         availableInputs = ControllerInput.availableInputs(for: family)
         joyConOrientation = Self.loadJoyConOrientation(
@@ -747,11 +788,33 @@ final class ControllerMappingStore: ObservableObject {
                 mappings[input] = newDefaults[input]
             }
         }
-        if !family.isJoyCon && family != .xiaomiRemote {
+        if harnessProvider == .codex && !family.isJoyCon && family != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
         }
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
         persistAll()
+    }
+
+    func setHarnessProvider(_ provider: HarnessProviderID) {
+        guard provider != harnessProvider else { return }
+        persistAll()
+        harnessProvider = provider
+        mappings = Self.loadMappings(
+            from: userDefaults,
+            key: activeStorageKey,
+            defaults: Self.defaultMappings(for: controllerFamily, provider: provider)
+        )
+        openApplicationTargets = Self.loadOpenApplicationTargets(
+            from: userDefaults,
+            key: openApplicationStorageKey
+        )
+        recordedShortcutConfigurations = Self.loadRecordedShortcutConfigurations(
+            from: userDefaults,
+            key: recordedShortcutsStorageKey
+        )
+        if provider == .codex && !controllerFamily.isJoyCon && controllerFamily != .xiaomiRemote {
+            migrateStoredMappingsIfNeeded()
+        }
     }
 
     func setConnectedDevices(_ devices: [ConnectedControllerDescriptor]) {
@@ -807,7 +870,7 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     func resetDefaults() {
-        mappings = Self.defaultMappings(for: controllerFamily)
+        mappings = Self.defaultMappings(for: controllerFamily, provider: harnessProvider)
         persist()
     }
 
@@ -1010,6 +1073,16 @@ final class ControllerMappingStore: ObservableObject {
 
     private static func storageKey(base: String, family: ControllerFamily) -> String {
         family.isJoyCon || family == .xiaomiRemote ? "\(base).profiles.\(family.rawValue)" : base
+    }
+
+    private static func storageKey(
+        base: String,
+        family: ControllerFamily,
+        provider: HarnessProviderID
+    ) -> String {
+        let familyKey = storageKey(base: base, family: family)
+        guard provider != .codex else { return familyKey }
+        return "\(familyKey).providers.\(provider.rawValue)"
     }
 
     private static func migrateRemoteProfile(from defaults: UserDefaults, base: String, family: ControllerFamily) {

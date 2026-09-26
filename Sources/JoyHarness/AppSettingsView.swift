@@ -8,6 +8,7 @@ struct AppSettingsView: View {
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
     @ObservedObject var nativeModeSettings: NativeGamepadAppSettings
+    @ObservedObject var harnessProviderSettings: HarnessProviderSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
     @ObservedObject var slotShortcutSettings: SlotShortcutSettings
 
@@ -35,8 +36,13 @@ struct AppSettingsView: View {
                     scrollDirectionSettings: scrollDirectionSettings,
                     pointerSensitivitySettings: pointerSensitivitySettings
                 )
+            case .harness:
+                HarnessSettingsPane(settings: harnessProviderSettings)
             case .controllerMapping:
-                ControllerMappingSettingsPane(store: mappingStore)
+                ControllerMappingSettingsPane(
+                    store: mappingStore,
+                    harnessProviderSettings: harnessProviderSettings
+                )
             case .slotShortcuts:
                 SlotShortcutSettingsPane(settings: slotShortcutSettings)
             case .nativeMode:

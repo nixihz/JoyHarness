@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [简体中文](CHANGELOG.zh-CN.md)
 
-## [Unreleased]
+## [0.7.1] - 2026-09-26
+
+### Added
+- Add a PS/Home Harness switcher for Codex, Claude, Cursor, and Pi, with immediate presentation, independent mappings, application associations, and unique foreground-app matching.
+
+### Fixed
+- Release active mapped outputs while the Harness switcher is open and prevent non-Codex Harnesses from sending Codex Micro press or radial input.
+
+### Changed
+- Maintenance and performance improvements.
 
 ## [0.7.0] - 2026-09-21
 
@@ -150,6 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.7.1]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
