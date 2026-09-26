@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-26
+
 ### Added
+- Sparkle in-app updates for signed and notarized stable releases, with EdDSA-signed appcasts, manual checks, and optional automatic checks. Downloads and installation require user confirmation. Existing users must install this first Sparkle-enabled version manually.
 - Add a PS/Home Harness switcher for Codex, Claude, Cursor, and Antigravity, with immediate presentation, independent mappings, application associations, and unique foreground-app matching. The panel widens to fit every enabled Harness and uses Liquid Glass on macOS 26. Cards show each associated app's real icon; press PS/Home again or B, click anywhere, or switch apps or Spaces to close it without switching. A trailing Main Window card brings up the Joy Harness main window from the controller, even after it was closed.
 - Add Antigravity as an optional Native Mode app, disabled by default so its Harness mappings work; migrate the earlier development default to disabled. Default apps are listed only when installed.
 - Add Claude Harness default mappings: L1/R1 cycle to the previous/next Claude session (`⌘⇧[` / `⌘⇧]`) and RT opens Claude Search (`⌘⇧K`). Saved Claude profiles fill these keys once where they were still No Action.
@@ -17,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Show a device switcher in the Dashboard header when several devices are connected. The Dashboard also switches to whichever device most recently had a button pressed; devices with the same name are numbered. The switcher is display only and is separate from the Settings **Configure Device** picker.
 
 ### Changed
+- Source, debug, ad-hoc, and prerelease builds remain outside the stable Sparkle update feed. Microphone component upgrades require a separate administrator-authorized installation from Settings.
 - Gamepad PS/Home now opens the Harness switcher in mapping mode; in Native Mode it returns to mapping mode, like the Xiaomi remote's Home.
 - Install and local test builds now go to `/Applications/Joy Harness.app` and remove the legacy `~/.agent-deck/Joy Harness.app` copy.
 - The right stick now scrolls in every Harness without holding LT, at the same speed and direction as LT + left stick, and works while the left stick moves the pointer. LT + left stick scrolling stays for single Joy-Con, and LT + right stick directions still trigger their mappings. Codex radial input now comes only from D-pad Left/Down/Right.
@@ -172,6 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0

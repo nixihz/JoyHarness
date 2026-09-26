@@ -25,17 +25,17 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 ## 下载
 
-当前版本为 **v0.7.0**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
+当前版本为 **v0.8.0**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
 
-- [下载 Joy-Harness-v0.7.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg)
-- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256)
-- [查看 v0.7.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.7.0)
+- [下载 Joy-Harness-v0.8.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.0/Joy-Harness-v0.8.0-macOS-arm64.dmg)
+- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.8.0/Joy-Harness-v0.8.0-macOS-arm64.dmg.sha256)
+- [查看 v0.8.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.8.0)
 
 DMG 只包含可手动启动的 `Joy Harness.app`。如需本地 CLI，或需要构建和刷写 RP2040 固件，
 请使用下方的[源码安装](#从零安装)。签名与 Apple 公证信息请查看 Release 说明。校验下载文件：
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.8.0-macOS-arm64.dmg.sha256
 ```
 
 ## 界面预览
@@ -47,6 +47,15 @@ shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
 **小米 RC003-MS 遥控器**
 
 ![Joy Harness 界面展示小米遥控器按键映射和连接详情](images/dashboard-xiaomi-remote.png)
+
+## v0.8.0 更新
+
+- 新增 Codex、Claude、Cursor、Antigravity 与 Joy Harness 主窗口的 Harness 切换浮层，支持独立映射和前台应用关联。
+- 支持多个设备同时连接，Dashboard 新增设备切换器，并自动跟随最近按键的设备。
+- 为签名并公证的稳定版加入 Sparkle 应用内更新，提供手动检查和可选的自动检查；下载与安装仍由用户确认。
+- 源码、调试、ad-hoc 和预发布构建不进入稳定版更新源。
+
+请先手动安装 v0.8.0，此后才能通过 Sparkle 接收应用内更新。
 
 ## v0.7.0 更新
 
@@ -545,7 +554,7 @@ PlayStation 标准手柄共用标准手柄映射 profile，以保持共同按键
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.7.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
+| `task dmg -- 0.8.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 构建并启动固定路径的签名应用 |
 | `task install` | 编译、安装并启动应用 |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -594,15 +603,15 @@ Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可
 构建适用于当前 Mac 架构的发布镜像：
 
 ```bash
-task dmg -- 0.7.0
-# 或：bash scripts/package_dmg.sh 0.7.0
+task dmg -- 0.8.0
+# 或：bash scripts/package_dmg.sh 0.8.0
 ```
 
 产物会写入 `dist/`：
 
 ```text
-Joy-Harness-v0.7.0-macOS-arm64.dmg
-Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
+Joy-Harness-v0.8.0-macOS-arm64.dmg
+Joy-Harness-v0.8.0-macOS-arm64.dmg.sha256
 ```
 
 DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、

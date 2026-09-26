@@ -23,18 +23,18 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.7.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.8.0** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
 
-- [Download Joy-Harness-v0.7.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.7.0/Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256)
-- [View the v0.7.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.7.0)
+- [Download Joy-Harness-v0.8.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.0/Joy-Harness-v0.8.0-macOS-arm64.dmg)
+- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.8.0/Joy-Harness-v0.8.0-macOS-arm64.dmg.sha256)
+- [View the v0.8.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.8.0)
 
 The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. See the release notes for signing and notarization details.
 
 Verify the download with:
 
 ```bash
-shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.8.0-macOS-arm64.dmg.sha256
 ```
 
 ## Dashboard
@@ -46,6 +46,15 @@ shasum -a 256 -c Joy-Harness-v0.7.0-macOS-arm64.dmg.sha256
 **Xiaomi RC003-MS remote**
 
 ![Joy Harness dashboard showing Xiaomi remote button mappings and connection details](docs/images/dashboard-xiaomi-remote.png)
+
+## What's New in v0.8.0
+
+- Adds Harness switching for Codex, Claude, Cursor, Antigravity, and the Joy Harness main window, with independent mappings and foreground application associations.
+- Adds simultaneous multi-device support with a Dashboard device switcher and recent-input selection.
+- Adds Sparkle in-app updates for signed and notarized stable releases, with manual checks and optional automatic checks. Downloads and installation remain user-confirmed.
+- Keeps source, debug, ad-hoc, and prerelease builds outside the stable update feed.
+
+Install v0.8.0 manually to receive future updates through Sparkle.
 
 ## What's New in v0.7.0
 
@@ -449,7 +458,7 @@ Run this audit separately from the full test suite: native view rendering occupi
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.7.0` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.8.0` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Build and launch the canonical signed app |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -493,8 +502,8 @@ The script first builds a signed app, stops installed Joy Harness/AgentDeck proc
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.7.0
-# Or: bash scripts/package_dmg.sh 0.7.0
+task dmg -- 0.8.0
+# Or: bash scripts/package_dmg.sh 0.8.0
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.

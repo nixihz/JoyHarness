@@ -9,7 +9,10 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-26
+
 ### 新增
+- 为签名并公证的稳定版加入 Sparkle 应用内更新，使用 EdDSA 签名 appcast，提供手动检查和可选的自动检查；下载与安装须由用户确认。现有用户需要手动安装这个首个支持 Sparkle 的版本。
 - 新增按下 PS/Home 即时呼出的 Harness 切换浮层，支持 Codex、Claude、Cursor 和 Antigravity 的独立映射、应用关联及唯一前台应用匹配。浮层宽度随已启用的 Harness 数量扩展，macOS 26 上使用 Liquid Glass 玻璃背景。卡片显示关联应用的真实图标；再次按 PS/Home 或 B、点击任意位置、切换应用或桌面空间都会关闭浮层且不切换 Harness。末尾的“主窗口”卡片可直接用手柄显示 Joy Harness 主窗口，关闭后也能重新打开。
 - 原生模式应用列表新增 Antigravity，默认关闭以保留其 Harness 映射；旧开发版的默认开启状态会迁移为关闭。默认应用仅在已安装时列出。
 - 新增 Claude Harness 默认映射：L1/R1 切换到上一个/下一个 Claude 会话（`⌘⇧[` / `⌘⇧]`），RT 打开 Claude 搜索（`⌘⇧K`）。已保存的 Claude 配置中这些键若仍为“不执行操作”，会一次性补上新默认值。
@@ -17,6 +20,7 @@
 - 连接多个设备时，Dashboard 顶部显示设备切换器，并自动切换到最近按下按键的设备；同名设备会自动编号。切换器只影响展示，与设置中的“设置设备”选择器相互独立。
 
 ### 变更
+- 源码、调试、ad-hoc 和预发布构建不进入稳定版 Sparkle 更新源。麦克风组件升级须由用户在设置中单独发起并完成管理员验证。
 - 游戏手柄的 PS/Home 在映射模式下改为呼出 Harness 切换浮层；原生手柄模式下按 PS/Home 返回映射模式，与小米遥控器主页键一致。
 - 安装和本地测试构建改为写入 `/Applications/Joy Harness.app`，并移除旧的 `~/.agent-deck/Joy Harness.app` 副本。
 - 右摇杆在所有 Harness 中直接滚动，无需按住 LT；速度和方向与 LT + 左摇杆相同，并可与左摇杆移动鼠标同时进行。LT + 左摇杆滚动继续保留，供单只 Joy-Con 使用；LT + 右摇杆四个方向仍触发各自的映射。Codex 径向输入改为只由十字键左/下/右发送。
@@ -172,6 +176,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nixihz/JoyHarness/compare/v0.5.1...v0.6.0
