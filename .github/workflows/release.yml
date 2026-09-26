@@ -342,7 +342,7 @@ jobs:
         run: |
           set -euo pipefail
           FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml"
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
             echo "Checking published Sparkle feed (attempt ${attempt})"
             if curl --fail --location --silent --show-error "${FEED_URL}" \
                 --output "${RUNNER_TEMP}/published-appcast.xml" \
