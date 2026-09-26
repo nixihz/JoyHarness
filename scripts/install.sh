@@ -32,6 +32,7 @@ install -m 755 "${BUILT}" "${STAGED_APP_EXE}"
 /usr/bin/ditto "${RESOURCE_BUNDLE}" "${STAGED_CONTENTS}/Resources/JoyHarness_JoyHarness.bundle"
 # Launch Services reads CFBundleIconFile from the app's resources, not the module bundle.
 install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_CONTENTS}/Resources/JoyHarness.icns"
+"${ROOT}/scripts/embed_sparkle.sh" "${STAGED_APP_DIR}"
 "${ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
 mkdir -p "${STAGED_CONTENTS}/PlugIns"
 /usr/bin/ditto "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.driver" "${STAGED_CONTENTS}/PlugIns/JoyHarnessMicrophone.driver"

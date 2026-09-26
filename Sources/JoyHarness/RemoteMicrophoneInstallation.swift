@@ -2,6 +2,18 @@ import Foundation
 import Security
 
 enum RemoteMicrophoneInstallation {
+    static var updateRequired: Bool {
+        guard let bundledDriver = Bundle.main.builtInPlugInsURL?.appendingPathComponent("JoyHarnessMicrophone.driver") else {
+            return false
+        }
+        let installedDriver = URL(fileURLWithPath: "/Library/Audio/Plug-Ins/HAL/JoyHarnessMicrophone.driver")
+        guard let bundledVersion = Bundle(url: bundledDriver)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+              let installedVersion = Bundle(url: installedDriver)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String else {
+            return false
+        }
+        return bundledVersion.compare(installedVersion, options: .numeric) == .orderedDescending
+    }
+
     static func install() async throws {
         guard let driver = Bundle.main.builtInPlugInsURL?.appendingPathComponent("JoyHarnessMicrophone.driver"),
               FileManager.default.fileExists(atPath: driver.path) else {

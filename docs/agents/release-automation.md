@@ -2,8 +2,9 @@
 
 `.github/workflows/release.yml` publishes a versioned Apple Silicon DMG from
 the `main` branch. It runs the complete test suite, packages the app, verifies
-the packaged app’s resource loading from a temporary location, the DMG and checksum, creates a draft GitHub Release, uploads both assets, and
-publishes the release only after every previous step succeeds.
+the packaged app’s resource loading from a temporary location, the DMG and
+checksum, creates a draft GitHub Release, uploads its assets, and publishes the
+release only after every previous step succeeds.
 
 ## Run a release
 
@@ -25,7 +26,9 @@ publishes the release only after every previous step succeeds.
    ```
 
 The workflow rejects invalid versions and versions whose tag or Release already
-exists. It does not modify an existing release.
+exists. Stable releases require a plain `major.minor.patch` version; a version
+with a suffix must use `prerelease=true`. The workflow does not modify an
+existing release.
 
 ## Signing modes
 
@@ -41,6 +44,12 @@ For a public Developer ID release, configure all five repository secrets:
 | `APPLE_API_KEY_P8_BASE64` | Base64-encoded App Store Connect API `.p8` key |
 | `APPLE_API_KEY_ID` | App Store Connect API key ID |
 | `APPLE_API_ISSUER_ID` | App Store Connect API issuer ID |
+
+For a signed, notarized stable release, also configure
+`SPARKLE_EDDSA_PRIVATE_KEY` with the Sparkle EdDSA private key. Its matching
+public key is stored in `config/sparkle-public-key.txt`; never commit the private
+key. The workflow fails before building a signed stable release if this secret
+is missing. Ad-hoc and prerelease builds do not use it.
 
 The workflow fails before building if only part of this set is configured. With
 the full set, it imports the application certificate into a temporary keychain, signs the bundled
@@ -66,6 +75,25 @@ If Apple rejects a submission, the workflow prints the notarization report and
 stops before stapling or publishing.
 
 Never commit certificates, API keys, or their passwords to the repository.
+
+## Sparkle updates
+
+Only a signed, notarized stable release enables Sparkle in its app bundle. The
+workflow signs the notarized DMG for Sparkle with EdDSA, adds `appcast.xml` as a
+third Release asset, and checks the published feed at
+`https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml`.
+Appcast enclosures use version-specific Release download URLs so older entries
+continue to point to their original DMGs. The existing feed is carried forward
+when a new eligible stable version is published.
+
+Only such releases are marked GitHub `latest`. The workflow explicitly publishes
+ad-hoc stable releases and prereleases with `--latest=false`, without an appcast
+asset. Source installs and debug builds also leave Sparkle disabled. Users of a
+release predating Sparkle must manually install the first eligible version.
+
+Local packaging and appcast checks do not prove an end-to-end update from a
+published, notarized Release. Confirm the feed, download, and Sparkle install
+flow when the first eligible stable release is published.
 
 ## Packaged resource check
 

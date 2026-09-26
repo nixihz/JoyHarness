@@ -50,6 +50,14 @@ struct JoyHarnessApp: App {
         .commands {
             CommandGroup(replacing: .appSettings) {}
 
+            if appDelegate.updater.isAvailable {
+                CommandGroup(after: .appInfo) {
+                    Button(L10n.text("检查更新…", "Check for Updates…")) {
+                        appDelegate.updater.checkForUpdates()
+                    }
+                }
+            }
+
             CommandGroup(after: .newItem) {
                 Button(L10n.text("刷新状态", "Refresh Status")) {
                     appDelegate.runtime.dashboard.perform(.refresh)
@@ -64,6 +72,7 @@ struct JoyHarnessApp: App {
                 appearanceSettings: appearanceSettings,
                 languageSettings: languageSettings,
                 launchAtLogin: launchAtLogin,
+                updater: appDelegate.updater,
                 scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
                 pointerSensitivitySettings: appDelegate.runtime.pointerSensitivitySettings,
                 nativeModeSettings: appDelegate.runtime.nativeGamepadAppSettings,
@@ -79,9 +88,11 @@ struct JoyHarnessApp: App {
 @MainActor
 final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
     let runtime = JoyHarnessRuntime()
+    let updater = AppUpdater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        updater.start()
         runtime.start()
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async { self.configureMainWindow() }

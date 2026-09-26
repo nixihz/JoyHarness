@@ -39,6 +39,7 @@ mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources"
 install -m 755 "${BUILT_BINARY}" "${APP_BUNDLE}/Contents/MacOS/JoyHarness"
 /usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/Contents/Resources/JoyHarness_JoyHarness.bundle"
 install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${APP_BUNDLE}/Contents/Resources/JoyHarness.icns"
+"${ROOT}/scripts/embed_sparkle.sh" "${APP_BUNDLE}"
 "${ROOT}/scripts/build_microphone_driver.sh" "${WORK_DIR}/microphone" distribution
 mkdir -p "${APP_BUNDLE}/Contents/PlugIns"
 /usr/bin/ditto "${WORK_DIR}/microphone/JoyHarnessMicrophone.driver" "${APP_BUNDLE}/Contents/PlugIns/JoyHarnessMicrophone.driver"
@@ -75,6 +76,24 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+if [[ "${JOY_HARNESS_ENABLE_SPARKLE:-0}" == "1" ]]; then
+  if [[ "${JOY_HARNESS_SIGNING_IDENTITY:-}" != "Developer ID Application:"* ]]; then
+    echo "Sparkle releases require a Developer ID Application identity" >&2
+    exit 1
+  fi
+  PUBLIC_KEY_FILE="${ROOT}/config/sparkle-public-key.txt"
+  if [[ ! -s "${PUBLIC_KEY_FILE}" ]]; then
+    echo "Sparkle public key is missing: ${PUBLIC_KEY_FILE}" >&2
+    exit 1
+  fi
+  PUBLIC_KEY="$(tr -d '[:space:]' < "${PUBLIC_KEY_FILE}")"
+  /usr/libexec/PlistBuddy -c 'Add :JoyHarnessUpdaterEnabled bool true' "${APP_BUNDLE}/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :SUFeedURL string https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml' "${APP_BUNDLE}/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${PUBLIC_KEY}" "${APP_BUNDLE}/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :SUAllowsAutomaticUpdates bool false' "${APP_BUNDLE}/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :SUAutomaticallyUpdate bool false' "${APP_BUNDLE}/Contents/Info.plist"
+fi
 
 "${ROOT}/scripts/sign_macos_app.sh" "${APP_BUNDLE}" "${BUNDLE_ID}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"

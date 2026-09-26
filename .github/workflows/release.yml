@@ -17,13 +17,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
 
@@ -41,6 +41,7 @@ jobs:
       - name: Validate release request
         env:
           VERSION_INPUT: ${{ inputs.version }}
+          PRERELEASE_INPUT: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
@@ -51,6 +52,10 @@ jobs:
           VERSION="${VERSION_INPUT#v}"
           if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid version: ${VERSION_INPUT}" >&2
+            exit 2
+          fi
+          if [[ "${PRERELEASE_INPUT}" == "false" && ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable releases require a version without a prerelease suffix: ${VERSION_INPUT}" >&2
             exit 2
           fi
 
@@ -72,11 +77,13 @@ jobs:
 
           ARCH="$(uname -m)"
           DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"
-          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
-          echo "TAG=${TAG}" >> "${GITHUB_ENV}"
-          echo "DMG_NAME=${DMG_NAME}" >> "${GITHUB_ENV}"
-          echo "DMG_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}" >> "${GITHUB_ENV}"
-          echo "CHECKSUM_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}.sha256" >> "${GITHUB_ENV}"
+          {
+            echo "VERSION=${VERSION}"
+            echo "TAG=${TAG}"
+            echo "DMG_NAME=${DMG_NAME}"
+            echo "DMG_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}"
+            echo "CHECKSUM_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}.sha256"
+          } >> "${GITHUB_ENV}"
 
       - name: Validate release secrets
         env:
@@ -154,6 +161,21 @@ jobs:
           fi
           echo "JOY_HARNESS_SIGNING_IDENTITY=${SIGNING_IDENTITY}" >> "${GITHUB_ENV}"
 
+      - name: Enable Sparkle for signed stable releases
+        if: env.RELEASE_MODE == 'notarized' && inputs.prerelease == false
+        run: echo "JOY_HARNESS_ENABLE_SPARKLE=1" >> "${GITHUB_ENV}"
+
+      - name: Validate Sparkle publishing prerequisites
+        if: env.RELEASE_MODE == 'notarized' && inputs.prerelease == false
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SPARKLE_EDDSA_PRIVATE_KEY}" ]]; then
+            echo "Sparkle EdDSA signing secret is missing." >&2
+            exit 1
+          fi
+
       - name: Build DMG
         run: bash scripts/package_dmg.sh "${VERSION}"
 
@@ -207,6 +229,37 @@ jobs:
             shasum -a 256 -c "${DMG_NAME}.sha256"
           )
 
+      - name: Generate signed Sparkle appcast
+        id: feed
+        if: env.RELEASE_MODE == 'notarized' && inputs.prerelease == false
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          FEED_DIR="${RUNNER_TEMP}/sparkle-feed"
+          mkdir -p "${FEED_DIR}"
+          cp "${DMG_PATH}" "${FEED_DIR}/${DMG_NAME}"
+          FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml"
+          HTTP_STATUS="$(curl --location --silent --show-error \
+            --output "${FEED_DIR}/appcast.xml" --write-out '%{http_code}' "${FEED_URL}")"
+          if [[ "${HTTP_STATUS}" == "404" ]]; then
+            unlink "${FEED_DIR}/appcast.xml"
+          elif [[ "${HTTP_STATUS}" != "200" ]]; then
+            echo "Cannot read existing Sparkle feed: HTTP ${HTTP_STATUS}" >&2
+            exit 1
+          fi
+          APPCAST_TOOL="$(find .build/artifacts -type f -path '*/Sparkle/bin/generate_appcast' -print -quit)"
+          if [[ -z "${APPCAST_TOOL}" ]]; then
+            echo "Sparkle generate_appcast tool is missing" >&2
+            exit 1
+          fi
+          printf '%s' "${SPARKLE_EDDSA_PRIVATE_KEY}" | "${APPCAST_TOOL}" \
+            --ed-key-file - \
+            --maximum-deltas 0 \
+            --download-url-prefix "https://github.com/nixihz/JoyHarness/releases/download/${TAG}/" \
+            "${FEED_DIR}"
+          python3 scripts/verify_sparkle_appcast.py "${FEED_DIR}/appcast.xml" "${VERSION}" "${DMG_NAME}"
+
       - name: Write release notes
         run: |
           if [[ "${RELEASE_MODE}" == "notarized" ]]; then
@@ -248,9 +301,15 @@ jobs:
         run: |
           set -euo pipefail
           create_release() {
+            ASSETS=(
+              "${DMG_PATH}#Joy Harness ${TAG} for macOS arm64"
+              "${CHECKSUM_PATH}#SHA-256 checksum"
+            )
+            if [[ "${RELEASE_MODE}" == "notarized" && "${PRERELEASE}" == "false" ]]; then
+              ASSETS+=("${RUNNER_TEMP}/sparkle-feed/appcast.xml#Sparkle appcast")
+            fi
             gh release create "${TAG}" \
-              "${DMG_PATH}#Joy Harness ${TAG} for macOS arm64" \
-              "${CHECKSUM_PATH}#SHA-256 checksum" \
+              "${ASSETS[@]}" \
               --target "${GITHUB_SHA}" \
               --draft \
               --title "Joy Harness ${TAG}" \
@@ -270,6 +329,28 @@ jobs:
         run: |
           if [[ "${PRERELEASE}" == "true" ]]; then
             gh release edit "${TAG}" --draft=false --latest=false
+          elif [[ "${RELEASE_MODE}" != "notarized" ]]; then
+            gh release edit "${TAG}" --draft=false --latest=false
           else
             gh release edit "${TAG}" --draft=false --latest
           fi
+
+      - name: Verify published feed
+        if: env.RELEASE_MODE == 'notarized' && inputs.prerelease == false
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml"
+          for attempt in 1 2 3 4 5; do
+            echo "Checking published Sparkle feed (attempt ${attempt})"
+            if curl --fail --location --silent --show-error "${FEED_URL}" \
+                --output "${RUNNER_TEMP}/published-appcast.xml" \
+                && python3 scripts/verify_sparkle_appcast.py \
+                  "${RUNNER_TEMP}/published-appcast.xml" "${VERSION#v}" "${DMG_NAME}"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Sparkle feed does not expose version ${VERSION}" >&2
+          exit 1

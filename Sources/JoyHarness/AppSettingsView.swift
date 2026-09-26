@@ -5,6 +5,7 @@ struct AppSettingsView: View {
     @ObservedObject var appearanceSettings: AppearanceSettings
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
+    @ObservedObject var updater: AppUpdater
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
     @ObservedObject var nativeModeSettings: NativeGamepadAppSettings
@@ -33,6 +34,7 @@ struct AppSettingsView: View {
                     appearanceSettings: appearanceSettings,
                     languageSettings: languageSettings,
                     launchAtLogin: launchAtLogin,
+                    updater: updater,
                     scrollDirectionSettings: scrollDirectionSettings,
                     pointerSensitivitySettings: pointerSensitivitySettings
                 )
@@ -59,6 +61,7 @@ private struct GeneralSettingsView: View {
     @ObservedObject var appearanceSettings: AppearanceSettings
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
+    @ObservedObject var updater: AppUpdater
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
 
@@ -77,12 +80,16 @@ private struct GeneralSettingsView: View {
                     } catch { remoteVoiceMessage = error.localizedDescription }
                 }
                 .disabled(installingMicrophone)
-                Text(remoteVoiceMessage ?? (RemoteMicrophoneOutput.installed
-                    ? L10n.text("这会切换系统默认输入；可在系统声音设置中切回其他麦克风。", "This changes the default input. Switch back in System Sound settings.")
-                    : L10n.text("麦克风组件尚未启用；安装需要管理员验证，并会短暂中断声音。", "Enable the microphone component first; installation requires administrator authentication and briefly interrupts audio.")))
+                Text(remoteVoiceMessage ?? (RemoteMicrophoneInstallation.updateRequired
+                    ? L10n.text("麦克风组件有更新；安装需要管理员验证，并会短暂中断声音。", "A microphone component update is available. Installation requires administrator authentication and briefly interrupts audio.")
+                    : RemoteMicrophoneOutput.installed
+                        ? L10n.text("这会切换系统默认输入；可在系统声音设置中切回其他麦克风。", "This changes the default input. Switch back in System Sound settings.")
+                        : L10n.text("麦克风组件尚未启用；安装需要管理员验证，并会短暂中断声音。", "Enable the microphone component first; installation requires administrator authentication and briefly interrupts audio.")))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button(L10n.text("启用 Joy Harness 麦克风组件", "Enable Joy Harness Microphone")) {
+                Button(RemoteMicrophoneInstallation.updateRequired
+                    ? L10n.text("更新 Joy Harness 麦克风组件", "Update Joy Harness Microphone")
+                    : L10n.text("启用 Joy Harness 麦克风组件", "Enable Joy Harness Microphone")) {
                     installingMicrophone = true
                     remoteVoiceMessage = L10n.text("正在启用麦克风组件，请完成管理员验证；声音会短暂中断。", "Enabling the microphone; authenticate as an administrator. Audio will briefly stop.")
                     Task { @MainActor in
@@ -114,6 +121,18 @@ private struct GeneralSettingsView: View {
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
+
+            if updater.isAvailable {
+                Section(L10n.text("更新", "Updates")) {
+                    Toggle(
+                        L10n.text("自动检查更新", "Automatically Check for Updates"),
+                        isOn: Binding(
+                            get: { updater.automaticallyChecksForUpdates },
+                            set: { updater.setAutomaticallyChecksForUpdates($0) }
+                        )
+                    )
+                }
             }
 
             Section(L10n.text("通用", "General")) {
@@ -257,6 +276,7 @@ private struct GeneralSettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             launchAtLogin.refresh()
+            updater.refresh()
         }
     }
 

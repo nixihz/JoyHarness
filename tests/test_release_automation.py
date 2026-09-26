@@ -276,6 +276,81 @@ xcrun() {
         self.assertIn('"Developer ID Application:"*', package_script)
         self.assertIn('codesign --verify --verbose=2 "${DMG_PATH}"', package_script)
 
+    def test_only_signed_stable_release_becomes_latest(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        step = workflow.split("      - name: Publish release\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("      - name:", 1)[0])
+
+        for release_mode, prerelease, expected in (
+            ("notarized", "false", "--latest"),
+            ("notarized", "true", "--latest=false"),
+            ("unnotarized", "false", "--latest=false"),
+        ):
+            with self.subTest(release_mode=release_mode, prerelease=prerelease):
+                environment = dict(os.environ, RELEASE_MODE=release_mode,
+                                   PRERELEASE=prerelease, TAG="v1.2.3")
+                result = subprocess.run(
+                    ["bash", "-c", 'gh() { printf "%s\\n" "$*"; }\n' + script],
+                    env=environment, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
+                if expected == "--latest":
+                    self.assertNotIn("--latest=false", result.stdout)
+
+    def test_stable_release_rejects_version_suffix(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        step = workflow.split("      - name: Validate release request\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("          SOURCE_VERSION=", 1)[0])
+
+        for version, prerelease, valid in (
+            ("1.2.3", "false", True),
+            ("1.2.3-rc.1", "false", False),
+            ("1.2.3.4", "false", False),
+            ("1.2.3-rc.1", "true", True),
+        ):
+            with self.subTest(version=version, prerelease=prerelease):
+                environment = dict(os.environ, VERSION_INPUT=version,
+                                   PRERELEASE_INPUT=prerelease,
+                                   GITHUB_REF="refs/heads/main")
+                result = subprocess.run(
+                    ["bash", "-c", script], env=environment,
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+                if not valid:
+                    self.assertIn("Stable releases require", result.stderr)
+
+    def test_appcast_verifier_rejects_unsigned_or_mutable_update(self) -> None:
+        version = "1.2.3"
+        dmg_name = "Joy-Harness-v1.2.3-macOS-arm64.dmg"
+        stable_url = (
+            "https://github.com/nixihz/JoyHarness/releases/download/"
+            f"v{version}/{dmg_name}"
+        )
+        xml = '''<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<channel><item><sparkle:version>1.2.3</sparkle:version>
+<enclosure url="{url}" sparkle:edSignature="signature" /></item></channel></rss>'''
+        with tempfile.TemporaryDirectory() as directory:
+            appcast = Path(directory) / "appcast.xml"
+            for url, signed, valid in (
+                (stable_url, True, True),
+                (stable_url, False, False),
+                ("https://github.com/nixihz/JoyHarness/releases/latest/download/" + dmg_name,
+                 True, False),
+            ):
+                with self.subTest(url=url, signed=signed):
+                    content = xml.format(url=url)
+                    if not signed:
+                        content = content.replace(' sparkle:edSignature="signature"', "")
+                    appcast.write_text(content, encoding="utf-8")
+                    result = subprocess.run(
+                        ["python3", "scripts/verify_sparkle_appcast.py",
+                         str(appcast), version, dmg_name],
+                        cwd=ROOT, capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode == 0, valid, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

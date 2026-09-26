@@ -40,6 +40,7 @@ cp "${BUILT_BINARY}" "${STAGED_BINARY}"
 chmod +x "${STAGED_BINARY}"
 /usr/bin/ditto "${RESOURCE_BUNDLE}" "${STAGED_CONTENTS}/Resources/JoyHarness_JoyHarness.bundle"
 install -m 644 "${PROJECT_ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_CONTENTS}/Resources/JoyHarness.icns"
+"${PROJECT_ROOT}/scripts/embed_sparkle.sh" "${STAGED_APP_BUNDLE}"
 "${PROJECT_ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
 mkdir -p "${STAGED_CONTENTS}/PlugIns"
 /usr/bin/ditto "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.driver" "${STAGED_CONTENTS}/PlugIns/JoyHarnessMicrophone.driver"

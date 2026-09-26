@@ -59,6 +59,20 @@ if [[ "${SIGNING_MODE}" == "local" ]]; then
   fi
 fi
 
+SPARKLE_FRAMEWORK="${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
+if [[ -d "${SPARKLE_FRAMEWORK}" ]]; then
+  SPARKLE_VERSION="${SPARKLE_FRAMEWORK}/Versions/B"
+  SPARKLE_SIGN_ARGS=(--force --sign "${SIGNING_IDENTITY:--}")
+  if [[ -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]] && identity_is_developer_id "${SIGNING_IDENTITY}"; then
+    SPARKLE_SIGN_ARGS+=(--options runtime --timestamp)
+  fi
+  codesign "${SPARKLE_SIGN_ARGS[@]}" --preserve-metadata=entitlements "${SPARKLE_VERSION}/XPCServices/Installer.xpc"
+  codesign "${SPARKLE_SIGN_ARGS[@]}" --preserve-metadata=entitlements "${SPARKLE_VERSION}/XPCServices/Downloader.xpc"
+  codesign "${SPARKLE_SIGN_ARGS[@]}" "${SPARKLE_VERSION}/Autoupdate"
+  codesign "${SPARKLE_SIGN_ARGS[@]}" --preserve-metadata=entitlements "${SPARKLE_VERSION}/Updater.app"
+  codesign "${SPARKLE_SIGN_ARGS[@]}" --preserve-metadata=entitlements "${SPARKLE_FRAMEWORK}"
+fi
+
 if [[ -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
   echo "==> Signing ${APP_BUNDLE} with ${SIGNING_IDENTITY}"
   # Nested drivers are signed first by build_microphone_driver.sh. Do not
