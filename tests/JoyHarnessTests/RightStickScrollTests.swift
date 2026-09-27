@@ -153,4 +153,34 @@ struct RightStickScrollTests {
         #expect(traditional.scroll.y > 0)
         #expect(natural.scroll.y == -traditional.scroll.y)
     }
+
+    @Test
+    func horizontalScrollFollowsTheSameContentDirectionAsVerticalScroll() {
+        for direction in ScrollDirectionPreference.allCases {
+            let stick = CGPoint(x: 0.6, y: -0.6)
+            let rightStick = MouseBridge.stickMotionVelocities(
+                leftStick: .zero,
+                leftStickScrolls: false,
+                scrollStick: stick,
+                pointerSpeedMultiplier: 1,
+                scrollDirection: direction
+            )
+            let functionLeftStick = MouseBridge.stickMotionVelocities(
+                leftStick: stick,
+                leftStickScrolls: true,
+                scrollStick: .zero,
+                pointerSpeedMultiplier: 1,
+                scrollDirection: direction
+            )
+
+            #expect(rightStick.scroll == functionLeftStick.scroll)
+            if direction == .traditional {
+                #expect(rightStick.scroll.x < 0)
+                #expect(rightStick.scroll.y < 0)
+            } else {
+                #expect(rightStick.scroll.x > 0)
+                #expect(rightStick.scroll.y > 0)
+            }
+        }
+    }
 }

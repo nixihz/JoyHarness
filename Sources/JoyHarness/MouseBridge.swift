@@ -689,7 +689,7 @@ final class MouseBridge: NSObject {
             + (maximumSpeed - minimumSpeed) * pow(normalizedMagnitude, 1.65)
         let polarity: CGFloat = direction == .natural ? -1 : 1
         return CGPoint(
-            x: x / magnitude * speed * polarity,
+            x: -x / magnitude * speed * polarity,
             y: y / magnitude * speed * polarity
         )
     }

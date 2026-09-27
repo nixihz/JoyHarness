@@ -1651,9 +1651,9 @@ struct JoyHarnessTests {
 
         #expect(vertical.x == 0)
         #expect(vertical.y > 0)
-        #expect(horizontal.x < 0)
+        #expect(horizontal.x > 0)
         #expect(horizontal.y == 0)
-        #expect(diagonal.x > 0)
+        #expect(diagonal.x < 0)
         #expect(diagonal.y < 0)
     }
 
