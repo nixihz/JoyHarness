@@ -117,9 +117,9 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
     /// SwiftUI leaves a Dock click doing nothing once the Dashboard is
     /// closed, since Joy Harness keeps running; reopen it here.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard MainWindow.find(in: NSApp.windows)?.isVisible != true else { return true }
-        runtime.showMainWindow()
-        return false
+        // A restored background launch may not have displayed the Dashboard
+        // yet. Allow SwiftUI's default reopen when its opener is not installed.
+        !runtime.showMainWindow()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -569,16 +569,19 @@ final class JoyHarnessRuntime {
 
     /// Brings Joy Harness forward with its Dashboard, reopening it when it was
     /// closed. The gamepad pointer can open settings from there.
-    func showMainWindow() {
+    @discardableResult
+    func showMainWindow() -> Bool {
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
         if let window = MainWindow.find(in: NSApp.windows) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
+            return true
         } else if let mainWindowOpener {
             mainWindowOpener()
+            return true
         } else {
-            print("[agent-deck] main window unavailable: it has not appeared since launch")
+            return false
         }
     }
 
