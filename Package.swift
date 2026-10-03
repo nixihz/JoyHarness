@@ -14,7 +14,8 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/JoyHarness",
-            exclude: ["Info.plist", "DashboardPrototype"],
+            // Packaging scripts install the app icon into Contents/Resources directly.
+            exclude: ["Info.plist", "DashboardPrototype", "Resources/JoyHarness.icns"],
             resources: [
                 .process("Resources"),
             ],

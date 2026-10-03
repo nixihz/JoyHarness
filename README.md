@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="Sources/JoyHarness/Resources/Brand/joy-harness-logo-readme.png" alt="Joy Harness logo" width="760">
+  <img src="assets/brand/joy-harness-logo-readme.png" alt="Joy Harness logo" width="760">
 </p>
 
 <h1 align="center">Joy Harness</h1>
 
 <p align="center">
-  <img src="Sources/JoyHarness/Resources/Brand/joy-harness-app-icon-v5.png" alt="Joy Harness app icon" width="112">
+  <img src="assets/brand/joy-harness-app-icon-v5.png" alt="Joy Harness app icon" width="112">
 </p>
 
 <p align="center">

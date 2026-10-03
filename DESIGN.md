@@ -198,7 +198,7 @@ Settings 使用标准 macOS 侧边栏和分组表单，导航只放稳定的任�
 
 ## 10. 资产和实现边界
 
-品牌资产位于 `Sources/JoyHarness/Resources/Brand/`，控制器 Dashboard 图位于 `Sources/JoyHarness/Resources/`。Logo 和应用图标只用于品牌入口、关于信息和分发资产；不要把 Logo 当作设置页装饰，也不要重绘现有控制器图。
+品牌资产位于 `assets/brand/`（不打进安装包），控制器 Dashboard 图位于 `Sources/JoyHarness/Resources/`。Logo 和应用图标只用于品牌入口、关于信息和分发资产；不要把 Logo 当作设置页装饰，也不要重绘现有控制器图。
 
 现有代码的参考尺寸与样式（不代表已完成本规范的布局调整）：
 

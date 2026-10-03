@@ -37,6 +37,8 @@ fi
 rm -rf "${APP_BUNDLE}"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources"
 install -m 755 "${BUILT_BINARY}" "${APP_BUNDLE}/Contents/MacOS/JoyHarness"
+# Release builds keep local symbols for debugging; the shipped binary does not need them.
+strip -x "${APP_BUNDLE}/Contents/MacOS/JoyHarness"
 /usr/bin/ditto "${RESOURCE_BUNDLE}" "${APP_BUNDLE}/Contents/Resources/JoyHarness_JoyHarness.bundle"
 install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${APP_BUNDLE}/Contents/Resources/JoyHarness.icns"
 "${ROOT}/scripts/embed_sparkle.sh" "${APP_BUNDLE}"
@@ -109,7 +111,7 @@ hdiutil create \
   -volname "${APP_NAME} ${VERSION}" \
   -srcfolder "${DMG_ROOT}" \
   -ov \
-  -format UDZO \
+  -format ULMO \
   "${DMG_PATH}"
 
 if [[ "${JOY_HARNESS_SIGNING_IDENTITY:-}" == "Developer ID Application:"* ]]; then
