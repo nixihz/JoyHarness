@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SOURCE="${ROOT}/Sources/JoyHarness/Resources/Brand/joy-harness-logo-concept-v5.png"
+SOURCE="${ROOT}/assets/brand/joy-harness-logo-concept-v5.png"
 OUTPUT="${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns"
 WORK_DIR="$(mktemp -d)"
 ICONSET="${WORK_DIR}/JoyHarness.iconset"
