@@ -28,15 +28,19 @@ struct LifecycleTests {
         bridge.start()
         #expect(bridge.isRunning)
         #expect(bridge.isObservingScreenChanges)
+        #expect(bridge.isRealtimeInputActivityActive)
 
         bridge.stop()
         bridge.stop()
         #expect(!bridge.isRunning)
         #expect(!bridge.isObservingScreenChanges)
+        #expect(!bridge.isRealtimeInputActivityActive)
 
         bridge.start()
         #expect(bridge.isRunning)
+        #expect(bridge.isRealtimeInputActivityActive)
         bridge.stop()
+        #expect(!bridge.isRealtimeInputActivityActive)
     }
 
     @Test

@@ -375,6 +375,7 @@ final class MouseBridge: NSObject {
     )
     private var displayLink: CVDisplayLink?
     private var fallbackMovementTimer: DispatchSourceTimer?
+    private var realtimeInputActivity: NSObjectProtocol?
     private var permissionTimer: Timer?
     private var screenParametersObserver: NSObjectProtocol?
     private var pressedMouseButtons: Set<MouseButton> = []
@@ -401,6 +402,7 @@ final class MouseBridge: NSObject {
 
     var isRunning: Bool { displayLink != nil || fallbackMovementTimer != nil }
     var isObservingScreenChanges: Bool { screenParametersObserver != nil }
+    var isRealtimeInputActivityActive: Bool { realtimeInputActivity != nil }
 
     var isAccessibilityGranted: Bool {
         AXIsProcessTrusted()
@@ -412,6 +414,17 @@ final class MouseBridge: NSObject {
 
     func start() {
         guard !isRunning else { return }
+        // The movement clock must keep its cadence while the app is a
+        // background controller service. Allowing idle system sleep preserves
+        // normal sleep behavior while latencyCritical prevents App Nap from
+        // throttling CVDisplayLink or the fallback timer.
+        realtimeInputActivity = ProcessInfo.processInfo.beginActivity(
+            options: [
+                .userInitiatedAllowingIdleSystemSleep,
+                .latencyCritical,
+            ],
+            reason: "Joy Harness controller pointer and scroll input"
+        )
         let now = ProcessInfo.processInfo.systemUptime
         lastPermissionState = isAccessibilityGranted
         requestAccessibilityPermission()
@@ -432,6 +445,10 @@ final class MouseBridge: NSObject {
 
     func stop() {
         stopMovementClock()
+        if let realtimeInputActivity {
+            ProcessInfo.processInfo.endActivity(realtimeInputActivity)
+            self.realtimeInputActivity = nil
+        }
         permissionTimer?.invalidate()
         permissionTimer = nil
         if let screenParametersObserver {
