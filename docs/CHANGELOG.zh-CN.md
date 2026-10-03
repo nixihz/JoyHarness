@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-03
+
+### 修复
+- 防止 App Nap 降低后台手柄指针与滚动输入的更新频率，同时保留系统空闲休眠。
+- 修正手柄横向滚动方向。
+- 在 Dashboard 出现前保留系统默认的窗口重新打开行为。
+- 发布验证为 Sparkle 更新源的传播预留等待时间。
+
 ## [0.8.0] - 2026-09-26
 
 ### 新增
@@ -176,6 +184,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1

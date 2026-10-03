@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-03
+
+### Fixed
+- prevent App Nap from throttling controller pointer input
+- correct horizontal controller scroll direction
+- preserve default window reopening before dashboard appears
+- allow release feed propagation time
+
 ## [0.8.0] - 2026-09-26
 
 ### Added
@@ -176,6 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/nixihz/JoyHarness/compare/v0.6.0...v0.6.1
