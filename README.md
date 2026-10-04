@@ -378,7 +378,9 @@ Finally, open a task in Codex Desktop and verify approval with `LT + A`, rejecti
 
 Joy Harness keeps independent controller mappings for Codex, Claude, Cursor, and Antigravity. Press PS/Home, even while Joy Harness is in the background, to open the Harness switcher, which shows each associated app's icon. Move with D-pad Left/Right, LB/RB, or the left stick, then press A to confirm. The last card, **Main Window**, brings up the Joy Harness main window, reopening it if it was closed, instead of switching Harness; open settings from there. Press PS/Home again or B to close it without switching; clicking anywhere, switching apps, or changing Spaces also closes it.
 
-Use **Settings > Harness** to enable Harnesses, associate macOS applications, and choose whether a confirmed selection activates the associated app. A uniquely matched foreground application switches the active Harness automatically; ambiguous terminal apps keep the current manual selection. Codex retains existing mapping storage, while the other Harnesses start without Codex Micro, task-slot, or radial actions and can be customized independently.
+Use **Settings > Harness** to manage applications and enable their Harnesses. Confirming an application in the PS/Home switcher always opens or activates it. The **Active Harness** picker in settings only changes the mappings and keeps focus in settings; it never opens or activates the app. A uniquely matched foreground application switches the active Harness automatically; ambiguous terminal apps keep the current manual selection. Codex retains existing mapping storage, while the other Harnesses start without Codex Micro, task-slot, or radial actions and can be customized independently.
+
+Choose **Add Application** to browse for a `.app` or select a running application. Each added app appears in the switcher, keeps its own mappings across restarts, and can be disabled or removed. Adding the same app again enables its existing Harness without overwriting its mappings.
 
 ## Default Controls
 

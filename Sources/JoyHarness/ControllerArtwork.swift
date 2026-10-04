@@ -200,7 +200,7 @@ struct ControllerArtwork: View {
                 .stroke(DashboardStyle.input, lineWidth: DashboardStyle.highlightBorderWidth))
             .frame(width: highlight.size.width * scale, height: highlight.size.height * scale)
             .opacity(active ? 1 : 0)
-            .animation(reduceMotion || active ? nil : .easeOut(duration: DashboardStyle.keyRelease), value: active)
+            .animation(reduceMotion || active ? nil : DashboardStyle.Motion.easeOut(DashboardStyle.Motion.keyRelease), value: active)
             .position(x: highlight.center.x * canvas.width, y: highlight.center.y * canvas.height)
     }
 }

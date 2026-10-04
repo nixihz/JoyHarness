@@ -1,13 +1,32 @@
 import Combine
 import Foundation
 
-enum HarnessProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
-    case codex
-    case claude
-    case cursor
-    case antigravity
+struct HarnessProviderID: RawRepresentable, Hashable, Codable, Identifiable, Sendable {
+    let rawValue: String
+
+    static let codex = Self(rawValue: "codex")
+    static let claude = Self(rawValue: "claude")
+    static let cursor = Self(rawValue: "cursor")
+    static let antigravity = Self(rawValue: "antigravity")
+    static let builtIns: [Self] = [.codex, .claude, .cursor, .antigravity]
 
     var id: Self { self }
+    var isBuiltIn: Bool { Self.builtIns.contains(self) }
+
+    init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    // Keep the v1 string representation so existing preferences and mapping
+    // storage keys remain valid as user-added Harnesses gain their own IDs.
+    init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 struct HarnessProviderConfiguration: Identifiable, Equatable, Sendable {
@@ -18,18 +37,19 @@ struct HarnessProviderConfiguration: Identifiable, Equatable, Sendable {
     var isEnabled: Bool
     var bundleIdentifier: String?
     var appName: String?
-    var activateApplicationOnSelection: Bool
+    var applicationPath: String? = nil
 
     var displayName: String {
         displayName(language: L10n.language)
     }
 
     func displayName(language: SupportedLanguage) -> String {
-        language == .simplifiedChinese ? simplifiedChineseName : englishName
+        if !id.isBuiltIn, let appName { return appName }
+        return language == .simplifiedChinese ? simplifiedChineseName : englishName
     }
 
     var hasAssociatedApplication: Bool {
-        bundleIdentifier != nil || appName != nil
+        bundleIdentifier != nil || appName != nil || applicationPath != nil
     }
 
     func matchesBundleIdentifier(_ value: String?) -> Bool {
@@ -40,10 +60,25 @@ struct HarnessProviderConfiguration: Identifiable, Equatable, Sendable {
         Self.matches(appName, value)
     }
 
-    /// Whether a running application belongs to this Harness by either of its
-    /// configured identities.
-    func isAssociated(bundleIdentifier: String?, appName: String?) -> Bool {
-        matchesBundleIdentifier(bundleIdentifier) || matchesAppName(appName)
+    func matchesApplicationPath(_ value: String?) -> Bool {
+        guard let configuredPath = HarnessProviderSettings.normalized(applicationPath),
+              let currentPath = HarnessProviderSettings.normalized(value) else { return false }
+        return URL(fileURLWithPath: configuredPath).standardizedFileURL
+            == URL(fileURLWithPath: currentPath).standardizedFileURL
+    }
+
+    /// Strong identities take precedence: another app with the same name must
+    /// not inherit this Harness's status, icon, or mappings.
+    func isAssociated(bundleIdentifier: String?, appName: String?, applicationPath: String? = nil) -> Bool {
+        if HarnessProviderSettings.normalized(self.bundleIdentifier) != nil,
+           HarnessProviderSettings.normalized(bundleIdentifier) != nil {
+            return matchesBundleIdentifier(bundleIdentifier)
+        }
+        if HarnessProviderSettings.normalized(self.applicationPath) != nil,
+           HarnessProviderSettings.normalized(applicationPath) != nil {
+            return matchesApplicationPath(applicationPath)
+        }
+        return matchesAppName(appName)
     }
 
     private static func matches(_ configuredValue: String?, _ currentValue: String?) -> Bool {
@@ -67,8 +102,7 @@ final class HarnessProviderSettings: ObservableObject {
             systemImage: "terminal.fill",
             isEnabled: true,
             bundleIdentifier: "com.openai.codex",
-            appName: "Codex",
-            activateApplicationOnSelection: true
+            appName: "Codex"
         ),
         HarnessProviderConfiguration(
             id: .claude,
@@ -77,8 +111,7 @@ final class HarnessProviderSettings: ObservableObject {
             systemImage: "brain.head.profile",
             isEnabled: true,
             bundleIdentifier: "com.anthropic.claudefordesktop",
-            appName: "Claude",
-            activateApplicationOnSelection: true
+            appName: "Claude"
         ),
         HarnessProviderConfiguration(
             id: .cursor,
@@ -87,8 +120,7 @@ final class HarnessProviderSettings: ObservableObject {
             systemImage: "cursorarrow.rays",
             isEnabled: true,
             bundleIdentifier: "com.todesktop.230313mzl4w4u92",
-            appName: "Cursor",
-            activateApplicationOnSelection: true
+            appName: "Cursor"
         ),
         HarnessProviderConfiguration(
             id: .antigravity,
@@ -97,8 +129,7 @@ final class HarnessProviderSettings: ObservableObject {
             systemImage: "arrow.up.circle.fill",
             isEnabled: true,
             bundleIdentifier: "com.google.antigravity",
-            appName: "Antigravity",
-            activateApplicationOnSelection: true
+            appName: "Antigravity"
         ),
     ]
 
@@ -109,7 +140,6 @@ final class HarnessProviderSettings: ObservableObject {
             onActiveProviderChange?(activeProviderID)
         }
     }
-    var onSelectionRequest: ((HarnessProviderID) -> Bool)?
     /// Runs after the new value is stored. `$activeProviderID` publishes during
     /// `willSet`, so subscribers that read back this object would see the old
     /// Harness.
@@ -142,8 +172,24 @@ final class HarnessProviderSettings: ObservableObject {
             restored.isEnabled = stored.isEnabled
             restored.bundleIdentifier = Self.normalized(stored.bundleIdentifier)
             restored.appName = Self.normalized(stored.appName)
-            restored.activateApplicationOnSelection = stored.activateApplicationOnSelection
+            restored.applicationPath = Self.normalized(stored.applicationPath)
             return restored
+        }
+        var restoredIDs = Set(providers.map(\.id))
+        for stored in storedState?.providers ?? [] where restoredIDs.insert(stored.id).inserted {
+            guard let name = Self.normalized(stored.name)
+                ?? Self.normalized(stored.appName)
+                ?? Self.normalized(stored.bundleIdentifier) else { continue }
+            providers.append(HarnessProviderConfiguration(
+                id: stored.id,
+                simplifiedChineseName: name,
+                englishName: name,
+                systemImage: "app.dashed",
+                isEnabled: stored.isEnabled,
+                bundleIdentifier: Self.normalized(stored.bundleIdentifier),
+                appName: Self.normalized(stored.appName),
+                applicationPath: Self.normalized(stored.applicationPath)
+            ))
         }
         activeProviderID = storedState?.activeProviderID ?? .codex
         reconcileActiveProvider()
@@ -153,6 +199,57 @@ final class HarnessProviderSettings: ObservableObject {
         providers.first { $0.id == id }
     }
 
+    /// Re-adding an app enables its existing Harness without replacing its
+    /// identity or mappings. Bundle IDs distinguish
+    /// different apps that happen to have the same display name.
+    @discardableResult
+    func addApplication(
+        bundleIdentifier: String?,
+        appName: String?,
+        applicationPath: String? = nil
+    ) -> HarnessProviderID? {
+        let bundleIdentifier = Self.normalized(bundleIdentifier)
+        let appName = Self.normalized(appName)
+        let applicationPath = Self.normalized(applicationPath)
+        guard let name = appName ?? bundleIdentifier else { return nil }
+
+        if let existing = matchingProviders(
+            in: providers, bundleIdentifier: bundleIdentifier, appName: appName, applicationPath: applicationPath
+        ).first {
+            configure(existing.id) { provider in
+                provider.isEnabled = true
+                if let bundleIdentifier { provider.bundleIdentifier = bundleIdentifier }
+                if let appName { provider.appName = appName }
+                if let applicationPath { provider.applicationPath = applicationPath }
+            }
+            return existing.id
+        }
+
+        let id = HarnessProviderID(rawValue: "custom.\(UUID().uuidString.lowercased())")
+        providers.append(HarnessProviderConfiguration(
+            id: id,
+            simplifiedChineseName: name,
+            englishName: name,
+            systemImage: "app.dashed",
+            isEnabled: true,
+            bundleIdentifier: bundleIdentifier,
+            appName: appName ?? name,
+            applicationPath: applicationPath
+        ))
+        reconcileActiveProvider()
+        persist()
+        return id
+    }
+
+    func removeApplication(_ id: HarnessProviderID) {
+        guard !id.isBuiltIn, providers.contains(where: { $0.id == id }) else { return }
+        providers.removeAll { $0.id == id }
+        reconcileActiveProvider()
+        persist()
+    }
+
+    /// Changes the active mappings without opening or activating any app.
+    /// Application activation belongs to confirmation in the PS/Home switcher.
     @discardableResult
     func select(_ id: HarnessProviderID) -> Bool {
         guard provider(for: id)?.isEnabled == true else { return false }
@@ -160,11 +257,6 @@ final class HarnessProviderSettings: ObservableObject {
         activeProviderID = id
         persist()
         return true
-    }
-
-    @discardableResult
-    func requestSelection(_ id: HarnessProviderID) -> Bool {
-        onSelectionRequest?(id) ?? select(id)
     }
 
     func configure(
@@ -176,6 +268,7 @@ final class HarnessProviderSettings: ObservableObject {
         update(&updated)
         updated.bundleIdentifier = Self.normalized(updated.bundleIdentifier)
         updated.appName = Self.normalized(updated.appName)
+        updated.applicationPath = Self.normalized(updated.applicationPath)
         guard updated != providers[index] else { return }
 
         providers[index] = updated
@@ -183,20 +276,26 @@ final class HarnessProviderSettings: ObservableObject {
         persist()
     }
 
-    func match(bundleIdentifier: String?, appName: String?) -> HarnessProviderConfiguration? {
-        let enabled = enabledProviders
-        if Self.normalized(bundleIdentifier) != nil {
-            let bundleMatches = enabled.filter { $0.matchesBundleIdentifier(bundleIdentifier) }
-            if bundleMatches.count == 1 {
-                return bundleMatches[0]
-            }
-            if bundleMatches.count > 1 {
-                return nil
-            }
-        }
+    func match(
+        bundleIdentifier: String?, appName: String?, applicationPath: String? = nil
+    ) -> HarnessProviderConfiguration? {
+        let matches = matchingProviders(
+            in: enabledProviders, bundleIdentifier: bundleIdentifier, appName: appName, applicationPath: applicationPath
+        )
+        return matches.count == 1 ? matches[0] : nil
+    }
 
-        let nameMatches = enabled.filter { $0.matchesAppName(appName) }
-        return nameMatches.count == 1 ? nameMatches[0] : nil
+    private func matchingProviders(
+        in candidates: [HarnessProviderConfiguration],
+        bundleIdentifier: String?, appName: String?, applicationPath: String?
+    ) -> [HarnessProviderConfiguration] {
+        let matches = candidates.filter {
+            $0.isAssociated(bundleIdentifier: bundleIdentifier, appName: appName, applicationPath: applicationPath)
+        }
+        let bundleMatches = matches.filter { $0.matchesBundleIdentifier(bundleIdentifier) }
+        if !bundleMatches.isEmpty { return bundleMatches }
+        let pathMatches = matches.filter { $0.matchesApplicationPath(applicationPath) }
+        return pathMatches.isEmpty ? matches : pathMatches
     }
 
     private func reconcileActiveProvider() {
@@ -236,14 +335,16 @@ private extension HarnessProviderSettings {
         var isEnabled: Bool
         var bundleIdentifier: String?
         var appName: String?
-        var activateApplicationOnSelection: Bool
+        var name: String?
+        var applicationPath: String?
 
         init(_ provider: HarnessProviderConfiguration) {
             id = provider.id
             isEnabled = provider.isEnabled
             bundleIdentifier = provider.bundleIdentifier
             appName = provider.appName
-            activateApplicationOnSelection = provider.activateApplicationOnSelection
+            name = provider.id.isBuiltIn ? nil : provider.displayName(language: .english)
+            applicationPath = provider.applicationPath
         }
     }
 }

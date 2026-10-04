@@ -3,6 +3,28 @@ import Testing
 @testable import JoyHarness
 
 struct DashboardPresentationTests {
+    @Test func newlyPressedInputTakesPriorityOverAHeldButton() {
+        #expect(DashboardPresentation.inputToReveal(
+            pressed: [.buttonA, .dpadDown], previous: [.buttonA],
+            displayed: ControllerInput.availableInputs(for: .dualSense)
+        ) == .dpadDown)
+        #expect(DashboardPresentation.inputToReveal(
+            pressed: [.buttonA], previous: [.buttonA, .dpadDown],
+            displayed: ControllerInput.availableInputs(for: .dualSense)
+        ) == nil)
+    }
+
+    @Test func functionChordRevealsItsOwnRowInsteadOfTheModifier() {
+        #expect(DashboardPresentation.inputToReveal(
+            pressed: [.leftTrigger, .functionDpadDown], previous: [],
+            displayed: ControllerInput.availableInputs(for: .dualSense)
+        ) == .functionDpadDown)
+        #expect(DashboardPresentation.inputToReveal(
+            pressed: [.touchpadButton, .dpadDown], previous: [],
+            displayed: ControllerInput.availableInputs(for: .xbox)
+        ) == .dpadDown)
+    }
+
     private func status(_ changes: [String: Any] = [:]) throws -> DashboardStatus {
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(DashboardStatus.empty)) as? [String: Any])
         json["controller"] = "Test controller"
@@ -126,5 +148,66 @@ struct DashboardPresentationTests {
             #expect(events.allSatisfy { $0.0 >= 0 && $0.3 > 0 && $0.0 + $0.3 < 1 })
             #expect(!engine.testFeedback(state))
         }
+    }
+
+    @Test func outdatedStatusShowsOnlyTheRefreshNotice() throws {
+        let missing = try status(["accessibility": false, "input_monitoring": false, "rp2040": false])
+        for freshness in [StatusFreshness.stale, .unavailable] {
+            #expect(DashboardPresentation(status: missing, freshness: freshness).notices == [.stale])
+        }
+    }
+
+    @Test func nativeModeReplacesMappingPrerequisiteNotices() throws {
+        let p = DashboardPresentation(
+            status: try status(["operation_mode": "native", "accessibility": false, "rp2040": false]),
+            freshness: .fresh
+        )
+        #expect(p.notices == [.nativeMode])
+    }
+
+    @Test func noticesListEachMissingPrerequisiteButNotUnknownOnes() throws {
+        let unknownMonitoring = DashboardPresentation(
+            status: try status(["accessibility": false, "input_monitoring": NSNull(), "rp2040": false]),
+            freshness: .fresh
+        )
+        #expect(unknownMonitoring.notices == [.accessibility, .adapter])
+
+        let deniedMonitoring = DashboardPresentation(
+            status: try status(["accessibility": true, "input_monitoring": false, "rp2040": true]),
+            freshness: .fresh
+        )
+        #expect(deniedMonitoring.notices == [.inputMonitoring])
+
+        let ready = DashboardPresentation(
+            status: try status(["accessibility": true, "input_monitoring": true, "rp2040": true]),
+            freshness: .fresh
+        )
+        #expect(ready.notices.isEmpty)
+    }
+
+    @Test func batterySymbolNeverOverstatesTheLevel() throws {
+        let p = DashboardPresentation(status: try status(), freshness: .fresh)
+        #expect(p.batterySymbol(0) == "battery.0")
+        #expect(p.batterySymbol(0.3) == "battery.25")
+        #expect(p.batterySymbol(0.62) == "battery.50")
+        #expect(p.batterySymbol(0.99) == "battery.75")
+        #expect(p.batterySymbol(1) == "battery.100")
+        #expect(p.batterySymbol(nil) == nil)
+        #expect(p.batterySymbol(.nan) == nil)
+        #expect(DashboardPresentation(status: try status(), freshness: .stale).batterySymbol(0.8) == nil)
+    }
+
+    @Test func headerNamesTheDisplayedDeviceInsteadOfTheCombinedStatus() {
+        let devices = [
+            ConnectedControllerDescriptor(id: "a", name: "Xbox Wireless Controller", family: .xbox, source: .gameController),
+            ConnectedControllerDescriptor(id: "b", name: "Xbox Wireless Controller", family: .xbox, source: .gameController),
+            ConnectedControllerDescriptor(id: "c", name: "", family: .xiaomiRemote, source: .xiaomiRemote),
+        ]
+        let combined = "Xbox Wireless Controller + Xiaomi Remote"
+        #expect(DashboardPresentation.headerTitle(devices: devices, displayedID: "b", fallback: combined)
+            == "Xbox Wireless Controller 2")
+        #expect(DashboardPresentation.headerTitle(devices: devices, displayedID: "c", fallback: combined)
+            == ControllerFamily.xiaomiRemote.displayName)
+        #expect(DashboardPresentation.headerTitle(devices: devices, displayedID: "gone", fallback: combined) == combined)
     }
 }

@@ -14,12 +14,31 @@ enum ApplicationPresentation {
         name(forDisplayName: FileManager.default.displayName(atPath: url.path))
     }
 
+    /// An application's own icon at a fixed point size. `NSMenu` draws images at
+    /// their intrinsic size, so menu rows need a pre-sized copy. Apps that are
+    /// not installed get a neutral template glyph instead of a brand stand-in.
+    static func icon(forApplicationAt url: URL?, size: CGFloat) -> NSImage {
+        let pointSize = NSSize(width: size, height: size)
+        if let url {
+            let icon = (NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage)
+                ?? NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = pointSize
+            return icon
+        }
+        let placeholder = NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
+            ?? NSImage(size: pointSize)
+        placeholder.size = pointSize
+        placeholder.isTemplate = true
+        return placeholder
+    }
+
     struct RunningApplication: Hashable, Identifiable {
         let bundleIdentifier: String?
         let name: String
+        var url: URL? = nil
 
         var id: String {
-            bundleIdentifier ?? "name:\(name)"
+            bundleIdentifier ?? url.map { "path:\($0.standardizedFileURL.path)" } ?? "name:\(name)"
         }
     }
 
@@ -34,10 +53,11 @@ enum ApplicationPresentation {
                 guard let name = application.localizedName, !name.isEmpty else { return nil }
                 return RunningApplication(
                     bundleIdentifier: application.bundleIdentifier,
-                    name: name
+                    name: name,
+                    url: application.bundleURL
                 )
             }
-        return Array(Set(applications)).sorted {
+        return Dictionary(applications.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).values.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }

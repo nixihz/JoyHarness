@@ -4,97 +4,106 @@ import UniformTypeIdentifiers
 
 struct HarnessSettingsPane: View {
     @ObservedObject var settings: HarnessProviderSettings
+    @State private var removalCandidate: HarnessProviderConfiguration?
+    @State private var addedProviderID: HarnessProviderID?
+    @State private var runningApplications: [ApplicationPresentation.RunningApplication] = []
+
+    private static let iconSize: CGFloat = 32
+    private static let menuIconSize: CGFloat = 16
 
     var body: some View {
-        // Scan once per render instead of once per provider menu.
-        let runningApplications = ApplicationPresentation.runningApplications()
         VStack(spacing: 0) {
             ActiveHarnessPickerBar(settings: settings)
 
             Divider()
 
-            Form {
-                Section {
-                    ForEach(settings.providers) { provider in
-                        providerRow(provider, runningApplications: runningApplications)
-                    }
-                } header: {
-                    Text(L10n.text("内置 Harness", "Built-in Harnesses"))
-                }
-            }
-            .formStyle(.grouped)
-        }
-    }
-
-    @ViewBuilder
-    private func providerRow(
-        _ provider: HarnessProviderConfiguration,
-        runningApplications: [ApplicationPresentation.RunningApplication]
-    ) -> some View {
-        let enableLabel = L10n.text(
-            "启用 \(provider.displayName) Harness",
-            "Enable \(provider.displayName) Harness"
-        )
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Toggle(enableLabel, isOn: enabledBinding(for: provider.id))
-                    .labelsHidden()
-                    .help(enableLabel)
-                    .accessibilityLabel(enableLabel)
-
-                ApplicationIconView(bundleIdentifier: provider.bundleIdentifier, placeholderSize: 18)
-                    .frame(width: 24, height: 24)
-                    .opacity(provider.isEnabled ? 1 : 0.5)
-                    .accessibilityHidden(true)
-
-                Text(provider.displayName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(provider.isEnabled ? .primary : .secondary)
-                    .lineLimit(1)
+            HStack(spacing: 12) {
+                Text(L10n.text(
+                    "添加应用，为它配置独立的按键映射。",
+                    "Add an application to customize its own key mappings."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
                 Spacer(minLength: 8)
+                addApplicationMenu(runningApplications: runningApplications)
+            }
+            .padding(16)
 
-                if settings.activeProviderID == provider.id {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.tint)
-                        .help(L10n.text("当前 Harness", "Active Harness"))
-                        .accessibilityLabel(L10n.text("当前 Harness", "Active Harness"))
+            ScrollViewReader { proxy in
+                Form {
+                    ForEach(settings.providers) { provider in
+                        Section {
+                            providerHeader(provider, runningApplications: runningApplications)
+
+                            if !provider.id.isBuiltIn {
+                                Button(L10n.text("移除应用…", "Remove Application…"), role: .destructive) {
+                                    removalCandidate = provider
+                                }
+                            }
+                        } footer: {
+                            if provider.id == settings.providers.last?.id {
+                                Text(L10n.text(
+                                    "停用的 Harness 不会出现在切换器中。",
+                                    "Disabled Harnesses do not appear in the switcher."
+                                ))
+                            }
+                        }
+                        .id(provider.id)
+                    }
+                }
+                .formStyle(.grouped)
+                .onChange(of: addedProviderID) { id in
+                    guard let id else { return }
+                    proxy.scrollTo(id, anchor: .top)
+                    addedProviderID = nil
                 }
             }
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                GridRow {
-                    Text(L10n.text("关联应用", "Application"))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 88, alignment: .leading)
-
-                    applicationMenu(for: provider, runningApplications: runningApplications)
-                }
-
-                GridRow {
-                    Color.clear
-                        .frame(width: 88, height: 1)
-
-                    Toggle(
-                        L10n.text("选择后激活关联应用", "Activate application after selection"),
-                        isOn: activationBinding(for: provider.id)
-                    )
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .font(.caption)
-            .padding(.leading, 34)
         }
-        .padding(.vertical, 3)
+        .onAppear(perform: refreshRunningApplications)
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            refreshRunningApplications()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
+            refreshRunningApplications()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshRunningApplications()
+        }
+        .confirmationDialog(
+            L10n.text("移除应用？", "Remove application?"),
+            isPresented: Binding(
+                get: { removalCandidate != nil },
+                set: { if !$0 { removalCandidate = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: removalCandidate
+        ) { provider in
+            Button(L10n.text("移除应用", "Remove Application"), role: .destructive) {
+                settings.removeApplication(provider.id)
+                removalCandidate = nil
+            }
+            Button(L10n.text("取消", "Cancel"), role: .cancel) {
+                removalCandidate = nil
+            }
+        } message: { provider in
+            Text(L10n.text(
+                "将从 Harness 列表和切换器中移除 \(provider.displayName)。重新添加时使用默认映射；应用本身不会被卸载。",
+                "Remove \(provider.displayName) from the Harness list and switcher. Adding it again starts with default mappings. The application stays installed."
+            ))
+        }
     }
 
-    private func applicationMenu(
-        for provider: HarnessProviderConfiguration,
+    private func refreshRunningApplications() {
+        runningApplications = ApplicationPresentation.runningApplications()
+    }
+
+    private func addApplicationMenu(
         runningApplications: [ApplicationPresentation.RunningApplication]
     ) -> some View {
         Menu {
             Button {
-                browseForApplication(for: provider.id, providerName: provider.displayName)
+                browseForApplication()
             } label: {
                 Label(L10n.text("浏览应用程序…", "Browse Applications…"), systemImage: "folder")
             }
@@ -102,41 +111,116 @@ struct HarnessSettingsPane: View {
             if !runningApplications.isEmpty {
                 Menu(L10n.text("从运行中的应用选择", "Choose from Running Applications")) {
                     ForEach(runningApplications) { application in
-                        Button(application.name) {
-                            associate(
-                                provider.id,
-                                withBundleIdentifier: application.bundleIdentifier,
-                                appName: application.name
+                        Button {
+                            addedProviderID = settings.addApplication(
+                                bundleIdentifier: application.bundleIdentifier,
+                                appName: application.name,
+                                applicationPath: application.url?.path
                             )
+                        } label: {
+                            runningApplicationLabel(application)
                         }
                     }
                 }
             }
-
-            if provider.hasAssociatedApplication {
-                Divider()
-
-                Button(L10n.text("清除关联", "Clear Association")) {
-                    associate(provider.id, withBundleIdentifier: nil, appName: nil)
-                }
-            }
         } label: {
-            HStack(spacing: 8) {
-                Text(applicationDisplayName(for: provider))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Label(L10n.text("添加应用", "Add Application"), systemImage: "plus")
         }
         .menuStyle(.borderedButton)
-        .frame(maxWidth: .infinity)
+        .fixedSize()
+    }
+
+    private func providerHeader(
+        _ provider: HarnessProviderConfiguration,
+        runningApplications: [ApplicationPresentation.RunningApplication]
+    ) -> some View {
+        let enableLabel = L10n.text(
+            "启用 \(provider.displayName) Harness",
+            "Enable \(provider.displayName) Harness"
+        )
+        return HStack(spacing: 12) {
+            Image(nsImage: ApplicationPresentation.icon(
+                forApplicationAt: provider.installedApplicationURL(),
+                size: Self.iconSize
+            ))
+            .resizable()
+            .frame(width: Self.iconSize, height: Self.iconSize)
+            .opacity(provider.isEnabled ? 1 : 0.45)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(provider.displayName)
+                        .font(.headline)
+                        .foregroundStyle(provider.isEnabled ? .primary : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if settings.activeProviderID == provider.id {
+                        activeBadge
+                    }
+                }
+
+                statusLabel(for: provider, runningApplications: runningApplications)
+            }
+
+            Spacer(minLength: 8)
+
+            Toggle(enableLabel, isOn: enabledBinding(for: provider.id))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .help(enableLabel)
+                .accessibilityLabel(enableLabel)
+        }
+    }
+
+    private var activeBadge: some View {
+        Text(L10n.text("当前", "Active"))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(.tint.opacity(0.15), in: Capsule())
+            .help(L10n.text("当前 Harness", "Active Harness"))
+            .accessibilityLabel(L10n.text("当前 Harness", "Active Harness"))
+    }
+
+    private func statusLabel(
+        for provider: HarnessProviderConfiguration,
+        runningApplications: [ApplicationPresentation.RunningApplication]
+    ) -> some View {
+        let symbol: String
+        let color: Color
+        let text: String
+        if !provider.isEnabled {
+            (symbol, color, text) = ("minus.circle", .secondary, L10n.text("已停用", "Disabled"))
+        } else {
+            let status = provider.applicationStatus(runningApplications: runningApplications)
+            text = status.localizedDescription
+            switch status {
+            case .connected:
+                (symbol, color) = ("checkmark.circle.fill", .green)
+            case .notRunning:
+                (symbol, color) = ("pause.circle", .secondary)
+            case .notAssociated:
+                (symbol, color) = ("exclamationmark.triangle.fill", .orange)
+            }
+        }
+        return HStack(spacing: 4) {
+            Image(systemName: symbol).foregroundStyle(color)
+            Text(text).foregroundStyle(.secondary)
+        }
+        .font(.caption)
+    }
+
+    private func runningApplicationLabel(_ application: ApplicationPresentation.RunningApplication) -> some View {
+        Label {
+            Text(application.name)
+        } icon: {
+            Image(nsImage: ApplicationPresentation.icon(
+                forApplicationAt: application.url,
+                size: Self.menuIconSize
+            ))
+        }
     }
 
     private func enabledBinding(for id: HarnessProviderID) -> Binding<Bool> {
@@ -150,57 +234,24 @@ struct HarnessSettingsPane: View {
         )
     }
 
-    private func activationBinding(for id: HarnessProviderID) -> Binding<Bool> {
-        Binding(
-            get: { settings.provider(for: id)?.activateApplicationOnSelection ?? false },
-            set: { shouldActivate in
-                settings.configure(id) { provider in
-                    provider.activateApplicationOnSelection = shouldActivate
-                }
-            }
-        )
-    }
-
-    private func applicationDisplayName(for provider: HarnessProviderConfiguration) -> String {
-        if let appName = provider.appName, !appName.isEmpty {
-            return appName
-        }
-        if let bundleIdentifier = provider.bundleIdentifier, !bundleIdentifier.isEmpty {
-            return bundleIdentifier
-        }
-        return L10n.text("未关联应用", "No application associated")
-    }
-
-    private func associate(
-        _ id: HarnessProviderID,
-        withBundleIdentifier bundleIdentifier: String?,
-        appName: String?
-    ) {
-        settings.configure(id) { provider in
-            provider.bundleIdentifier = bundleIdentifier
-            provider.appName = appName
-        }
-    }
-
-    private func browseForApplication(for id: HarnessProviderID, providerName: String) {
+    private func browseForApplication() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.application]
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.prompt = L10n.text("选择", "Choose")
+        panel.prompt = L10n.text("添加", "Add")
         panel.message = L10n.text(
-            "选择要与 \(providerName) Harness 关联的应用。",
-            "Choose the application to associate with the \(providerName) Harness."
+            "选择要添加到 Harness 的应用。添加后可配置独立的按键映射。",
+            "Choose an application to add to Harness and customize its key mappings."
         )
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        let bundleIdentifier = Bundle(url: url)?.bundleIdentifier
-        associate(
-            id,
-            withBundleIdentifier: bundleIdentifier,
-            appName: ApplicationPresentation.name(forApplicationAt: url)
+        addedProviderID = settings.addApplication(
+            bundleIdentifier: Bundle(url: url)?.bundleIdentifier,
+            appName: ApplicationPresentation.name(forApplicationAt: url),
+            applicationPath: url.path
         )
     }
 }
@@ -220,7 +271,7 @@ struct ActiveHarnessPickerBar: View {
                     get: { settings.activeProviderID },
                     set: { id in
                         guard let id else { return }
-                        _ = settings.requestSelection(id)
+                        _ = settings.select(id)
                     }
                 )
             ) {
@@ -230,8 +281,15 @@ struct ActiveHarnessPickerBar: View {
                 }
 
                 ForEach(settings.enabledProviders) { provider in
-                    Label(provider.displayName, systemImage: provider.systemImage)
-                        .tag(Optional(provider.id))
+                    Label {
+                        Text(provider.displayName)
+                    } icon: {
+                        Image(nsImage: ApplicationPresentation.icon(
+                            forApplicationAt: provider.installedApplicationURL(),
+                            size: 16
+                        ))
+                    }
+                    .tag(Optional(provider.id))
                 }
             }
             .labelsHidden()

@@ -120,7 +120,7 @@ struct HarnessSwitcherTests {
 
     @Test func panelFitsEveryCardInsteadOfClippingTheOuterOnes() throws {
         let coordinator = HarnessSwitcherCoordinator()
-        let ids = HarnessProviderID.allCases
+        let ids = HarnessProviderID.builtIns
         coordinator.present(options: options(ids), current: .codex) { _ in }
         defer { coordinator.cancel() }
 
@@ -540,6 +540,29 @@ struct HarnessSwitcherTests {
         ) == nil)
     }
 
+    @Test func sameNamedInstalledApplicationCannotReplaceTheConfiguredApp() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HarnessSwitcherTests.\(UUID().uuidString)", isDirectory: true)
+        let otherApp = directory.appendingPathComponent("Claude.app", isDirectory: true)
+        let contents = otherApp.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let info = ["CFBundleIdentifier": "dev.example.different-claude", "CFBundleName": "Claude"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: contents.appendingPathComponent("Info.plist"))
+
+        var claude = try #require(HarnessProviderSettings.defaultProviders.first { $0.id == .claude })
+        #expect(claude.installedApplicationURL(
+            urlForBundleIdentifier: { _ in nil }, applicationDirectories: [directory]
+        ) == nil)
+
+        // A saved path can also be replaced by another application's bundle.
+        claude.applicationPath = otherApp.path
+        #expect(claude.installedApplicationURL(
+            urlForBundleIdentifier: { _ in nil }, applicationDirectories: [directory]
+        ) == nil)
+    }
+
     private func snapshot(pressing input: ControllerInput) -> JoyConInputSnapshot {
         JoyConInputSnapshot(
             buttons: [input: true],
@@ -557,5 +580,62 @@ struct HarnessSwitcherTests {
                 isApplicationConnected: true
             )
         }
+    }
+}
+
+@MainActor
+struct HarnessSettingsPresentationTests {
+    private func codex(bundleIdentifier: String? = "com.openai.codex", appName: String? = "Codex")
+        -> HarnessProviderConfiguration {
+        var provider = HarnessProviderSettings.defaultProviders[0]
+        provider.bundleIdentifier = bundleIdentifier
+        provider.appName = appName
+        return provider
+    }
+
+    @Test func applicationStatusDistinguishesRunningStoppedAndUnassociated() {
+        let running = [ApplicationPresentation.RunningApplication(
+            bundleIdentifier: "com.openai.codex", name: "Codex"
+        )]
+
+        #expect(codex().applicationStatus(runningApplications: running) == .connected)
+        #expect(codex().applicationStatus(runningApplications: []) == .notRunning)
+        #expect(
+            codex(bundleIdentifier: nil, appName: nil)
+                .applicationStatus(runningApplications: running) == .notAssociated
+        )
+    }
+
+    @Test func applicationStatusMatchesByNameWhenOnlyTheNameWasAssociated() {
+        let running = [ApplicationPresentation.RunningApplication(bundleIdentifier: nil, name: "Codex")]
+
+        #expect(
+            codex(bundleIdentifier: nil).applicationStatus(runningApplications: running) == .connected
+        )
+    }
+
+    @Test func sameNamedApplicationsDoNotBorrowRunningStatus() {
+        let running = [ApplicationPresentation.RunningApplication(
+            bundleIdentifier: "dev.example.other", name: "Codex",
+            url: URL(fileURLWithPath: "/Applications/Other/Codex.app")
+        )]
+        #expect(codex().applicationStatus(runningApplications: running) == .notRunning)
+
+        var pathOnly = codex(bundleIdentifier: nil)
+        pathOnly.applicationPath = "/Users/example/Tools/Codex.app"
+        #expect(pathOnly.applicationStatus(runningApplications: running) == .notRunning)
+        pathOnly.applicationPath = "/Applications/Other/Codex.app"
+        #expect(pathOnly.applicationStatus(runningApplications: running) == .connected)
+    }
+
+    @Test func menuIconsAreSizedForMenusAndKeepTheAppsOwnArtwork() {
+        let finder = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+        let appIcon = ApplicationPresentation.icon(forApplicationAt: finder, size: 16)
+        let placeholder = ApplicationPresentation.icon(forApplicationAt: nil, size: 16)
+
+        #expect(appIcon.size == NSSize(width: 16, height: 16))
+        #expect(!appIcon.isTemplate)
+        #expect(placeholder.size == NSSize(width: 16, height: 16))
+        #expect(placeholder.isTemplate)
     }
 }

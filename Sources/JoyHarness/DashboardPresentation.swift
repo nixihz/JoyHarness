@@ -191,6 +191,57 @@ struct DashboardPresentation {
 
 }
 
+enum DashboardNoticeKind: Hashable {
+    case stale
+    case nativeMode
+    case accessibility
+    case inputMonitoring
+    case adapter
+}
+
+extension DashboardPresentation {
+    /// Follow a new press, not an older held button. A function-layer press
+    /// takes precedence over its modifier when both arrive in the same update.
+    static func inputToReveal(
+        pressed: Set<ControllerInput>, previous: Set<ControllerInput>, displayed: Set<ControllerInput>
+    ) -> ControllerInput? {
+        let newInputs = pressed.subtracting(previous).intersection(displayed)
+        let ordered = ControllerInput.allCases.filter(newInputs.contains)
+        return ordered.first { $0.group == .functionLayer } ?? ordered.first
+    }
+
+    /// Notices in display order. Unread state hides everything else because
+    /// no other value can be trusted; native mode hands the controller to the
+    /// foreground app, so mapping prerequisites do not apply.
+    var notices: [DashboardNoticeKind] {
+        guard isFresh else { return [.stale] }
+        if status.isNativeMode { return [.nativeMode] }
+        var notices: [DashboardNoticeKind] = []
+        if !status.accessibility { notices.append(.accessibility) }
+        if status.inputMonitoring == false { notices.append(.inputMonitoring) }
+        if !status.rp2040 { notices.append(.adapter) }
+        return notices
+    }
+
+    /// The SF Symbol matching a battery level, or nil when the level is unknown.
+    func batterySymbol(_ level: Float?) -> String? {
+        guard isFresh, let level, level.isFinite else { return nil }
+        let step = (min(max(level, 0), 1) * 4).rounded(.down)
+        return "battery.\(Int(step) * 25)"
+    }
+
+    /// The Dashboard shows one device at a time, even when the status reports
+    /// several connected devices under a combined name.
+    static func headerTitle(
+        devices: [ConnectedControllerDescriptor],
+        displayedID: String,
+        fallback: String
+    ) -> String {
+        guard devices.contains(where: { $0.id == displayedID }) else { return fallback }
+        return ConnectedControllerDescriptor.pickerTitles(for: devices)[displayedID] ?? fallback
+    }
+}
+
 extension DashboardPresentation {
     /// Uses the grip of the Joy-Con the status reports, which may not be the
     /// device Settings is editing.

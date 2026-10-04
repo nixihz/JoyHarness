@@ -70,7 +70,7 @@ struct ControllerMappingProviderTests {
             .slot6,
         ]
 
-        for provider in HarnessProviderID.allCases where provider != .codex {
+        for provider in HarnessProviderID.builtIns + [HarnessProviderID(rawValue: "custom.test")] where provider != .codex {
             let defaults = ControllerMappingStore.defaultMappings(for: .xbox, provider: provider)
             #expect(Set(defaults.values).isDisjoint(with: forbiddenActions))
             #expect(defaults[.buttonA] == .mouseLeft)
@@ -129,7 +129,7 @@ struct ControllerMappingProviderTests {
             #expect(defaults[.rightShoulder] == .claudeNextSession)
             #expect(defaults[.rightTrigger] == .disabled)
         }
-        for provider in HarnessProviderID.allCases where provider != .claude {
+        for provider in HarnessProviderID.builtIns + [HarnessProviderID(rawValue: "custom.test")] where provider != .claude {
             let defaults = ControllerMappingStore.defaultMappings(for: .xbox, provider: provider)
             #expect(Set(defaults.values).isDisjoint(with: claudeActions))
         }

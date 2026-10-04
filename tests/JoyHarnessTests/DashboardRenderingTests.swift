@@ -25,6 +25,12 @@ struct DashboardRenderingTests {
                 let mapping = ControllerMappingStore(userDefaults: defaults)
                 mapping.setControllerFamily(family)
                 mapping.setJoyConOrientation(compact ? .vertical : .horizontal)
+                if family == .dualSense {
+                    mapping.setAction(.openApplication, for: .buttonA)
+                    mapping.setOpenApplicationTarget(
+                        "dev.example.design-review.very-long-application-display-name", for: .buttonA
+                    )
+                }
                 // Several connected devices show the header device switcher;
                 // four devices exercise its narrower fallbacks.
                 if index == 0 || index == 4 {
@@ -77,7 +83,12 @@ struct DashboardRenderingTests {
                     width: DashboardStyle.windowWidth + (showsDetails ? DashboardStyle.detailsColumnWidth + 1 : 0),
                     height: DashboardStyle.windowHeight
                 )
-                let view = DashboardView(store: store, mappingStore: mapping, detailsPresented: showsDetails)
+                let view = DashboardView(
+                    store: store,
+                    mappingStore: mapping,
+                    harnessProviderSettings: HarnessProviderSettings(userDefaults: defaults),
+                    detailsPresented: showsDetails
+                )
                     .environmentObject(language).environmentObject(coordinator)
                     .environment(\.colorScheme, compact ? .dark : .light)
                     .frame(width: size.width, height: size.height)
@@ -85,13 +96,64 @@ struct DashboardRenderingTests {
                 host.frame = NSRect(origin: .zero, size: size)
                 host.appearance = NSAppearance(named: compact ? .accessibilityHighContrastDarkAqua : .aqua)
                 host.layoutSubtreeIfNeeded()
-                let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-                host.cacheDisplay(in: host.bounds, to: bitmap)
-                let png = try #require(bitmap.representation(using: .png, properties: [:]))
                 let name = showsDetails ? "xiaomi-remote-details" : index == 7 ? "input-monitoring-required" : index == 8 ? "disconnected" : index == 9 ? "stale" : family.rawValue
-                try png.write(to: directory.appendingPathComponent("\(name)-\(compact ? "compact-dark-en" : "wide-light-zh").png"))
+                let file = directory.appendingPathComponent("\(name)-\(compact ? "compact-dark-en" : "wide-light-zh").png")
+                try capture(host, size: size, to: file)
+                if family == .dualSense {
+                    // A remains held while a lower, initially hidden row is pressed.
+                    store.setControllerInput(.dpadDown, pressed: true)
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+                    host.layoutSubtreeIfNeeded()
+                    try capture(host, size: size, to: directory.appendingPathComponent("held-and-new-input-\(compact).png"))
+
+                    // Changing the displayed device and pressing a function chord
+                    // in one update must not reset the newly selected layer.
+                    json["controller_family"] = ControllerFamily.xbox.rawValue
+                    json["controller"] = ControllerFamily.xbox.displayName
+                    try JSONSerialization.data(withJSONObject: json).write(to: statusURL)
+                    store.reload()
+                    store.setControllerInput(.leftTrigger, pressed: true)
+                    store.setControllerInput(.functionDpadDown, pressed: true)
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+                    host.layoutSubtreeIfNeeded()
+                    try capture(host, size: size, to: directory.appendingPathComponent("switched-device-function-input-\(compact).png"))
+                }
             }
         }
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("fixture.json"))
+    }
+
+    @MainActor private func capture(_ host: NSView, size: NSSize, to file: URL) throws {
+        if ProcessInfo.processInfo.environment["DASHBOARD_RENDER_ONSCREEN"] != nil {
+            // Liquid Glass and materials only composite in an on-screen
+            // window; capturing it needs Screen Recording permission.
+            try captureOnScreen(host, size: size, to: file)
+        } else {
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let png = try #require(bitmap.representation(using: .png, properties: [:]))
+            try png.write(to: file)
+        }
+    }
+
+    @MainActor private func captureOnScreen(_ host: NSView, size: NSSize, to file: URL) throws {
+        let window = NSWindow(
+            contentRect: NSRect(origin: NSPoint(x: 80, y: 80), size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = host.appearance
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        let capture = Process()
+        capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), file.path]
+        try capture.run()
+        capture.waitUntilExit()
+        #expect(capture.terminationStatus == 0)
     }
 }

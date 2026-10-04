@@ -59,7 +59,7 @@ struct HarnessSwitcherOption: Identifiable, Equatable {
     ) {
         id = .harness(configuration.id)
         displayName = configuration.displayName(language: language)
-        systemImage = configuration.systemImage
+        systemImage = "app.dashed"
         self.applicationIcon = applicationIcon
         if isApplicationConnected {
             applicationStatus = .connected
@@ -111,8 +111,8 @@ extension HarnessProviderConfiguration {
     }
 
     /// Finds the associated app on disk so the switcher can show its real icon
-    /// while it is not running. The bundle identifier wins; the configured
-    /// name covers apps that were associated by name only.
+    /// while it is not running. Prefer the explicitly chosen path, then the
+    /// bundle identifier; the configured name covers name-only associations.
     func installedApplicationURL(
         urlForBundleIdentifier: (String) -> URL? = {
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
@@ -120,6 +120,13 @@ extension HarnessProviderConfiguration {
         applicationDirectories: [URL] = HarnessProviderConfiguration.defaultApplicationDirectories,
         fileManager: FileManager = .default
     ) -> URL? {
+        if let applicationPath {
+            let url = URL(fileURLWithPath: applicationPath, isDirectory: true)
+            if fileManager.fileExists(atPath: applicationPath),
+               isAssociated(bundleIdentifier: Bundle(url: url)?.bundleIdentifier, appName: appName, applicationPath: url.path) {
+                return url
+            }
+        }
         if let bundleIdentifier = Self.trimmed(bundleIdentifier),
            let url = urlForBundleIdentifier(bundleIdentifier) {
             return url
@@ -128,7 +135,24 @@ extension HarnessProviderConfiguration {
         let bundleName = appName.lowercased().hasSuffix(".app") ? appName : "\(appName).app"
         return applicationDirectories
             .map { $0.appendingPathComponent(bundleName, isDirectory: true) }
-            .first { fileManager.fileExists(atPath: $0.path) }
+            .first {
+                fileManager.fileExists(atPath: $0.path) && isAssociated(
+                    bundleIdentifier: Bundle(url: $0)?.bundleIdentifier,
+                    appName: appName,
+                    applicationPath: $0.path
+                )
+            }
+    }
+
+    /// How this Harness's associated app stands among the running apps.
+    func applicationStatus(
+        runningApplications: [ApplicationPresentation.RunningApplication]
+    ) -> HarnessApplicationStatus {
+        guard hasAssociatedApplication else { return .notAssociated }
+        let isRunning = runningApplications.contains {
+            isAssociated(bundleIdentifier: $0.bundleIdentifier, appName: $0.name, applicationPath: $0.url?.path)
+        }
+        return isRunning ? .connected : .notRunning
     }
 
     private static func trimmed(_ value: String?) -> String? {

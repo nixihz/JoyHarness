@@ -35,7 +35,8 @@ struct JoyHarnessApp: App {
         WindowGroup(MainWindow.title, id: MainWindow.id) {
             DashboardView(
                 store: appDelegate.runtime.dashboard,
-                mappingStore: appDelegate.runtime.mappings
+                mappingStore: appDelegate.runtime.mappings,
+                harnessProviderSettings: appDelegate.runtime.harnessProviderSettings
             )
                 .environmentObject(languageSettings)
                 .environmentObject(settingsCoordinator)
@@ -219,9 +220,6 @@ final class JoyHarnessRuntime {
         }
         harnessProviderSettings.onActiveProviderChange = { [weak self] providerID in
             self?.applyActiveHarness(providerID)
-        }
-        harnessProviderSettings.onSelectionRequest = { [weak self] providerID in
-            self?.selectHarness(providerID) ?? false
         }
     }
 
@@ -540,7 +538,11 @@ final class JoyHarnessRuntime {
         let runningApplications = NSWorkspace.shared.runningApplications
         let harnessOptions = harnessProviderSettings.enabledProviders.map { provider in
             let runningApplication = runningApplications.first {
-                provider.isAssociated(bundleIdentifier: $0.bundleIdentifier, appName: $0.localizedName)
+                provider.isAssociated(
+                    bundleIdentifier: $0.bundleIdentifier,
+                    appName: $0.localizedName,
+                    applicationPath: $0.bundleURL?.path
+                )
             }
             return HarnessSwitcherOption(
                 configuration: provider,
@@ -560,7 +562,7 @@ final class JoyHarnessRuntime {
         ) { [weak self] target in
             switch target {
             case let .harness(providerID):
-                _ = self?.selectHarness(providerID)
+                _ = self?.confirmHarnessFromSwitcher(providerID)
             case .mainWindow:
                 self?.showMainWindow()
             }
@@ -586,12 +588,11 @@ final class JoyHarnessRuntime {
     }
 
     @discardableResult
-    private func selectHarness(_ providerID: HarnessProviderID) -> Bool {
+    private func confirmHarnessFromSwitcher(_ providerID: HarnessProviderID) -> Bool {
         guard harnessProviderSettings.select(providerID),
               let provider = harnessProviderSettings.provider(for: providerID) else { return false }
-        if provider.activateApplicationOnSelection,
-           let bundleIdentifier = provider.bundleIdentifier {
-            _ = openApplication(bundleIdentifier: bundleIdentifier)
+        if let url = provider.installedApplicationURL() {
+            _ = openApplication(at: url)
         }
         return true
     }
@@ -619,7 +620,8 @@ final class JoyHarnessRuntime {
         self.frontmostAppBundleID = bundleID
         if let matchedProvider = harnessProviderSettings.match(
             bundleIdentifier: bundleID,
-            appName: appName
+            appName: appName,
+            applicationPath: app.bundleURL?.path
         ) {
             _ = harnessProviderSettings.select(matchedProvider.id)
         }
@@ -725,9 +727,13 @@ final class JoyHarnessRuntime {
             print("[agent-deck] application not found: \(bundleIdentifier)")
             return false
         }
+        return openApplication(at: url)
+    }
+
+    private func openApplication(at url: URL) -> Bool {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
             if let error {
-                print("[agent-deck] failed to open \(bundleIdentifier): \(error.localizedDescription)")
+                print("[agent-deck] failed to open \(url.path): \(error.localizedDescription)")
             }
         }
         return true

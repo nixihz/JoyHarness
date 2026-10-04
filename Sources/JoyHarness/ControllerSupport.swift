@@ -136,12 +136,15 @@ struct ConnectedControllerDescriptor: Identifiable, Equatable {
 
     /// Picker titles keyed by device ID. Devices with the same name, such as
     /// two identical gamepads, are numbered in list order.
-    static func pickerTitles(for devices: [ConnectedControllerDescriptor]) -> [String: String] {
-        let counts = Dictionary(devices.map { ($0.displayName, 1) }, uniquingKeysWith: +)
+    static func pickerTitles(
+        for devices: [ConnectedControllerDescriptor],
+        name deviceName: (ConnectedControllerDescriptor) -> String = \.displayName
+    ) -> [String: String] {
+        let counts = Dictionary(devices.map { (deviceName($0), 1) }, uniquingKeysWith: +)
         var ordinals: [String: Int] = [:]
         var titles: [String: String] = [:]
         for device in devices {
-            let name = device.displayName
+            let name = deviceName(device)
             guard counts[name, default: 0] > 1 else {
                 titles[device.id] = name
                 continue
