@@ -18,6 +18,7 @@ enum SystemKey: Hashable {
     case rightCommand
     case copy
     case paste
+    case closeWindow
     case screenshotTool
     case browserBack
     case browserForward

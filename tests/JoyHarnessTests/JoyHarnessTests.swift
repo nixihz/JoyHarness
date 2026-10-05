@@ -803,7 +803,8 @@ struct JoyHarnessTests {
 
         let store = ControllerMappingStore(userDefaults: defaults)
 
-        #expect(store.action(for: .functionButtonA) == .approve)
+        // DualSense then moves the old shared L2 + × default to Close Window.
+        #expect(store.action(for: .functionButtonA) == .closeWindow)
         #expect(store.action(for: .functionButtonB) == .deny)
         #expect(store.action(for: .functionButtonX) == .answerNo)
         #expect(store.action(for: .functionButtonY) == .answerYes)

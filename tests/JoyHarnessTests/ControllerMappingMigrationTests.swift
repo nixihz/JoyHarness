@@ -419,4 +419,109 @@ struct ControllerMappingMigrationTests {
         #expect(store.action(for: .home) == .disabled)
         #expect(defaults.integer(forKey: "\(storageKey).schemaVersion") == 8)
     }
+
+    @Test
+    func dualSenseDefaultsUseArrowKeysAndOptionsHoldsRightCommand() throws {
+        let suiteName = "ControllerMappingMigrationTests.dualSenseDefaults.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        for provider in HarnessProviderID.builtIns {
+            let store = ControllerMappingStore(
+                userDefaults: defaults,
+                storageKey: "controllerMappings.\(provider.rawValue)",
+                harnessProvider: provider
+            )
+            store.setControllerFamily(.dualSense)
+
+            #expect(store.action(for: .dpadUp) == .arrowUp)
+            #expect(store.action(for: .dpadDown) == .arrowDown)
+            #expect(store.action(for: .dpadLeft) == .arrowLeft)
+            #expect(store.action(for: .dpadRight) == .arrowRight)
+            #expect(store.action(for: .menu) == .rightCommand)
+            #expect(store.action(for: .options) == .screenshotTool)
+            #expect(store.action(for: .functionButtonA) == .closeWindow)
+        }
+        #expect(SystemKey.closeWindow.eventDescriptor(pressed: true).keyCode == 0x0D)
+        #expect(SystemKey.closeWindow.eventDescriptor(pressed: true).flags == .maskCommand)
+        #expect(SystemKey.closeWindow.eventDescriptor(pressed: false).flags.isEmpty)
+    }
+
+    @Test
+    func dualSenseDefaultsDoNotLeakIntoTheSharedXboxProfile() throws {
+        let suiteName = "ControllerMappingMigrationTests.dualSenseShared.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ControllerMappingStore(userDefaults: defaults)
+
+        store.setControllerFamily(.dualSense)
+        store.setAction(.copy, for: .buttonA)
+
+        #expect(store.action(for: .dpadLeft, family: .xbox) == .radialInput)
+        #expect(store.action(for: .menu, family: .xbox) == .pushToTalk)
+        #expect(store.action(for: .functionButtonA, family: .xbox) == .approve)
+        #expect(store.action(for: .buttonA, family: .xbox) == .copy)
+
+        store.setControllerFamily(.xbox)
+        #expect(store.action(for: .dpadUp) == .rightCommand)
+        #expect(store.action(for: .dpadLeft) == .radialInput)
+        #expect(store.action(for: .menu) == .pushToTalk)
+        #expect(store.action(for: .buttonA) == .copy)
+        #expect(store.action(for: .dpadRight, family: .dualSense) == .arrowRight)
+    }
+
+    @Test
+    func savedDualSenseProfileMovesToNewNavigationDefaultsOnce() throws {
+        let suiteName = "ControllerMappingMigrationTests.dualSenseMigration.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "controllerMappings.v1"
+        defaults.set(ControllerFamily.dualSense.rawValue, forKey: "\(storageKey).controllerFamily")
+        defaults.set(8, forKey: "\(storageKey).schemaVersion")
+        defaults.set([
+            ControllerInput.buttonA.rawValue: ControllerMappedAction.enter.rawValue,
+            ControllerInput.dpadUp.rawValue: ControllerMappedAction.rightCommand.rawValue,
+            ControllerInput.dpadLeft.rawValue: ControllerMappedAction.radialInput.rawValue,
+            ControllerInput.dpadDown.rawValue: ControllerMappedAction.copy.rawValue,
+            ControllerInput.dpadRight.rawValue: ControllerMappedAction.radialInput.rawValue,
+            ControllerInput.menu.rawValue: ControllerMappedAction.pushToTalk.rawValue,
+        ], forKey: storageKey)
+
+        let store = ControllerMappingStore(userDefaults: defaults, storageKey: storageKey)
+
+        #expect(store.action(for: .dpadUp) == .arrowUp)
+        #expect(store.action(for: .dpadLeft) == .arrowLeft)
+        #expect(store.action(for: .dpadRight) == .arrowRight)
+        #expect(store.action(for: .menu) == .rightCommand)
+        #expect(store.action(for: .dpadDown) == .copy)
+        #expect(store.action(for: .buttonA) == .enter)
+
+        store.setAction(.pushToTalk, for: .menu)
+        let reloaded = ControllerMappingStore(userDefaults: defaults, storageKey: storageKey)
+        #expect(reloaded.action(for: .menu) == .pushToTalk)
+    }
+
+    @Test
+    func navigationMigratedDualSenseProfileStillMovesL2CrossToCloseWindow() throws {
+        let suiteName = "ControllerMappingMigrationTests.dualSenseCloseWindow.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "controllerMappings.v1"
+        defaults.set(ControllerFamily.dualSense.rawValue, forKey: "\(storageKey).controllerFamily")
+        defaults.set(8, forKey: "\(storageKey).schemaVersion")
+        defaults.set(true, forKey: "\(storageKey).dualSenseNavigationDefaultsMigrated")
+        defaults.set([
+            ControllerInput.functionButtonA.rawValue: ControllerMappedAction.approve.rawValue,
+            ControllerInput.menu.rawValue: ControllerMappedAction.pushToTalk.rawValue,
+        ], forKey: storageKey)
+
+        let store = ControllerMappingStore(userDefaults: defaults, storageKey: storageKey)
+
+        #expect(store.action(for: .functionButtonA) == .closeWindow)
+        #expect(store.action(for: .menu) == .pushToTalk)
+
+        store.setAction(.approve, for: .functionButtonA)
+        let reloaded = ControllerMappingStore(userDefaults: defaults, storageKey: storageKey)
+        #expect(reloaded.action(for: .functionButtonA) == .approve)
+    }
 }

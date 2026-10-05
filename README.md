@@ -156,7 +156,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 ## Features
 
 - **Control Codex away from the keyboard:** switch among six Codex Micro task slots, open the active task, approve or reject permission prompts, and enter `yes` or `no`. Fast mode and task splitting can still be assigned as custom mappings.
-- **Push-to-talk:** hold Menu/Options to send Codex Micro `ACT10`, then release to stop. DualSense controllers can also use the touchpad button. Recording remains native to Codex Desktop.
+- **Push-to-talk:** hold Xbox Menu or DualShock Options to send Codex Micro `ACT10`, then release to stop. DualSense has no default push-to-talk button; map Options or the touchpad button to it in Settings. Recording remains native to Codex Desktop.
 - **DualSense audio diagnostics:** detect the controller microphone exposed over USB and report whether it is the default macOS input. Joy Harness does not claim the recording device or change global audio settings.
 - **Graduated trigger feedback:** DualSense R2 provides a light touch, a resistance wall, and a stronger confirmation after the trigger point. Xbox RT uses Impulse Trigger feedback where supported.
 - **Control macOS:** move the pointer with the left stick and scroll with the right stick (or LT + left stick); hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
@@ -415,7 +415,8 @@ Any mappable input can use **Record Shortcut...**. Select **Click to Record**, t
 | LT + right stick Left / Right | Browser back / forward (`Command-[` / `Command-]`) | Yes |
 | LT + right stick Up / Down | Disabled by default; assign open app or any other mapped action in Settings | Depends on action |
 | Xbox: Options/View; PlayStation: Create | Lark screenshot (`Command-Shift-A`) | Yes |
-| D-pad Up press/release | Right Command press/release, useful for voice-input tools | Yes |
+| D-pad Up press/release (DualSense: Options) | Right Command press/release, useful for voice-input tools | Yes |
+| DualSense D-pad Up / Down / Left / Right | Arrow keys with system-rate key repeat | Yes |
 
 These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. Hold L3 alone to boost pointer speed. While LT is held, the right stick stops scrolling and triggers its four direction mappings instead. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
 
@@ -423,17 +424,17 @@ These actions target the foreground application, not only Codex Desktop. LT is a
 
 | Input | Micro input | Action |
 |---|---|---|
-| Xbox: LT + A; PlayStation: L2 + Cross | `ACT07` | Approve the current permission request |
+| Xbox: LT + A; DualShock: L2 + Cross | `ACT07` | Approve the current permission request (DualSense: L2 + Cross closes the window with `Command-W`) |
 | Xbox: LT + B; PlayStation: L2 + Circle | `ACT08` | Reject the current permission request |
 | Xbox: LT + Y; PlayStation: L2 + Triangle | Keyboard input | Type `yes` without submitting |
 | Xbox: LT + X; PlayStation: L2 + Square | Keyboard input | Type `no` without submitting |
 | LB / RB | `AG00`-`AG05` | Select previous/next task slot with wraparound |
 | LT + Up / Left / Down / Right | `AG00`-`AG03` | Select task slots 1/2/3/4 counterclockwise |
 | LT + LB / RB | `AG04` / `AG05` | Select task slots 5/6 |
-| Hold/release Menu or Options | `ACT10` press/release | Native Codex Desktop push-to-talk |
+| Hold/release Xbox Menu or DualShock Options | `ACT10` press/release | Native Codex Desktop push-to-talk |
 | Hold/release DualSense/DualShock touchpad (when mapped to push-to-talk) | `ACT10` press/release | Optional PlayStation push-to-talk input |
 | RT / R2 past the resistance wall | `ACT12` | Focus Codex Desktop after the confirmation travel point |
-| D-pad Left/Down/Right without LT | `v.oai.rad` | Radial input as angle and magnitude; the right stick scrolls instead |
+| D-pad Left/Down/Right without LT (not DualSense) | `v.oai.rad` | Radial input as angle and magnitude; the right stick scrolls instead |
 
 Joy Harness reads the six most recent task names and ordering through the read-only Codex app-server `thread/list` method. Local state stores only display names, or a first-message summary for unnamed tasks, and never stores full conversation content.
 

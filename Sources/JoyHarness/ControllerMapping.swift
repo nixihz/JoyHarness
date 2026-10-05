@@ -279,6 +279,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
     case rightCommand
     case copy
     case paste
+    case closeWindow
     case screenshotTool
     case answerYes
     case answerNo
@@ -327,6 +328,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .rightCommand: L10n.text("右侧 Command", "Right Command")
         case .copy: L10n.text("复制", "Copy")
         case .paste: L10n.text("粘贴", "Paste")
+        case .closeWindow: L10n.text("关闭窗口", "Close Window")
         case .screenshotTool: L10n.text("飞书截图", "Feishu Screenshot")
         case .answerYes: L10n.text("输入 yes", "Type yes")
         case .answerNo: L10n.text("输入 no", "Type no")
@@ -373,6 +375,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .rightCommand: .systemKey(.rightCommand)
         case .copy: .systemKey(.copy)
         case .paste: .systemKey(.paste)
+        case .closeWindow: .systemKey(.closeWindow)
         case .screenshotTool: .systemKey(.screenshotTool)
         case .browserBack: .systemKey(.browserBack)
         case .browserForward: .systemKey(.browserForward)
@@ -642,6 +645,16 @@ final class ControllerMappingStore: ObservableObject {
             defaults[.buttonY] = .screenshotTool
             return defaults
         }
+        if family == .dualSense {
+            var defaults = baseDefaultMappings
+            defaults[.dpadUp] = .arrowUp
+            defaults[.dpadDown] = .arrowDown
+            defaults[.dpadLeft] = .arrowLeft
+            defaults[.dpadRight] = .arrowRight
+            defaults[.menu] = .rightCommand
+            defaults[.functionButtonA] = .closeWindow
+            return defaults
+        }
         guard family == .joyConLeft || family == .joyConRight else { return baseDefaultMappings }
         var defaults = baseDefaultMappings
         let available = ControllerInput.availableInputs(for: family)
@@ -733,6 +746,7 @@ final class ControllerMappingStore: ObservableObject {
         if harnessProvider == .claude {
             migrateClaudeSessionDefaultsIfNeeded()
         }
+        migrateDualSenseDefaultsIfNeeded()
     }
 
     func action(for input: ControllerInput) -> ControllerMappedAction {
@@ -793,12 +807,16 @@ final class ControllerMappingStore: ObservableObject {
             key: key,
             defaults: Self.defaultMappings(for: family, provider: harnessProvider)
         )
-        guard harnessProvider == .claude else { return stored }
-        return Self.migrateClaudeSessionDefaults(
-            in: stored,
-            family: family,
-            key: key,
-            userDefaults: userDefaults
+        let migrated = harnessProvider == .claude
+            ? Self.migrateClaudeSessionDefaults(in: stored, family: family, key: key, userDefaults: userDefaults)
+            : stored
+        // Standard gamepads share one stored profile shaped for the family
+        // Settings shows; read the other family's defaults in its place.
+        guard key == activeStorageKey, family != controllerFamily else { return migrated }
+        return Self.replacingDefaults(
+            in: migrated,
+            from: Self.defaultMappings(for: controllerFamily, provider: harnessProvider),
+            to: Self.defaultMappings(for: family, provider: harnessProvider)
         )
     }
 
@@ -899,9 +917,7 @@ final class ControllerMappingStore: ObservableObject {
                 key: recordedShortcutsStorageKey
             )
         } else {
-            for input in ControllerInput.allCases where mappings[input] == previousDefaults[input] {
-                mappings[input] = newDefaults[input]
-            }
+            mappings = Self.replacingDefaults(in: mappings, from: previousDefaults, to: newDefaults)
         }
         if harnessProvider == .codex && !family.isJoyCon && family != .xiaomiRemote {
             migrateStoredMappingsIfNeeded()
@@ -909,6 +925,7 @@ final class ControllerMappingStore: ObservableObject {
         if harnessProvider == .claude {
             migrateClaudeSessionDefaultsIfNeeded()
         }
+        migrateDualSenseDefaultsIfNeeded()
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
         persistAll()
     }
@@ -936,6 +953,7 @@ final class ControllerMappingStore: ObservableObject {
         if provider == .claude {
             migrateClaudeSessionDefaultsIfNeeded()
         }
+        migrateDualSenseDefaultsIfNeeded()
     }
 
     func setConnectedDevices(_ devices: [ConnectedControllerDescriptor]) {
@@ -1265,6 +1283,45 @@ final class ControllerMappingStore: ObservableObject {
             mappings[.home] = .toggleOperationMode
             persist()
         }
+    }
+
+    /// DualSense defaults that diverged from Xbox after release, one step per
+    /// change. Saved profiles still holding the Xbox default for these inputs
+    /// move once per step; later choices stay untouched.
+    private static let dualSenseDefaultMigrations: [(flag: String, inputs: [ControllerInput])] = [
+        ("dualSenseNavigationDefaultsMigrated", [.dpadUp, .dpadDown, .dpadLeft, .dpadRight, .menu]),
+        ("dualSenseCloseWindowDefaultMigrated", [.functionButtonA]),
+    ]
+
+    private func migrateDualSenseDefaultsIfNeeded() {
+        guard controllerFamily == .dualSense else { return }
+        let oldDefaults = Self.defaultMappings(for: .xbox, provider: harnessProvider)
+        let newDefaults = Self.defaultMappings(for: .dualSense, provider: harnessProvider)
+        var migrated = mappings
+        for step in Self.dualSenseDefaultMigrations {
+            let completedKey = "\(activeStorageKey).\(step.flag)"
+            guard !userDefaults.bool(forKey: completedKey) else { continue }
+            for input in step.inputs where migrated[input] == oldDefaults[input] {
+                migrated[input] = newDefaults[input]
+            }
+            userDefaults.set(true, forKey: completedKey)
+        }
+        if migrated != mappings {
+            mappings = migrated
+            persist()
+        }
+    }
+
+    private static func replacingDefaults(
+        in mappings: [ControllerInput: ControllerMappedAction],
+        from oldDefaults: [ControllerInput: ControllerMappedAction],
+        to newDefaults: [ControllerInput: ControllerMappedAction]
+    ) -> [ControllerInput: ControllerMappedAction] {
+        var result = mappings
+        for input in ControllerInput.allCases where mappings[input] == oldDefaults[input] {
+            result[input] = newDefaults[input]
+        }
+        return result
     }
 
     private static func loadMappings(

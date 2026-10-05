@@ -53,6 +53,8 @@ extension SystemKey {
             return SystemKeyEventDescriptor(keyCode: 0x08, flags: pressed ? .maskCommand : [])
         case .paste:
             return SystemKeyEventDescriptor(keyCode: 0x09, flags: pressed ? .maskCommand : [])
+        case .closeWindow:
+            return SystemKeyEventDescriptor(keyCode: 0x0D, flags: pressed ? .maskCommand : [])
         case .screenshotTool:
             let flags: CGEventFlags = [.maskCommand, .maskShift]
             return SystemKeyEventDescriptor(keyCode: 0x00, flags: pressed ? flags : [])
