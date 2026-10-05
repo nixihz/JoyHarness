@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-05
+
+### Added
+- Custom application Harnesses with native app icons, persistent independent mappings, and application management in Settings.
+
+### Changed
+- Refresh the Dashboard with glass cards, an on-demand connection inspector, and automatic scrolling to newly pressed inputs.
+- Keep focus in Settings when changing the active Harness; confirming an app in the PS/Home switcher opens or activates it.
+- Reduce the macOS DMG from about 18 MB to about 3 MB through optimized artwork, a smaller app bundle, and improved compression (#9).
+
 ## [0.8.1] - 2026-10-03
 
 ### Fixed
@@ -184,6 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.8.2]: https://github.com/nixihz/JoyHarness/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0

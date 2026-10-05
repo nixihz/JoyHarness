@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-05
+
+### 新增
+- 自定义应用 Harness：使用应用原生图标，独立保存按键映射，并可在设置中管理应用。
+
+### 优化与重构
+- Dashboard 改用玻璃卡片，连接详情按需展开，并自动滚动到刚按下的输入项。
+- 在设置中切换当前 Harness 时保留窗口焦点；在 PS/Home 切换浮层中确认后打开或激活对应应用。
+- 通过优化图片资源、精简应用包和改进压缩，将 macOS DMG 从约 18 MB 缩小至约 3 MB（#9）。
+
 ## [0.8.1] - 2026-10-03
 
 ### 修复
@@ -184,6 +194,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.8.2]: https://github.com/nixihz/JoyHarness/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nixihz/JoyHarness/compare/v0.6.1...v0.7.0
