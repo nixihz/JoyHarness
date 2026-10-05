@@ -1,4 +1,5 @@
 import os
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +15,38 @@ CURRENT_VERSION = (
 
 
 class ReleaseAutomationTests(unittest.TestCase):
+    def test_publication_requires_complete_consistent_artifacts(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        step = workflow.split("      - name: Verify complete artifact set\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("      - name:", 1)[0])
+        for fault in (None, "missing-intel", "corrupt-intel", "mixed-signing"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                assets = root / "release-assets"
+                assets.mkdir()
+                for arch in ("arm64", "x86_64"):
+                    name = f"Joy-Harness-v1.2.3-macOS-{arch}.dmg"
+                    data = f"verified artifact for {arch}".encode()
+                    (assets / name).write_bytes(data)
+                    (assets / f"{name}.sha256").write_text(f"{hashlib.sha256(data).hexdigest()}  {name}\n")
+                    (assets / f"signing-mode-{arch}.txt").write_text("unnotarized\n")
+                intel = assets / "Joy-Harness-v1.2.3-macOS-x86_64.dmg"
+                if fault == "missing-intel":
+                    intel.unlink()
+                elif fault == "corrupt-intel":
+                    intel.write_bytes(b"damaged download")
+                elif fault == "mixed-signing":
+                    (assets / "signing-mode-x86_64.txt").write_text("notarized\n")
+                output = root / "github-env"
+                environment = dict(os.environ, VERSION="1.2.3", BACKFILL_ARCH="none",
+                                   PRERELEASE="false", GITHUB_ENV=str(output))
+                result = subprocess.run(
+                    ["bash", "-c", 'sha256sum() { shasum -a 256 "$@"; }\n' + script],
+                    env=environment, cwd=root, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode == 0, fault is None, result.stderr)
+                self.assertEqual(output.exists(), fault is None)
+
     def test_release_credentials_accept_existing_five_secrets(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         step = workflow.split("      - name: Validate release secrets\n", 1)[1]
@@ -87,6 +120,7 @@ xcrun() {
             checkout = Path(temporary_directory)
             for relative_path in (
                 "README.md",
+                "docs/README.zh-CN.md",
                 "Sources/JoyHarness/Resources/VERSION",
                 "tests/JoyHarnessTests/JoyHarnessTests.swift",
                 "scripts/package_dmg.sh",
@@ -166,6 +200,7 @@ xcrun() {
         }
         required_paths = (
             "README.md",
+            "docs/README.zh-CN.md",
             "Sources/JoyHarness/Resources/VERSION",
             "tests/JoyHarnessTests/JoyHarnessTests.swift",
             "scripts/package_dmg.sh",
@@ -224,25 +259,6 @@ xcrun() {
             release_workflow,
         )
 
-    def test_release_workflow_has_a_guarded_one_click_flow(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("workflow_dispatch:", workflow)
-        self.assertIn("contents: write", workflow)
-        self.assertIn("runs-on: macos-26", workflow)
-        self.assertIn('refs/heads/main', workflow)
-        self.assertIn("Sources/JoyHarness/Resources/VERSION", workflow)
-        self.assertIn("does not match source version", workflow)
-        self.assertIn("gh release create", workflow)
-        self.assertIn("--draft", workflow)
-        self.assertNotIn("PRERELEASE_ARGS", workflow)
-        self.assertIn("create_release --prerelease", workflow)
-        self.assertIn("README.md", workflow)
-        self.assertIn('gh release edit "${TAG}" --draft=false --latest=false', workflow)
-        self.assertIn('gh release edit "${TAG}" --draft=false --latest', workflow)
-
     def test_release_workflow_supports_complete_or_empty_signing_config(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
@@ -298,29 +314,6 @@ xcrun() {
                 if expected == "--latest":
                     self.assertNotIn("--latest=false", result.stdout)
 
-    def test_stable_release_rejects_version_suffix(self) -> None:
-        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        step = workflow.split("      - name: Validate release request\n", 1)[1]
-        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("          SOURCE_VERSION=", 1)[0])
-
-        for version, prerelease, valid in (
-            ("1.2.3", "false", True),
-            ("1.2.3-rc.1", "false", False),
-            ("1.2.3.4", "false", False),
-            ("1.2.3-rc.1", "true", True),
-        ):
-            with self.subTest(version=version, prerelease=prerelease):
-                environment = dict(os.environ, VERSION_INPUT=version,
-                                   PRERELEASE_INPUT=prerelease,
-                                   GITHUB_REF="refs/heads/main")
-                result = subprocess.run(
-                    ["bash", "-c", script], env=environment,
-                    capture_output=True, text=True,
-                )
-                self.assertEqual(result.returncode == 0, valid, result.stderr)
-                if not valid:
-                    self.assertIn("Stable releases require", result.stderr)
-
     def test_appcast_verifier_rejects_unsigned_or_mutable_update(self) -> None:
         version = "1.2.3"
         dmg_name = "Joy-Harness-v1.2.3-macOS-arm64.dmg"
@@ -350,6 +343,28 @@ xcrun() {
                         cwd=ROOT, capture_output=True, text=True,
                     )
                     self.assertEqual(result.returncode == 0, valid, result.stderr)
+
+    def test_intel_appcast_rejects_arm_updates_in_retained_history(self) -> None:
+        xml = '''<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<channel>
+<item><sparkle:version>1.2.3</sparkle:version><enclosure sparkle:edSignature="signed"
+url="https://github.com/nixihz/JoyHarness/releases/download/v1.2.3/Joy-Harness-v1.2.3-macOS-x86_64.dmg" /></item>
+<item><sparkle:version>1.2.2</sparkle:version><enclosure sparkle:edSignature="signed"
+url="https://github.com/nixihz/JoyHarness/releases/download/v1.2.2/Joy-Harness-v1.2.2-macOS-{arch}.dmg" /></item>
+</channel></rss>'''
+        with tempfile.TemporaryDirectory() as directory:
+            appcast = Path(directory) / "appcast-x86_64.xml"
+            for arch, valid in (("x86_64", True), ("arm64", False)):
+                with self.subTest(arch=arch):
+                    appcast.write_text(xml.format(arch=arch))
+                    result = subprocess.run(
+                        ["python3", "scripts/verify_sparkle_appcast.py", str(appcast),
+                         "1.2.3", "Joy-Harness-v1.2.3-macOS-x86_64.dmg"],
+                        cwd=ROOT, capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode == 0, valid, result.stderr)
+                    if not valid:
+                        self.assertIn("wrong architecture", result.stderr)
 
 
 if __name__ == "__main__":

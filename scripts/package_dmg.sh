@@ -8,6 +8,11 @@ VERSION="${VERSION_INPUT#v}"
 APP_NAME="Joy Harness"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${ROOT}/Sources/JoyHarness/Info.plist")"
 ARCH="$(uname -m)"
+case "${ARCH}" in
+  arm64) APPCAST_NAME="appcast.xml" ;;
+  x86_64) APPCAST_NAME="appcast-x86_64.xml" ;;
+  *) echo "unsupported macOS architecture: ${ARCH} (expected arm64 or x86_64)" >&2; exit 2 ;;
+esac
 DIST_DIR="${ROOT}/dist"
 APP_BUNDLE="${DIST_DIR}/${APP_NAME}.app"
 DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"
@@ -91,7 +96,7 @@ if [[ "${JOY_HARNESS_ENABLE_SPARKLE:-0}" == "1" ]]; then
   fi
   PUBLIC_KEY="$(tr -d '[:space:]' < "${PUBLIC_KEY_FILE}")"
   /usr/libexec/PlistBuddy -c 'Add :JoyHarnessUpdaterEnabled bool true' "${APP_BUNDLE}/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c 'Add :SUFeedURL string https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml' "${APP_BUNDLE}/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :SUFeedURL string https://github.com/nixihz/JoyHarness/releases/latest/download/${APPCAST_NAME}" "${APP_BUNDLE}/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${PUBLIC_KEY}" "${APP_BUNDLE}/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Add :SUAllowsAutomaticUpdates bool false' "${APP_BUNDLE}/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Add :SUAutomaticallyUpdate bool false' "${APP_BUNDLE}/Contents/Info.plist"
@@ -100,7 +105,7 @@ fi
 "${ROOT}/scripts/sign_macos_app.sh" "${APP_BUNDLE}" "${BUNDLE_ID}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 plutil -lint "${APP_BUNDLE}/Contents/Info.plist"
-python3 "${ROOT}/scripts/verify_packaged_app.py" "${APP_BUNDLE}"
+python3 "${ROOT}/scripts/verify_packaged_app.py" "${APP_BUNDLE}" --arch "${ARCH}"
 
 mkdir -p "${DMG_ROOT}"
 /usr/bin/ditto "${APP_BUNDLE}" "${DMG_ROOT}/${APP_NAME}.app"

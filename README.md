@@ -23,18 +23,21 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.8.2** for Apple Silicon Macs (arm64) running macOS 13.0 or later:
+The current release is **v0.8.2** for Apple Silicon (arm64) and Intel (x86_64, also called AMD64) Macs running macOS 13.0 or later. Choose the download for your Mac's chip:
 
-- [Download Joy-Harness-v0.8.2-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg)
-- [Download the SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256)
+- Apple Silicon: [Download Joy-Harness-v0.8.2-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg) · [SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256)
+- Intel: [Download Joy-Harness-v0.8.2-macOS-x86_64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-x86_64.dmg) · [SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-x86_64.dmg.sha256)
 - [View the v0.8.2 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.8.2)
 
 The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. See the release notes for signing and notarization details.
 
-Verify the download with:
+Verify the download with the matching checksum file:
 
 ```bash
+# Apple Silicon
 shasum -a 256 -c Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256
+# Intel
+shasum -a 256 -c Joy-Harness-v0.8.2-macOS-x86_64.dmg.sha256
 ```
 
 ## Dashboard

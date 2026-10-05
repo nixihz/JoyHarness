@@ -1,34 +1,70 @@
 # Release automation
 
-`.github/workflows/release.yml` publishes a versioned Apple Silicon DMG from
-the `main` branch. It runs the complete test suite, packages the app, verifies
-the packaged app’s resource loading from a temporary location, the DMG and
-checksum, creates a draft GitHub Release, uploads its assets, and publishes the
-release only after every previous step succeeds.
+`.github/workflows/release.yml` publishes versioned DMGs for Apple Silicon
+(`arm64`) and Intel (`x86_64`, also called AMD64), both requiring macOS 13.0 or
+later. A normal release builds from `main`: `macos-26` tests and packages arm64
+natively, and `macos-26-intel` tests and packages x86_64 natively. Each job checks
+the packaged app's resource loading from a temporary location, the binary
+architecture, DMG and checksum. Signing and notarization run separately for each
+architecture. Only after both jobs succeed does the workflow upload all assets to
+one draft GitHub Release and publish it.
 
 ## Run a release
 
-1. Prepare release files and changelog automatically from Conventional Commits:
+1. Prepare version references and draft changelogs from Conventional Commits:
    ```bash
    python3 scripts/prepare_release.py <version>
    ```
    Or invoke the `.agents/skills/release/SKILL.md` skill with prompt: `帮我发版 vX.Y.Z`.
+   The script updates both architectures' current download links, checksum
+   commands, filenames and visible release labels. It preserves historical
+   README summaries. Review the diff, translate the Chinese changelog's commit
+   subjects, and write the new English and Chinese README summaries yourself;
+   the script does not translate subjects or generate What's New sections.
 
-2. Commit and push the release preparation:
+2. Validate the prepared release, then commit and push it:
    ```bash
+   task ci
+   task release-check
    git commit -am "chore: prepare v<version> release"
    git push origin main
    ```
 
 3. Dispatch the GitHub Actions release workflow:
    ```bash
-   gh workflow run release.yml --ref main -f version=<version> -f prerelease=false
+   gh workflow run release.yml --ref main -f version=<version> -f prerelease=false -f backfill_arch=none
    ```
 
-The workflow rejects invalid versions and versions whose tag or Release already
-exists. Stable releases require a plain `major.minor.patch` version; a version
-with a suffix must use `prerelease=true`. The workflow does not modify an
-existing release.
+`backfill_arch=none` is the default and releases both architectures. This mode
+rejects invalid versions and versions whose tag or Release already exists.
+Stable releases require a plain `major.minor.patch` version; a version with a
+suffix must use `prerelease=true`.
+
+4. Monitor the run and verify the published Release has both DMGs, matching
+   SHA-256 files, and both architecture feeds when Sparkle is enabled. Fetch the
+   new tag locally after publication.
+
+## Add a missing architecture to an existing release
+
+Use `backfill_arch=x86_64` or `backfill_arch=arm64` only for the latest published
+stable release. For example, to add Intel to v0.8.2:
+
+```bash
+gh workflow run release.yml --ref main -f version=0.8.2 -f prerelease=false -f backfill_arch=x86_64
+```
+
+This mode resolves the existing tag to its commit SHA and builds the application
+from that exact source. It overlays only the workflow's newer packaging tooling
+so the missing architecture can be built; application source, resources and
+version metadata remain those of the tag. Run it from the updated `main`
+workflow without preparing a new version or moving the tag.
+
+The workflow rejects drafts, prereleases, releases other than the latest stable
+release, and any requested architecture whose assets already exist. It natively
+tests, packages, signs and notarizes the missing architecture before adding its
+DMG, checksum and eligible Sparkle feed. Existing assets remain intact and the
+tag is never moved. After completion, check the added files and feed, and confirm
+the original tag SHA and existing asset checksums are unchanged.
 
 ## Signing modes
 
@@ -79,12 +115,14 @@ Never commit certificates, API keys, or their passwords to the repository.
 ## Sparkle updates
 
 Only a signed, notarized stable release enables Sparkle in its app bundle. The
-workflow signs the notarized DMG for Sparkle with EdDSA, adds `appcast.xml` as a
-third Release asset, and checks the published feed at
-`https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml`.
+workflow signs each notarized DMG for Sparkle with EdDSA. Apple Silicon keeps
+`appcast.xml` and Intel uses `appcast-x86_64.xml`; each app bundle points to its
+own architecture's feed under
+`https://github.com/nixihz/JoyHarness/releases/latest/download/`.
 Appcast enclosures use version-specific Release download URLs so older entries
-continue to point to their original DMGs. The existing feed is carried forward
-when a new eligible stable version is published.
+continue to point to their original DMGs. Each architecture's existing feed is
+carried forward when a new eligible stable version is published. Backfilling an
+architecture adds only its feed, preserving the other architecture's update path.
 
 Only such releases are marked GitHub `latest`. The workflow explicitly publishes
 ad-hoc stable releases and prereleases with `--latest=false`, without an appcast

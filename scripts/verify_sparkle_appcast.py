@@ -3,6 +3,7 @@
 
 import argparse
 from pathlib import Path
+import re
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 
@@ -18,12 +19,18 @@ def verify(appcast: Path, version: str, dmg_name: str) -> None:
     expected_url = (
         f"https://github.com/nixihz/JoyHarness/releases/download/v{version}/{dmg_name}"
     )
+    architecture = re.search(r"-macOS-(arm64|x86_64)\.dmg$", dmg_name)
+    if architecture is None:
+        raise ValueError(f"unsupported release artifact: {dmg_name}")
+    expected_suffix = f"-macOS-{architecture.group(1)}.dmg"
     matching = []
     for item in root.findall("./channel/item"):
         enclosure = item.find("enclosure")
         if enclosure is None:
             raise ValueError("appcast item is missing an enclosure")
         url = enclosure.get("url", "")
+        if not urlparse(url).path.endswith(expected_suffix):
+            raise ValueError(f"appcast contains an update for the wrong architecture: {url}")
         if "/releases/latest/download/" in url:
             raise ValueError("appcast contains a mutable latest-release download URL")
         if urlparse(url).scheme != "https":

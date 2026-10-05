@@ -4,7 +4,7 @@ Release preparation script for Joy Harness.
 
 Automates:
 1. Detecting the previous tag and parsing conventional commits since that tag.
-2. Generating structured release notes (What's New) in English and Chinese.
+2. Drafting changelog entries with English and Chinese category headings.
 3. Updating version references across all project files:
    - Sources/JoyHarness/Resources/VERSION
    - tests/JoyHarnessTests/JoyHarnessTests.swift
@@ -12,11 +12,13 @@ Automates:
    - docs/README.zh-CN.md
    - docs/CHANGELOG.md
    - docs/CHANGELOG.zh-CN.md
+
+Commit subjects remain in their original language. Translate the Chinese
+changelog and write the README What's New summaries during release review.
 """
 
 import argparse
 import datetime
-import os
 import re
 import subprocess
 import sys
@@ -98,6 +100,36 @@ def update_file(path: Path, old_content: str, new_content: str, dry_run: bool = 
         path.write_text(new_content, encoding="utf-8")
 
 
+def update_readme_references(content: str, version: str) -> str:
+    """Update current downloads and commands while preserving release history."""
+    sections = re.split(r"(?=^## )", content, flags=re.MULTILINE)
+    for index, section in enumerate(sections):
+        if re.match(r"## (?:What's New in v|v[0-9][^\n]* 更新)", section):
+            continue
+        section = re.sub(
+            r"(The current release is|当前版本为) \*\*v[^*]+\*\*",
+            lambda match: f"{match[1]} **v{version}**",
+            section,
+        )
+        section = re.sub(
+            r"releases/download/v[0-9a-zA-Z.-]+/(?=Joy-Harness-v[0-9a-zA-Z.-]+-macOS-(?:arm64|x86_64)\.dmg)",
+            f"releases/download/v{version}/",
+            section,
+        )
+        section = re.sub(
+            r"Joy-Harness-v[0-9a-zA-Z.-]+-macOS-(arm64|x86_64)\.dmg",
+            lambda match: f"Joy-Harness-v{version}-macOS-{match[1]}.dmg",
+            section,
+        )
+        section = re.sub(r"releases/tag/v[0-9a-zA-Z.-]+", f"releases/tag/v{version}", section)
+        section = re.sub(r"View the v[0-9a-zA-Z.-]+ release", f"View the v{version} release", section)
+        section = re.sub(r"查看 v[0-9a-zA-Z.-]+ Release", f"查看 v{version} Release", section)
+        section = re.sub(r"task dmg -- [0-9a-zA-Z.-]+", f"task dmg -- {version}", section)
+        section = re.sub(r"scripts/package_dmg\.sh [0-9a-zA-Z.-]+", f"scripts/package_dmg.sh {version}", section)
+        sections[index] = section
+    return "".join(sections)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare Joy Harness Release")
     parser.add_argument("version", nargs="?", help="Target version (e.g. 0.5.0)")
@@ -130,25 +162,13 @@ def main() -> int:
     # 3. Update README.md
     readme_file = ROOT / "README.md"
     readme = readme_file.read_text(encoding="utf-8")
-    readme = re.sub(r'The current release is \*\*v[^\*]+\*\*', f'The current release is **v{target_version}**', readme, count=1)
-    readme = re.sub(r'Download Joy-Harness-v[0-9a-zA-Z.-]+-macOS-arm64\.dmg', f'Download Joy-Harness-v{target_version}-macOS-arm64.dmg', readme)
-    readme = re.sub(r'releases/download/v[0-9a-zA-Z.-]+/Joy-Harness-v[0-9a-zA-Z.-]+-macOS-arm64\.dmg', f'releases/download/v{target_version}/Joy-Harness-v{target_version}-macOS-arm64.dmg', readme)
-    readme = re.sub(r'releases/tag/v[0-9a-zA-Z.-]+', f'releases/tag/v{target_version}', readme, count=1)
-    readme = re.sub(r'Joy-Harness-v[0-9a-zA-Z.-]+-macOS-arm64\.dmg\.sha256', f'Joy-Harness-v{target_version}-macOS-arm64.dmg.sha256', readme)
-    readme = re.sub(r'task dmg -- [0-9a-zA-Z.-]+', f'task dmg -- {target_version}', readme)
-    readme = re.sub(r'scripts/package_dmg\.sh [0-9a-zA-Z.-]+', f'scripts/package_dmg.sh {target_version}', readme)
+    readme = update_readme_references(readme, target_version)
     update_file(readme_file, readme_file.read_text(encoding="utf-8"), readme, args.dry_run)
 
     # 4. Update docs/README.zh-CN.md
     readme_zh_file = ROOT / "docs" / "README.zh-CN.md"
     readme_zh = readme_zh_file.read_text(encoding="utf-8")
-    readme_zh = re.sub(r'当前版本为 \*\*v[^\*]+\*\*', f'当前版本为 **v{target_version}**', readme_zh, count=1)
-    readme_zh = re.sub(r'下载 Joy-Harness-v[0-9a-zA-Z.-]+-macOS-arm64\.dmg', f'下载 Joy-Harness-v{target_version}-macOS-arm64.dmg', readme_zh)
-    readme_zh = re.sub(r'releases/download/v[0-9a-zA-Z.-]+/Joy-Harness-v[0-9a-zA-Z.-]+-macOS-arm64\.dmg', f'releases/download/v{target_version}/Joy-Harness-v{target_version}-macOS-arm64.dmg', readme_zh)
-    readme_zh = re.sub(r'releases/tag/v[0-9a-zA-Z.-]+', f'releases/tag/v{target_version}', readme_zh, count=1)
-    readme_zh = re.sub(r'Joy-Harness-v[0-9a-zA-Z.-]+-macOS-arm64\.dmg\.sha256', f'Joy-Harness-v{target_version}-macOS-arm64.dmg.sha256', readme_zh)
-    readme_zh = re.sub(r'task dmg -- [0-9a-zA-Z.-]+', f'task dmg -- {target_version}', readme_zh)
-    readme_zh = re.sub(r'scripts/package_dmg\.sh [0-9a-zA-Z.-]+', f'scripts/package_dmg.sh {target_version}', readme_zh)
+    readme_zh = update_readme_references(readme_zh, target_version)
     update_file(readme_zh_file, readme_zh_file.read_text(encoding="utf-8"), readme_zh, args.dry_run)
 
     # 5. Update docs/CHANGELOG.md
@@ -196,10 +216,10 @@ def main() -> int:
 
     print(f"\n✓ Release preparation complete for v{target_version}.")
     print("Next steps:")
-    print("  1. Review changes in git diff")
-    print("  2. Run tests: swift test && python3 -m unittest discover -s tests -v")
+    print("  1. Review git diff, translate the Chinese changelog, and write both README What's New summaries")
+    print("  2. Validate: task ci && task release-check")
     print(f"  3. Commit and push: git commit -am 'chore: prepare v{target_version} release' && git push")
-    print(f"  4. Trigger release: gh workflow run release.yml -f version={target_version}")
+    print(f"  4. Trigger release: gh workflow run release.yml --ref main -f version={target_version} -f prerelease=false -f backfill_arch=none")
     return 0
 
 

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Semantic version to release (for example, 0.2.0)
+        description: Semantic version to release (for example, 0.8.2)
         required: true
         type: string
       prerelease:
@@ -12,6 +12,15 @@ on:
         required: true
         default: false
         type: boolean
+      backfill_arch:
+        description: Add a missing architecture to the latest stable release
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - arm64
+          - x86_64
 
 permissions:
   contents: write
@@ -21,16 +30,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: macos-26
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate release request
+        id: plan
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          PRERELEASE_INPUT: ${{ inputs.prerelease }}
+          BACKFILL_ARCH: ${{ inputs.backfill_arch }}
+        run: python3 scripts/plan_release.py "$VERSION_INPUT" --prerelease "$PRERELEASE_INPUT" --backfill-arch "$BACKFILL_ARCH"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
-
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
     steps:
-      - name: Check out main
+      - name: Check out release source
         uses: actions/checkout@v6
         with:
+          ref: ${{ needs.plan.outputs.source_sha }}
           fetch-depth: 0
 
       - name: Install release tools
@@ -38,52 +74,25 @@ jobs:
           brew install go-task shellcheck cmake ninja
           brew install --cask gcc-arm-embedded
 
-      - name: Validate release request
+      - name: Set architecture-specific artifact names
         env:
-          VERSION_INPUT: ${{ inputs.version }}
-          PRERELEASE_INPUT: ${{ inputs.prerelease }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
-            echo "Releases must be dispatched from the main branch." >&2
-            exit 1
-          fi
-
-          VERSION="${VERSION_INPUT#v}"
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid version: ${VERSION_INPUT}" >&2
-            exit 2
-          fi
-          if [[ "${PRERELEASE_INPUT}" == "false" && ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Stable releases require a version without a prerelease suffix: ${VERSION_INPUT}" >&2
-            exit 2
-          fi
-
-          SOURCE_VERSION="$(tr -d '[:space:]' < Sources/JoyHarness/Resources/VERSION)"
-          if [[ "${VERSION}" != "${SOURCE_VERSION}" ]]; then
-            echo "Release version ${VERSION} does not match source version ${SOURCE_VERSION}." >&2
-            exit 1
-          fi
-
-          TAG="v${VERSION}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag already exists: ${TAG}" >&2
-            exit 1
-          fi
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Release already exists: ${TAG}" >&2
-            exit 1
-          fi
-
           ARCH="$(uname -m)"
+          [[ "$ARCH" == "$EXPECTED_ARCH" ]]
           DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"
+          if [[ "$ARCH" == arm64 ]]; then
+            FEED_NAME=appcast.xml
+          else
+            FEED_NAME=appcast-x86_64.xml
+          fi
           {
-            echo "VERSION=${VERSION}"
-            echo "TAG=${TAG}"
             echo "DMG_NAME=${DMG_NAME}"
             echo "DMG_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}"
             echo "CHECKSUM_PATH=${GITHUB_WORKSPACE}/dist/${DMG_NAME}.sha256"
-          } >> "${GITHUB_ENV}"
+            echo "FEED_NAME=${FEED_NAME}"
+          } >> "$GITHUB_ENV"
 
       - name: Validate release secrets
         env:
@@ -123,6 +132,26 @@ jobs:
           task ci
           task release-check -- "${TAG}"
           task firmware
+
+      - name: Require signing for an existing stable release
+        if: inputs.backfill_arch != 'none'
+        run: test "$RELEASE_MODE" = notarized
+
+      - name: Load current distribution tools for backfill
+        if: inputs.backfill_arch != 'none'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tools
+          sparse-checkout: scripts
+
+      - name: Apply distribution tools to the tagged source
+        if: inputs.backfill_arch != 'none'
+        run: |
+          # Application sources and resources remain exactly those of the release tag.
+          for tool in package_dmg.sh embed_sparkle.sh verify_packaged_app.py verify_sparkle_appcast.py; do
+            cp ".release-tools/scripts/$tool" "scripts/$tool"
+          done
 
       - name: Import Developer ID certificate
         if: env.RELEASE_MODE == 'notarized'
@@ -239,11 +268,11 @@ jobs:
           FEED_DIR="${RUNNER_TEMP}/sparkle-feed"
           mkdir -p "${FEED_DIR}"
           cp "${DMG_PATH}" "${FEED_DIR}/${DMG_NAME}"
-          FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml"
+          FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/${FEED_NAME}"
           HTTP_STATUS="$(curl --location --silent --show-error \
-            --output "${FEED_DIR}/appcast.xml" --write-out '%{http_code}' "${FEED_URL}")"
+            --output "${FEED_DIR}/${FEED_NAME}" --write-out '%{http_code}' "${FEED_URL}")"
           if [[ "${HTTP_STATUS}" == "404" ]]; then
-            unlink "${FEED_DIR}/appcast.xml"
+            unlink "${FEED_DIR}/${FEED_NAME}"
           elif [[ "${HTTP_STATUS}" != "200" ]]; then
             echo "Cannot read existing Sparkle feed: HTTP ${HTTP_STATUS}" >&2
             exit 1
@@ -258,74 +287,129 @@ jobs:
             --maximum-deltas 0 \
             --download-url-prefix "https://github.com/nixihz/JoyHarness/releases/download/${TAG}/" \
             "${FEED_DIR}"
-          python3 scripts/verify_sparkle_appcast.py "${FEED_DIR}/appcast.xml" "${VERSION}" "${DMG_NAME}"
+          python3 scripts/verify_sparkle_appcast.py "${FEED_DIR}/${FEED_NAME}" "${VERSION}" "${DMG_NAME}"
+          cp "${FEED_DIR}/${FEED_NAME}" "dist/${FEED_NAME}"
+
+      - name: Stage verified release artifacts
+        run: |
+          mkdir -p release-assets
+          cp "$DMG_PATH" "$CHECKSUM_PATH" release-assets/
+          if [[ "$RELEASE_MODE" == notarized && "${{ inputs.prerelease }}" == false ]]; then
+            cp "dist/$FEED_NAME" release-assets/
+          fi
+          echo "$RELEASE_MODE" > "release-assets/signing-mode-${{ matrix.arch }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      BACKFILL_ARCH: ${{ inputs.backfill_arch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify complete artifact set
+        run: |
+          set -euo pipefail
+          ARCHES="arm64 x86_64"
+          if [[ "$BACKFILL_ARCH" != none ]]; then ARCHES="$BACKFILL_ARCH"; fi
+          RELEASE_MODE=""
+          for ARCH in $ARCHES; do
+            MODE="$(cat "release-assets/signing-mode-$ARCH.txt")"
+            [[ "$MODE" == notarized || "$MODE" == unnotarized ]]
+            [[ -z "$RELEASE_MODE" || "$RELEASE_MODE" == "$MODE" ]]
+            RELEASE_MODE="$MODE"
+            DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"
+            (cd release-assets && sha256sum -c "$DMG_NAME.sha256")
+            if [[ "$RELEASE_MODE" == notarized && "$PRERELEASE" == false ]]; then
+              FEED_NAME=appcast.xml
+              if [[ "$ARCH" == x86_64 ]]; then FEED_NAME=appcast-x86_64.xml; fi
+              python3 scripts/verify_sparkle_appcast.py "release-assets/$FEED_NAME" "$VERSION" "$DMG_NAME"
+            fi
+          done
+          echo "RELEASE_MODE=$RELEASE_MODE" >> "$GITHUB_ENV"
 
       - name: Write release notes
         run: |
-          if [[ "${RELEASE_MODE}" == "notarized" ]]; then
-            SIGNING_NOTE="This build is signed with Developer ID Application and notarized by Apple."
-          else
-            SIGNING_NOTE="This build is not notarized. macOS may require approval in System Settings > Privacy & Security before first launch."
-          fi
-
-          WHATS_NEW="$(python3 -c "
-          import re, sys
-          content = open('README.md', encoding='utf-8').read()
-          pattern = r'## What\'s New in v?' + re.escape('${VERSION}') + r'\n\n(.*?)(?=\n## |\Z)'
-          match = re.search(pattern, content, re.DOTALL)
+          python3 - <<'PYNOTES'
+          import os, re, subprocess
+          from pathlib import Path
+          version = os.environ['VERSION']
+          readme = subprocess.check_output(['git', 'show', os.environ['SOURCE_SHA'] + ':README.md'], text=True)
+          match = re.search(r"## What's New in v?" + re.escape(version) + r'\n\n(.*?)(?=\n## |\Z)', readme, re.S)
+          notes = f"Joy Harness v{version} for Apple Silicon (arm64) and Intel (x86_64 / AMD64) Macs running macOS 13.0 or later.\n\n"
           if match:
-              print('## What\'s New\n\n' + match.group(1).strip() + '\n')
-          " || true)"
-
-          {
-            echo "Joy Harness ${TAG} for Apple Silicon Macs running macOS 13.0 or later."
-            echo ""
-            if [[ -n "${WHATS_NEW}" ]]; then
-              echo "${WHATS_NEW}"
-              echo ""
-            fi
-            echo "## Install"
-            echo ""
-            echo "1. Download ${DMG_NAME} and its .sha256 file."
-            echo "2. Open the DMG and drag Joy Harness.app to Applications."
-            echo "3. Use the checksum file to verify the download when needed."
-            echo ""
-            echo "${SIGNING_NOTE}"
-            echo ""
-            echo "The DMG contains the desktop app. Install from source with task install when Codex hooks, login startup, notify bridge, and the local CLI are also required."
-          } > "${RUNNER_TEMP}/release-notes.md"
+              notes += "## What's New\n\n" + match.group(1).strip() + "\n\n"
+          notes += "## Install\n\nChoose the DMG for your Mac's processor and its matching .sha256 file:\n\n"
+          for arch, label in [('arm64', 'Apple Silicon'), ('x86_64', 'Intel')]:
+              notes += f"- {label}: `Joy-Harness-v{version}-macOS-{arch}.dmg`\n"
+          notes += "\nOpen the DMG and drag Joy Harness.app to Applications.\n\n"
+          if os.environ['RELEASE_MODE'] == 'notarized':
+              notes += "Both builds are signed with Developer ID Application and notarized by Apple.\n"
+          else:
+              notes += "These builds are not notarized. macOS may require approval in System Settings > Privacy & Security before first launch.\n"
+          notes += "\nThe DMGs contain the desktop app. Install from source with task install when Codex hooks, login startup, notify bridge, and the local CLI are also required.\n"
+          Path(os.environ['RUNNER_TEMP'], 'release-notes.md').write_text(notes)
+          PYNOTES
 
       - name: Create draft release and upload assets
-        env:
-          PRERELEASE: ${{ inputs.prerelease }}
+        if: inputs.backfill_arch == 'none'
         run: |
           set -euo pipefail
+          python3 scripts/plan_release.py "$VERSION" --prerelease "$PRERELEASE"
           create_release() {
-            ASSETS=(
-              "${DMG_PATH}#Joy Harness ${TAG} for macOS arm64"
-              "${CHECKSUM_PATH}#SHA-256 checksum"
-            )
-            if [[ "${RELEASE_MODE}" == "notarized" && "${PRERELEASE}" == "false" ]]; then
-              ASSETS+=("${RUNNER_TEMP}/sparkle-feed/appcast.xml#Sparkle appcast")
+            ASSETS=()
+            for ARCH in arm64 x86_64; do
+              DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"
+              ASSETS+=("release-assets/$DMG_NAME#Joy Harness ${TAG} for macOS ${ARCH}")
+              ASSETS+=("release-assets/$DMG_NAME.sha256#SHA-256 checksum (${ARCH})")
+            done
+            if [[ "$RELEASE_MODE" == notarized && "$PRERELEASE" == false ]]; then
+              ASSETS+=("release-assets/appcast.xml#Sparkle appcast (arm64)")
+              ASSETS+=("release-assets/appcast-x86_64.xml#Sparkle appcast (x86_64)")
             fi
-            gh release create "${TAG}" \
-              "${ASSETS[@]}" \
-              --target "${GITHUB_SHA}" \
-              --draft \
-              --title "Joy Harness ${TAG}" \
-              --notes-file "${RUNNER_TEMP}/release-notes.md" \
-              "$@"
+            gh release create "$TAG" "${ASSETS[@]}" --target "$SOURCE_SHA" --draft \
+              --title "Joy Harness $TAG" --notes-file "$RUNNER_TEMP/release-notes.md" "$@"
           }
+          if [[ "$PRERELEASE" == true ]]; then create_release --prerelease; else create_release; fi
 
-          if [[ "${PRERELEASE}" == "true" ]]; then
-            create_release --prerelease
-          else
-            create_release
-          fi
+      - name: Add missing architecture to the existing release
+        if: inputs.backfill_arch != 'none'
+        run: |
+          set -euo pipefail
+          # Recheck immediately before upload; existing files are never clobbered.
+          python3 scripts/plan_release.py "$VERSION" --backfill-arch "$BACKFILL_ARCH"
+          [[ "$(git rev-parse "refs/tags/${TAG}^{commit}")" == "$SOURCE_SHA" ]]
+          DMG_NAME="Joy-Harness-v${VERSION}-macOS-${BACKFILL_ARCH}.dmg"
+          FEED_NAME=appcast.xml
+          if [[ "$BACKFILL_ARCH" == x86_64 ]]; then FEED_NAME=appcast-x86_64.xml; fi
+          gh release upload "$TAG" \
+            "release-assets/$DMG_NAME#Joy Harness ${TAG} for macOS ${BACKFILL_ARCH}" \
+            "release-assets/$DMG_NAME.sha256#SHA-256 checksum (${BACKFILL_ARCH})" \
+            "release-assets/$FEED_NAME#Sparkle appcast (${BACKFILL_ARCH})"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
 
       - name: Publish release
-        env:
-          PRERELEASE: ${{ inputs.prerelease }}
+        if: inputs.backfill_arch == 'none'
         run: |
           if [[ "${PRERELEASE}" == "true" ]]; then
             gh release edit "${TAG}" --draft=false --latest=false
@@ -337,20 +421,28 @@ jobs:
 
       - name: Verify published feed
         if: env.RELEASE_MODE == 'notarized' && inputs.prerelease == false
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/appcast.xml"
-          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            echo "Checking published Sparkle feed (attempt ${attempt})"
-            if curl --fail --location --silent --show-error "${FEED_URL}" \
-                --output "${RUNNER_TEMP}/published-appcast.xml" \
-                && python3 scripts/verify_sparkle_appcast.py \
-                  "${RUNNER_TEMP}/published-appcast.xml" "${VERSION#v}" "${DMG_NAME}"; then
-              exit 0
+          ARCHES="arm64 x86_64"
+          if [[ "$BACKFILL_ARCH" != none ]]; then ARCHES="$BACKFILL_ARCH"; fi
+          for ARCH in $ARCHES; do
+            FEED_NAME=appcast.xml
+            if [[ "$ARCH" == x86_64 ]]; then FEED_NAME=appcast-x86_64.xml; fi
+            FEED_URL="https://github.com/nixihz/JoyHarness/releases/latest/download/$FEED_NAME"
+            VERIFIED=false
+            for attempt in {1..30}; do
+              echo "Checking published Sparkle feed for $ARCH (attempt $attempt)"
+              if curl --fail --location --silent --show-error "$FEED_URL" \
+                  --output "$RUNNER_TEMP/$FEED_NAME" \
+                  && python3 scripts/verify_sparkle_appcast.py "$RUNNER_TEMP/$FEED_NAME" "$VERSION" \
+                    "Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"; then
+                VERIFIED=true
+                break
+              fi
+              sleep 10
+            done
+            if [[ "$VERIFIED" != true ]]; then
+              echo "Sparkle feed for $ARCH does not expose version $VERSION" >&2
+              exit 1
             fi
-            sleep 10
           done
-          echo "Sparkle feed does not expose version ${VERSION}" >&2
-          exit 1

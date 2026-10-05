@@ -1,89 +1,63 @@
 ---
 name: joyharness-release
-description: Automate Joy Harness release lifecycle. Parses conventional commits into English and Chinese changelogs, synchronizes version across all project files, runs unit tests, commits and pushes to main, and dispatches the GitHub Actions DMG packaging, Developer ID signing, and release workflow.
+description: Publish a new Joy Harness release or add a missing Mac architecture to the latest stable release. Prepares versions and changelog drafts, validates the repository, and runs the native arm64 and x86_64 GitHub Actions packaging, signing, notarization and release workflow.
 ---
 
-# Joy Harness Release Automation
+# Joy Harness releases
 
-Automate the full end-to-end release lifecycle for Joy Harness using Conventional Commits and GitHub Actions.
+Use this skill for new versions, release publication, or adding a missing Apple
+Silicon / Intel package to an existing release. Follow the relevant branch below.
+See [release automation](../../../docs/agents/release-automation.md) for signing
+secrets, Sparkle behavior, and packaged resource checks.
 
-## When to use
+## Publish a new version
 
-Use this skill whenever the user asks to:
-- "发版" / "发布 release" / "发布新版本"
-- "prepare release" / "release vX.Y.Z" / "publish release"
-- Bump version and trigger the release workflow
-
-## Workflow Steps
-
-### Step 1: Analyze Commits and Determine Version
-
-1. Identify the previous release tag:
+1. Identify the previous release tag and inspect the commits since it. Use the
+   version requested by the user; otherwise choose a Semantic Version based on
+   the changes. Run `python3 scripts/prepare_release.py <version>`.
+2. Review all six release files: `Sources/JoyHarness/Resources/VERSION`,
+   `tests/JoyHarnessTests/JoyHarnessTests.swift`, `README.md`,
+   `docs/README.zh-CN.md`, `docs/CHANGELOG.md`, and `docs/CHANGELOG.zh-CN.md`.
+   Verify current download URLs, bare artifact names, checksum commands, visible
+   release labels and local packaging commands for both `arm64` and `x86_64`.
+   The script drafts changelog categories but preserves commit subjects in their
+   original language. Translate the Chinese entry and write the new README
+   What's New summaries manually; preserve historical summaries.
+3. Run `task ci` and `task release-check`. Resolve failures before committing the
+   preparation, then commit and push the release changes to `main`.
+4. Dispatch the release workflow:
    ```bash
-   git describe --tags --abbrev=0
+   gh workflow run release.yml --ref main -f version=<version> -f prerelease=false -f backfill_arch=none
    ```
-2. Scan commits since the last tag:
+   Use `prerelease=true` for a prerelease version. `backfill_arch=none` is the
+   default: `macos-26` builds arm64 and `macos-26-intel` builds x86_64. Both run
+   native tests, packaging and architecture checks, plus signing and
+   notarization when configured. All builds must succeed before one Release is
+   published with both architectures.
+5. Monitor the dispatched run to completion. Fetch the new tag and verify both
+   DMGs, their SHA-256 files, and, for a signed notarized stable release, both
+   Sparkle feeds: `appcast.xml` for arm64 and `appcast-x86_64.xml` for Intel.
+   Report the Release URL, tag and verified outcome.
+
+## Add a missing architecture
+
+1. Confirm the requested version is the latest published stable release and
+   record its tag commit SHA and existing asset checksums. The selected
+   architecture's assets must be absent. Use `x86_64` for Intel (AMD64) or
+   `arm64` for Apple Silicon.
+2. Ensure the updated workflow and packaging tools are on `main`; validate any
+   changes with `task ci` and `task release-check`. Keep the version metadata and
+   existing tag unchanged. The workflow builds application source and resources
+   from the original tag SHA, overlaying only newer packaging tooling.
+3. Dispatch the backfill. For v0.8.2 Intel:
    ```bash
-   git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"* %s (%h)"
+   gh workflow run release.yml --ref main -f version=0.8.2 -f prerelease=false -f backfill_arch=x86_64
    ```
-3. Classify the conventional commits into categories:
-   - `feat:` -> Features / 新功能
-   - `fix:` -> Bug Fixes / 修复
-   - `perf:` -> Performance / 性能优化
-   - `docs:` -> Documentation / 文档
-   - `refactor:` / `test:` / `chore:` / `ci:` -> Maintenance / 维护与重构
-4. Determine target version (e.g., `0.5.0` or `0.4.1`) based on Semantic Versioning, or use the version requested by the user.
-
-### Step 2: Prepare Release Files
-
-Run the automated preparation script or update the 6 files:
-```bash
-python3 scripts/prepare_release.py <version>
-```
-
-Verify that the following 6 files have been synchronized:
-1. `Sources/JoyHarness/Resources/VERSION`: contains `<version>`
-2. `tests/JoyHarnessTests/JoyHarnessTests.swift`: `#expect(AppVersion.current == "<version>")`
-3. `README.md`: updated download URLs, SHA-256 command, `task dmg -- <version>`, and `## What's New in v<version>`
-4. `docs/README.zh-CN.md`: updated Chinese download URLs, SHA-256 command, `task dmg -- <version>`, and `## v<version> 更新`
-5. `docs/CHANGELOG.md`: added `## [<version>] - YYYY-MM-DD` section and compare link
-6. `docs/CHANGELOG.zh-CN.md`: added Chinese `## [<version>] - YYYY-MM-DD` section and compare link
-
-### Step 3: Run Validation Suite
-
-Ensure all tests pass before making any release commit:
-```bash
-swift test && python3 -m unittest discover -s tests -v
-```
-
-### Step 4: Commit and Push
-
-1. Stage and commit changes:
-   ```bash
-   git add Sources/JoyHarness/Resources/VERSION tests/JoyHarnessTests/JoyHarnessTests.swift README.md docs/README.zh-CN.md docs/CHANGELOG.md docs/CHANGELOG.zh-CN.md
-   git commit -m "chore: prepare v<version> release"
-   ```
-2. Push to `main`:
-   ```bash
-   git push origin main
-   ```
-
-### Step 5: Dispatch GitHub Actions Release Workflow
-
-1. Trigger the release workflow:
-   ```bash
-   gh workflow run release.yml --ref main -f version=<version> -f prerelease=false
-   ```
-2. Monitor workflow progress with `gh run watch <run_id>`.
-3. Once completed, sync the newly created tag to local:
-   ```bash
-   git fetch --tags
-   ```
-4. Verify the published release:
-   ```bash
-   gh release view v<version>
-   ```
-
-### Step 6: Summary
-
-Present a clear summary of the published release to the user with the release URL, tag, and key highlights.
+   `backfill_arch=arm64` selects the corresponding Apple Silicon job. Backfill
+   rejects drafts, prereleases, versions other than the latest stable release,
+   and existing assets for the selected architecture. It never moves the tag or
+   overwrites existing assets.
+4. Monitor the run to completion and verify the added DMG, checksum and eligible
+   architecture-specific Sparkle feed. Confirm the tag SHA and all previous
+   asset checksums are unchanged, then report the direct download and Release
+   links with the validation result.

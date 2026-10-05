@@ -30,21 +30,16 @@ def validate(root: Path, tag: str | None) -> list[str]:
         elif tag != f"v{version}":
             errors.append(f"tag {tag!r} does not match source version {version!r}")
 
-    readme = read(root, "README.md")
-    artifact = f"Joy-Harness-v{version}-macOS-arm64.dmg"
-    download_line = (
-        f"- [Download {artifact}]"
-        f"(https://github.com/nixihz/JoyHarness/releases/download/v{version}/{artifact})"
-    )
-    checksum_line = (
-        "- [Download the SHA-256 checksum]"
-        f"(https://github.com/nixihz/JoyHarness/releases/download/v{version}/"
-        f"{artifact}.sha256)"
-    )
-    if download_line not in readme:
-        errors.append(f"README download artifact does not match {artifact}")
-    if checksum_line not in readme:
-        errors.append(f"README checksum artifact does not match {artifact}.sha256")
+    for relative_path, download_label in (("README.md", "Download"), ("docs/README.zh-CN.md", "下载")):
+        readme = read(root, relative_path)
+        for arch in ("arm64", "x86_64"):
+            artifact = f"Joy-Harness-v{version}-macOS-{arch}.dmg"
+            release_url = f"https://github.com/nixihz/JoyHarness/releases/download/v{version}"
+            download_link = f"[{download_label} {artifact}]({release_url}/{artifact})"
+            if download_link not in readme:
+                errors.append(f"README download artifact does not match {artifact} in {relative_path}")
+            if f"]({release_url}/{artifact}.sha256)" not in readme:
+                errors.append(f"README checksum artifact does not match {artifact}.sha256 in {relative_path}")
 
     swift_tests = read(root, "tests/JoyHarnessTests/JoyHarnessTests.swift")
     if f'#expect(AppVersion.current == "{version}")' not in swift_tests:

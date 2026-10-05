@@ -25,17 +25,20 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 ## 下载
 
-当前版本为 **v0.8.2**，支持 Apple Silicon Mac（arm64）和 macOS 13.0 或更高版本：
+当前版本为 **v0.8.2**，支持 Apple Silicon（arm64）和 Intel（x86_64，也称 AMD64）Mac，均要求 macOS 13.0 或更高版本。请按 Mac 的芯片选择下载：
 
-- [下载 Joy-Harness-v0.8.2-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg)
-- [下载 SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256)
+- Apple Silicon：[下载 Joy-Harness-v0.8.2-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg) · [SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256)
+- Intel：[下载 Joy-Harness-v0.8.2-macOS-x86_64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-x86_64.dmg) · [SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.8.2/Joy-Harness-v0.8.2-macOS-x86_64.dmg.sha256)
 - [查看 v0.8.2 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.8.2)
 
 DMG 只包含可手动启动的 `Joy Harness.app`。如需本地 CLI，或需要构建和刷写 RP2040 固件，
-请使用下方的[源码安装](#从零安装)。签名与 Apple 公证信息请查看 Release 说明。校验下载文件：
+请使用下方的[源码安装](#从零安装)。签名与 Apple 公证信息请查看 Release 说明。使用对应架构的校验文件验证下载：
 
 ```bash
+# Apple Silicon
 shasum -a 256 -c Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256
+# Intel
+shasum -a 256 -c Joy-Harness-v0.8.2-macOS-x86_64.dmg.sha256
 ```
 
 ## 界面预览
@@ -627,12 +630,14 @@ task dmg -- 0.8.2
 # 或：bash scripts/package_dmg.sh 0.8.2
 ```
 
-产物会写入 `dist/`：
+产物会写入 `dist/`，文件名包含当前 Mac 的架构（`arm64` 或 `x86_64`）。例如 Intel Mac 的产物为：
 
 ```text
-Joy-Harness-v0.8.2-macOS-arm64.dmg
-Joy-Harness-v0.8.2-macOS-arm64.dmg.sha256
+Joy-Harness-v0.8.2-macOS-x86_64.dmg
+Joy-Harness-v0.8.2-macOS-x86_64.dmg.sha256
 ```
+
+GitHub Release 流程会分别在 Apple Silicon 和 Intel runner 上原生测试和打包，两个架构均成功后一起发布。
 
 DMG 内包含 `Joy Harness.app` 和指向 `/Applications` 的快捷方式。脚本会验证 app 签名、
 `Info.plist` 与 DMG 完整性。本地没有 `Developer ID Application` 证书时，现有签名脚本会
