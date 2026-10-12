@@ -58,3 +58,14 @@ struct PadCommand: Decodable {
         case invalidAction
     }
 }
+
+extension PadState {
+    static func fromCodexStatus(_ status: String, activeFlags: [String] = []) -> PadState? {
+        switch status {
+        case "active": return activeFlags.contains("waitingOnApproval") || activeFlags.contains("waitingOnUserInput") ? .waiting : .busy
+        case "idle": return .idle
+        case "systemError": return .error
+        default: return nil
+        }
+    }
+}

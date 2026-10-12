@@ -945,7 +945,7 @@ final class JoyHarnessRuntime {
                 slotStates[index] = .idle
                 continue
             }
-            slotStates[index] = threadStates[threadID] ?? .idle
+            slotStates[index] = threadStates[threadID] ?? slotThreads[index]?.observedState ?? .idle
         }
         current = slotStates[buttons.selectedSlot]
         writeStatus(current, note: "tasks-refreshed")

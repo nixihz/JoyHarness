@@ -4,6 +4,9 @@ struct CodexThreadSummary: Equatable {
     let id: String
     let title: String
     let status: String
+    var activeFlags: [String] = []
+    var rolloutPath: String? = nil
+    var observedState: PadState? = nil
 }
 
 @MainActor
@@ -23,6 +26,8 @@ final class CodexThreadProvider {
     private let requestTimeout: TimeInterval
     private var recovery = CodexThreadRecoveryStateMachine()
     private var diagnosticBuffer: CodexDiagnosticBuffer
+    private var rolloutStates = CodexRolloutStateReader()
+    private var metadataTask: Task<Void, Never>?
 
     private(set) var health: CodexProviderHealth = .stopped
     var stderrDiagnostics: String { diagnosticBuffer.text }
@@ -45,6 +50,8 @@ final class CodexThreadProvider {
     func stop() {
         guard health != .stopped else { return }
         recovery.stop()
+        metadataTask?.cancel()
+        metadataTask = nil
         publishHealth()
         refreshTimer?.invalidate()
         refreshTimer = nil
@@ -91,7 +98,9 @@ final class CodexThreadProvider {
                 .compactMap { $0 }
                 .first(where: { !$0.isEmpty }) ?? L10n.text("未命名任务", "Untitled Task")
             let status = (thread["status"] as? [String: Any])?["type"] as? String ?? "notLoaded"
-            return CodexThreadSummary(id: id, title: title, status: status)
+            return CodexThreadSummary(id: id, title: title, status: status,
+                                      activeFlags: (thread["status"] as? [String: Any])?["activeFlags"] as? [String] ?? [],
+                                      rolloutPath: thread["path"] as? String)
         }
     }
 
@@ -163,6 +172,8 @@ final class CodexThreadProvider {
         let environment = ProcessInfo.processInfo.environment
         let candidates = [
             environment["CODEX_BIN"],
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+            "/Applications/Codex.app/Contents/Resources/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
         ].compactMap { $0 }
         if let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
@@ -235,7 +246,24 @@ final class CodexThreadProvider {
             refresh()
         case .threadList:
             if let threads = Self.decodeThreads(from: data) {
-                onUpdate?(threads)
+                metadataTask?.cancel()
+                let reader = rolloutStates
+                metadataTask = Task { [weak self] in
+                    let result = await Task.detached(priority: .utility) {
+                        var reader = reader
+                        reader.retain(paths: Set(threads.compactMap(\.rolloutPath)))
+                        let observed = threads.map { thread in
+                            var result = thread
+                            result.observedState = PadState.fromCodexStatus(thread.status, activeFlags: thread.activeFlags)
+                                ?? thread.rolloutPath.flatMap { reader.state(at: $0) }
+                            return result
+                        }
+                        return (reader, observed)
+                    }.value
+                    guard !Task.isCancelled, let self, self.health == .healthy else { return }
+                    self.rolloutStates = result.0
+                    self.onUpdate?(result.1)
+                }
             }
         }
     }
