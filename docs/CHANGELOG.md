@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-12
+
+### Added
+- Optional Codex edge lights with six native Micro task slots, saved placement on any display edge, adjustable brightness, and click-to-open task navigation.
+- Top-edge completion effects: green ink, colorful ink, falling flowers, morning glory vines, and a random effect option, with device-free previews and Reduce Motion support.
+- Native RP2040 Micro lighting snapshots through HID Feature Report 7; edge-light synchronization requires updated Joy Harness RP2040 firmware.
+- Codex task state recovery from rollout events.
+- Native Apple Silicon and Intel macOS release builds with signing, notarization, checksums, and separate Sparkle update feeds.
+- DualSense defaults for D-pad arrow keys with key repeat, held Right Command on Options, and Close Window (`Command-W`) on L2 + Cross; existing custom mappings remain intact.
+
+### Fixed
+- Task state updates, task-list refreshes, and controller reconnections no longer trigger haptics; manual tests play finite patterns without repeating vibration.
+
 ## [0.8.2] - 2026-10-05
 
 ### Added
@@ -194,6 +207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.9.0]: https://github.com/nixihz/JoyHarness/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/nixihz/JoyHarness/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0

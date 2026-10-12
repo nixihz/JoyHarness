@@ -9,6 +9,19 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-12
+
+### 新增
+- 可选的 Codex 光缝：同步六个原生 Micro 任务槽，支持保存任意显示器边缘的位置、调整亮度和点击打开任务。
+- 顶部完成特效：绿色颜料、多彩颜料、天女散花、藤蔓牵牛花和随机特效选项，支持无需设备的预览及系统减少动态效果设置。
+- RP2040 通过 HID Feature Report 7 提供原生 Micro 灯效快照；光缝同步需要更新 Joy Harness RP2040 固件。
+- 从 rollout 事件恢复 Codex 任务状态。
+- 同时发布 Apple Silicon 与 Intel 原生 macOS 构建，包含签名、公证、校验文件和独立的 Sparkle 更新源。
+- DualSense 专属默认映射：十字键发送支持长按重复的方向键，Options 按住右侧 Command，L2 + × 关闭窗口（`⌘W`）；保留已自定义的映射。
+
+### 修复
+- 任务状态更新、任务列表刷新和手柄重连不再触发震动；手动测试仅播放有限时长的效果，不启动循环震动。
+
 ## [0.8.2] - 2026-10-05
 
 ### 新增
@@ -194,6 +207,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.9.0]: https://github.com/nixihz/JoyHarness/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/nixihz/JoyHarness/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nixihz/JoyHarness/compare/v0.7.0...v0.8.0
