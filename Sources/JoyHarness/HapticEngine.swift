@@ -6,8 +6,6 @@ final class HapticEngine {
     private var engines: [CHHapticEngine] = []
     private var rightTriggerEngine: CHHapticEngine?
     private var activePlayers: [UUID: CHHapticPatternPlayer] = [:]
-    private var pulseTimer: Timer?
-    private var feedbackTimer: Timer?
     private var controllerName: String = "none"
 
     var onConnectionChange: (() -> Void)?
@@ -88,41 +86,13 @@ final class HapticEngine {
         detach()
     }
 
-    func apply(_ state: PadState) {
-        stopAll()
-        switch state {
-        case .idle:
-            break
-        case .busy:
-            startPulse(interval: 0.85, intensity: 0.28, sharpness: 0.35, duration: 0.12)
-        case .waiting:
-            startPulse(interval: 0.45, intensity: 0.72, sharpness: 0.85, duration: 0.12)
-        case .done:
-            playBurst(events: [
-                (0.0, 0.55, 0.4, 0.08),
-                (0.12, 0.35, 0.2, 0.06),
-            ])
-        case .error:
-            playBurst(events: [
-                (0.0, 1.0, 1.0, 0.12),
-                (0.16, 0.9, 0.9, 0.12),
-                (0.32, 1.0, 1.0, 0.16),
-            ])
-        }
-    }
-
-    func announceSlot(_ index: Int, state: PadState) {
+    func announceSlot(_ index: Int) {
         stopAll()
         let count = min(max(index + 1, 1), 6)
         let events = (0..<count).map { pulse in
             (TimeInterval(pulse) * 0.11, Float(0.42), Float(0.75), TimeInterval(0.045))
         }
         playBurst(events: events)
-        guard state == .busy || state == .waiting else { return }
-        let delay = TimeInterval(count) * 0.11 + 0.12
-        feedbackTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.apply(state)
-        }
     }
 
     func playAdaptiveTriggerFeedback(_ event: RightTriggerFeedbackEvent) {
@@ -173,13 +143,6 @@ final class HapticEngine {
         }
     }
 
-    private func startPulse(interval: TimeInterval, intensity: Float, sharpness: Float, duration: TimeInterval) {
-        playOneShot(intensity: intensity, sharpness: sharpness, duration: duration)
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.playOneShot(intensity: intensity, sharpness: sharpness, duration: duration)
-        }
-    }
-
     private func playOneShot(intensity: Float, sharpness: Float, duration: TimeInterval) {
         guard !engines.isEmpty else {
             print("[agent-deck] rumble skipped (no haptic engine) intensity=\(intensity)")
@@ -218,7 +181,7 @@ final class HapticEngine {
         }
     }
 
-    // Finite preview only: never changes domain state or starts the repeating state timer.
+    // 手动测试必须有限，避免任务长期运行时持续打扰用户。
     func testFeedback(_ state: PadState) -> Bool {
         playBurst(events: Self.testEvents(for: state))
     }
@@ -309,10 +272,6 @@ final class HapticEngine {
     }
 
     private func stopAll() {
-        pulseTimer?.invalidate()
-        pulseTimer = nil
-        feedbackTimer?.invalidate()
-        feedbackTimer = nil
         for player in activePlayers.values {
             try? player.stop(atTime: 0)
         }

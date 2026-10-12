@@ -449,7 +449,7 @@ Joy Harness reads the six most recent task names and ordering through the read-o
 | RT/R2 crosses the trigger point | Graduated feel followed by a short confirmation |
 | Dashboard or CLI test | Diagnostic patterns for `busy`, `waiting`, `done`, and `error` |
 
-Joy Harness does not subscribe to the Codex task lifecycle and does not automatically vibrate when a task starts, waits for approval, or completes.
+Task state updates, task-list refreshes, and controller reconnections do not trigger haptics. Manual Dashboard and CLI tests always play a finite pattern; busy and waiting states never start repeating vibration.
 
 ## Dashboard
 

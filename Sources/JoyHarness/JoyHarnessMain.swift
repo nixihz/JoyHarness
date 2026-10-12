@@ -417,7 +417,7 @@ final class JoyHarnessRuntime {
         buttons.onSlotSelected = { [weak self] index in
             guard let self else { return }
             self.current = self.slotStates[index]
-            self.haptics.announceSlot(index, state: self.current)
+            self.haptics.announceSlot(index)
             self.writeStatus(self.current, note: "slot-selected")
         }
         buttons.onControllerChange = { [weak self] controller, family in
@@ -517,7 +517,6 @@ final class JoyHarnessRuntime {
         }
         haptics.onConnectionChange = { [weak self] in
             guard let self else { return }
-            self.haptics.apply(self.current)
             self.writeStatus(self.current, note: "controller-change")
         }
         rp2040.onConnectionChange = { [weak self] connected in
@@ -923,7 +922,6 @@ final class JoyHarnessRuntime {
         print("[agent-deck] state=\(state.rawValue)\(note.map { " note=\($0)" } ?? "")")
         if let targetSlot, targetSlot == buttons.selectedSlot {
             current = state
-            haptics.apply(state)
         }
         writeStatus(current, note: note)
         if state == .done || state == .error {
@@ -950,7 +948,6 @@ final class JoyHarnessRuntime {
             slotStates[index] = threadStates[threadID] ?? .idle
         }
         current = slotStates[buttons.selectedSlot]
-        haptics.apply(current)
         writeStatus(current, note: "tasks-refreshed")
     }
 
@@ -987,6 +984,10 @@ final class JoyHarnessRuntime {
         }
         if let raw = command.state, let state = PadState.parse(raw) {
             apply(state, note: command.note, threadID: command.threadID)
+            // CLI 主动请求使用有限反馈，任务状态刷新本身不驱动震动。
+            if command.threadID == nil, state != .idle {
+                _ = haptics.testFeedback(state)
+            }
         }
     }
 }
