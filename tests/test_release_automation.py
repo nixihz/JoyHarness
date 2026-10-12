@@ -193,7 +193,7 @@ xcrun() {
                 "DMG naming is inconsistent",
             ),
             "firmware/rp2040/src/main.c": (
-                "0.1.0-agentdeck",
+                "0.2.0-agentdeck",
                 "9.9.9-unknown",
                 "firmware protocol version",
             ),

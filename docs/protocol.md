@@ -59,7 +59,7 @@ JSON 对象至少包含 `state` 或 `action` 之一：
 
 | 命令 | 格式 | 结果 |
 | --- | --- | --- |
-| 探测 | `P` | 回复 `READY agentdeck-rp2040 0.1.0`。 |
+| 探测 | `P` | 回复 `READY agentdeck-rp2040 0.2.0`。 |
 | 按键 | `H <key> <action> <agent>` | 转换为 `v.oai.hid` 通知；`agent < 0` 时省略 `ag`。 |
 | 径向输入 | `J <angle> <distance>` | 转换为 `v.oai.rad` 通知；两个数均夹紧到 0 至 1000，再缩放为 0.000 至 1.000。 |
 

@@ -10,11 +10,17 @@ else
   SDK_PATH="${PICO_SDK_PATH:-${DEFAULT_SDK_PATH}}"
 fi
 BUILD_DIR="${ROOT}/firmware/rp2040/build"
-for prefix in /opt/homebrew/opt /usr/local/opt; do
-  if [[ -x "${prefix}/arm-none-eabi-gcc@9/bin/arm-none-eabi-gcc" ]]; then
-    export PATH="${prefix}/arm-none-eabi-gcc@9/bin:${PATH}"
-    break
-  fi
+if [[ -d "${HOME}/.agent-deck/toolchains/build-tools/bin" ]]; then
+  export PATH="${HOME}/.agent-deck/toolchains/build-tools/bin:${PATH}"
+fi
+# 优先完整的 Newlib 工具链，避免 Homebrew 独立 GCC 缺失系统头文件。
+for version in 9 8; do
+  for prefix in /opt/homebrew/opt /usr/local/opt; do
+    if [[ -x "${prefix}/arm-none-eabi-gcc@${version}/bin/arm-none-eabi-gcc" ]]; then
+      export PATH="${prefix}/arm-none-eabi-gcc@${version}/bin:${PATH}"
+      break 2
+    fi
+  done
 done
 for prefix in /opt/homebrew/opt /usr/local/opt; do
   if [[ -d "${prefix}/arm-none-eabi-binutils/bin" ]]; then

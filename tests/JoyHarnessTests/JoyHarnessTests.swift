@@ -172,6 +172,7 @@ struct JoyHarnessTests {
 
     @Test
     func rp2040HandshakeAcceptsCurrentAndLegacyFirmware() {
+        #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040 0.2.0"))
         #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040 0.1.0"))
         #expect(RP2040Bridge.isReadyLine("READY agentdeck-rp2040"))
         #expect(RP2040Bridge.isReadyLine("READY codexpad-rp2040 0.1.0"))

@@ -8,6 +8,7 @@
 #include "bsp/board_api.h"
 #include "pico/stdlib.h"
 #include "transport_queue.h"
+#include "micro_lighting.h"
 #include "tusb.h"
 
 #define REPORT_ID 6
@@ -108,16 +109,17 @@ static bool has_method(const char *json, const char *method) {
 }
 
 static void reply_to_rpc(const char *json) {
+    (void)micro_lighting_apply(json, strlen(json));
     int id = parse_id(json);
     if (id < 0) return;
     char response[256];
     if (has_method(json, "device.status")) {
         snprintf(response, sizeof(response),
-                 "{\"id\":%d,\"result\":{\"version\":\"0.1.0-agentdeck\",\"profile_index\":0,\"layer_index\":0}}\n",
+                 "{\"id\":%d,\"result\":{\"version\":\"0.2.0-agentdeck\",\"profile_index\":0,\"layer_index\":0}}\n",
                  id);
     } else if (has_method(json, "sys.version")) {
         snprintf(response, sizeof(response),
-                 "{\"id\":%d,\"result\":{\"version\":\"0.1.0-agentdeck\"}}\n", id);
+                 "{\"id\":%d,\"result\":{\"version\":\"0.2.0-agentdeck\"}}\n", id);
     } else if (has_method(json, "v.oai.rgbcfg") ||
                has_method(json, "v.oai.thstatus") ||
                has_method(json, "lights.preview")) {
@@ -184,7 +186,7 @@ static void handle_cdc_line(char *line) {
         if (distance > 1000) distance = 1000;
         notify_joystick(angle, distance);
     } else if (strcmp(line, "P") == 0) {
-        tud_cdc_write_str("READY agentdeck-rp2040 0.1.0\n");
+        tud_cdc_write_str("READY agentdeck-rp2040 0.2.0\n");
         tud_cdc_write_flush();
     }
 }
@@ -221,10 +223,11 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
                                hid_report_type_t report_type, uint8_t *buffer,
                                uint16_t requested_length) {
     (void)instance;
-    (void)report_id;
-    (void)report_type;
-    (void)buffer;
-    (void)requested_length;
+    if (report_id == 7 && report_type == HID_REPORT_TYPE_FEATURE && requested_length >= 63) {
+        // Feature 读取独立于原生 RPC 队列，Joy Harness 不会抢走客户端的响应。
+        micro_lighting_snapshot(buffer);
+        return 63;
+    }
     return 0;
 }
 

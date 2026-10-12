@@ -57,6 +57,11 @@ uint8_t const desc_hid_report[] = {
     0x95, 0x3F,             // Report Count (63)
     0x09, 0x01,             // Usage (1)
     0x91, 0x02,             // Output (Data, Variable, Absolute)
+    // 六槽快照走独立 Feature，保留原生 Report 6 的输入输出格式。
+    0x85, 0x07,
+    0x95, 0x3F,
+    0x09, 0x02,
+    0xB1, 0x02,
     0xC0,                   // End Collection
 };
 

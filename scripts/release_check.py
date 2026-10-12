@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 SEMANTIC_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[.-][0-9A-Za-z.-]+)?$")
-FIRMWARE_PROTOCOL_VERSION = "0.1.0-agentdeck"
+FIRMWARE_PROTOCOL_VERSION = "0.2.0-agentdeck"
 DMG_ASSIGNMENT = 'DMG_NAME="Joy-Harness-v${VERSION}-macOS-${ARCH}.dmg"'
 
 
