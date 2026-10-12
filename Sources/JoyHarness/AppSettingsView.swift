@@ -12,6 +12,7 @@ struct AppSettingsView: View {
     @ObservedObject var harnessProviderSettings: HarnessProviderSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
     @ObservedObject var slotShortcutSettings: SlotShortcutSettings
+    @ObservedObject var edgeLightSettings: EdgeLightSettings
 
     var body: some View {
         HStack(spacing: 0) {
@@ -36,7 +37,8 @@ struct AppSettingsView: View {
                     launchAtLogin: launchAtLogin,
                     updater: updater,
                     scrollDirectionSettings: scrollDirectionSettings,
-                    pointerSensitivitySettings: pointerSensitivitySettings
+                    pointerSensitivitySettings: pointerSensitivitySettings,
+                    edgeLightSettings: edgeLightSettings
                 )
             case .harness:
                 HarnessSettingsPane(settings: harnessProviderSettings)
@@ -64,9 +66,46 @@ private struct GeneralSettingsView: View {
     @ObservedObject var updater: AppUpdater
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
+    @ObservedObject var edgeLightSettings: EdgeLightSettings
 
     var body: some View {
         Form {
+            Section(L10n.text("屏幕状态灯", "Screen Status Lights")) {
+                Toggle(L10n.text("显示 Codex 光缝", "Show Codex Edge Lights"), isOn: $edgeLightSettings.isEnabled)
+                LabeledContent(L10n.text("灯光亮度", "Light Brightness")) {
+                    HStack(spacing: 10) {
+                        Slider(value: $edgeLightSettings.brightness, in: EdgeLightSettings.brightnessRange, step: 0.05)
+                            .frame(width: 180)
+                            .accessibilityLabel(L10n.text("灯光亮度", "Light Brightness"))
+                        Text(edgeLightSettings.brightness.formatted(.percent.precision(.fractionLength(0))))
+                            .monospacedDigit()
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
+                .disabled(!edgeLightSettings.isEnabled)
+                Picker(L10n.text("完成特效", "Completion Effect"), selection: $edgeLightSettings.completionEffect) {
+                    ForEach(EdgeLightCompletionEffect.allCases) { effect in
+                        Text(effect.displayName).tag(effect)
+                    }
+                }
+                .disabled(!edgeLightSettings.isEnabled)
+                Button(L10n.text("预览特效", "Preview Effect")) { edgeLightSettings.onPreview?() }
+                    .disabled(!edgeLightSettings.isEnabled || edgeLightSettings.placement.edge != .top)
+                Text(L10n.text("特效仅在顶部播放；点击灯条或会话已读会收起。预览无需连接设备；随机特效每次从四种动画中选择一种。", "Effects play at the top edge. Click the light or read the conversation to dismiss. Preview works without a device; Random Effect chooses one of the four animations each time."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.text("六个状态灯贴在屏幕边缘。移入鼠标显示编号，拖动到任意一边，点击打开对应任务。", "Six status lights at the screen edge. Hover for numbers, drag to any edge, and click to open the task."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.text("蓝色：运行中 · 绿色跳动：完成未读 · 白色：空闲／已读\n橙色：等待回应或批准 · 红色：错误 · 熄灭：未分配\n顶部新完成时播放所选特效。", "Blue: working · Green bounce: complete, unread · White: idle / read\nOrange: waiting for input or approval · Red: error · Off: unassigned\nNew completion at the top edge plays the selected effect."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(edgeLightSettings.isMicroSynchronized
+                     ? L10n.text("已同步 Micro 键盘的 1–6 槽位和颜色。", "Synced with Micro keyboard slots 1–6 and colors.")
+                     : L10n.text("尚未同步：请连接已更新固件的 Joy Harness RP2040。虚线表示未知状态。", "Not synced: connect Joy Harness RP2040 with updated firmware. Dashed lights indicate unknown status."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section(L10n.text("遥控器麦克风", "Remote Microphone")) {
                 Text(L10n.text(
                     "使用 RC003-MS 内置麦克风说话。首次使用时启用 Joy Harness 自带的麦克风组件，之后选择为语音输入。只在按住语音键时接收，不保存录音。",

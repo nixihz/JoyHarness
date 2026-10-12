@@ -79,7 +79,8 @@ struct JoyHarnessApp: App {
                 nativeModeSettings: appDelegate.runtime.nativeGamepadAppSettings,
                 harnessProviderSettings: appDelegate.runtime.harnessProviderSettings,
                 settingsCoordinator: settingsCoordinator,
-                slotShortcutSettings: appDelegate.runtime.slotShortcutSettings
+                slotShortcutSettings: appDelegate.runtime.slotShortcutSettings,
+                edgeLightSettings: appDelegate.runtime.edgeLightSettings
             )
             .environment(\.locale, languageSettings.locale)
         }
@@ -131,6 +132,9 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 final class JoyHarnessRuntime {
     let slotShortcutSettings = SlotShortcutSettings()
+    let edgeLightSettings = EdgeLightSettings()
+    private let microMirror = CodexMicroMirror()
+    private var edgeLights: EdgeLightCoordinator!
     let dashboard: DashboardStore
     let mappings: ControllerMappingStore
     let scrollDirectionSettings: ScrollDirectionSettings
@@ -202,6 +206,8 @@ final class JoyHarnessRuntime {
             mappingProvider: { family, input in mappings.action(for: input, family: family) }
         )
         self.dashboard = DashboardStore(statusURL: statusURL)
+        edgeLights = EdgeLightCoordinator(settings: edgeLightSettings)
+        edgeLights.onOpenSlot = { [weak self] index in self?.openEdgeLightSlot(index) ?? false }
         self.dashboard.onAction = { [weak self] action in
             self?.perform(action) ?? false
         }
@@ -235,6 +241,17 @@ final class JoyHarnessRuntime {
         self.instanceLock = instanceLock
         hasStarted = true
         configureBridge()
+        edgeLights.start()
+        microMirror.onSnapshot = { [weak self] snapshot in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.edgeLightSettings.isMicroSynchronized = snapshot != nil
+                self.edgeLights.update(snapshot?.slots ?? (0..<6).map {
+                    EdgeLightSlot(identity: "micro-\($0)", title: L10n.text("未同步", "Not synchronized"), state: nil)
+                })
+            }
+        }
+        microMirror.start()
         adaptiveTrigger.startHIDInputMonitoring()
         threads.onUpdate = { [weak self] summaries in
             self?.updateThreads(summaries)
@@ -283,6 +300,8 @@ final class JoyHarnessRuntime {
     }
 
     func stopHotkeys() {
+        microMirror.stop()
+        edgeLights.stop()
         slotHotkeys.stop()
         xiaomiVoice.stop()
         remoteMicrophoneOutput.stop()
@@ -773,6 +792,7 @@ final class JoyHarnessRuntime {
         let controllerName = connectedDevices.map(\.displayName).joined(separator: " + ")
             .isEmpty ? haptics.connectedName : connectedDevices.map(\.displayName).joined(separator: " + ")
         var payload: [String: Any] = [
+            "edge_lights": edgeLights.diagnostics,
             "app_path": Bundle.main.bundleURL.path,
             "app_version": AppVersion.current,
             "app_pid": ProcessInfo.processInfo.processIdentifier,
@@ -934,6 +954,12 @@ final class JoyHarnessRuntime {
                 self.apply(.idle, note: "auto-idle", threadID: taskID)
             }
         }
+    }
+
+    private func openEdgeLightSlot(_ index: Int) -> Bool {
+        guard (0..<6).contains(index), edgeLightSettings.isMicroSynchronized, rp2040.isConnected else { return false }
+        rp2040.tapSlot(index, twice: true)
+        return true
     }
 
     private func updateThreads(_ summaries: [CodexThreadSummary]) {
