@@ -184,7 +184,7 @@ struct StickMotionVelocities: Equatable, Sendable {
 }
 
 /// One smoothed motion output (pointer or scroll) with its own sub-pixel remainder.
-private struct MotionChannel {
+struct MotionChannel {
     var targetVelocity = CGPoint.zero
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
@@ -397,8 +397,9 @@ final class MouseBridge: NSObject {
     /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
     nonisolated static let precisionSpeedMultiplier = PointerSensitivityValues.defaults.slow
     nonisolated static let boostSpeedMultiplier = PointerSensitivityValues.defaults.fast
-    nonisolated static let pointerAccelerationResponseTime: CGFloat = 0.016
-    nonisolated static let pointerDecelerationResponseTime: CGFloat = 0.012
+    // 保留少量平滑以吸收输入抖动，同时避免反向和松手后残留明显位移。
+    nonisolated static let pointerAccelerationResponseTime: CGFloat = 0.005
+    nonisolated static let pointerDecelerationResponseTime: CGFloat = 0.003
 
     var onPermissionChange: (() -> Void)?
 
