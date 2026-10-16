@@ -290,6 +290,10 @@ final class ControllerHub {
         joyConFallback?.refreshJoyConOrientation()
     }
 
+    func updateJoyConHIDStick(side: JoyConSide, snapshot: JoyConHIDStickSnapshot?) {
+        joyConFallback?.updateJoyConHIDStick(side: side, snapshot: snapshot)
+    }
+
     func setRemoteControllerActive(_ active: Bool) {
         if active {
             guard remoteSession == nil else { return }

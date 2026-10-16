@@ -311,11 +311,14 @@ final class JoyConHIDMotionManager {
     private var endpoints: [ObjectIdentifier: JoyConHIDMotionEndpoint] = [:]
     private var motionSnapshotsByEndpoint: [ObjectIdentifier: JoyConHIDMotionSnapshot] = [:]
     private var shoulderSnapshotsByEndpoint: [ObjectIdentifier: JoyConHIDShoulderSnapshot] = [:]
+    private var stickSnapshotsByEndpoint: [ObjectIdentifier: JoyConHIDStickSnapshot] = [:]
     private(set) var snapshots: [JoyConSide: JoyConHIDMotionSnapshot] = [:]
     private(set) var shoulderSnapshots: [JoyConSide: JoyConHIDShoulderSnapshot] = [:]
+    private(set) var stickSnapshots: [JoyConSide: JoyConHIDStickSnapshot] = [:]
 
     var onMotionChange: ((JoyConSide, JoyConHIDMotionSnapshot?) -> Void)?
     var onShoulderChange: ((JoyConSide, JoyConHIDShoulderSnapshot?) -> Void)?
+    var onStickChange: ((JoyConSide, JoyConHIDStickSnapshot?) -> Void)?
 
     func start() {
         guard manager == nil else { return }
@@ -362,8 +365,10 @@ final class JoyConHIDMotionManager {
         endpoints.removeAll()
         motionSnapshotsByEndpoint.removeAll()
         shoulderSnapshotsByEndpoint.removeAll()
+        stickSnapshotsByEndpoint.removeAll()
         snapshots.removeAll()
         shoulderSnapshots.removeAll()
+        stickSnapshots.removeAll()
         guard let manager else { return }
         IOHIDManagerRegisterDeviceMatchingCallback(manager, nil, nil)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, nil, nil)
@@ -401,12 +406,18 @@ final class JoyConHIDMotionManager {
                 guard let self, self.endpoints[id] != nil else { return }
                 self.shoulderSnapshotsByEndpoint[id] = snapshot
                 self.publishShoulderSnapshot(for: side)
+            },
+            onStickChange: { [weak self] snapshot in
+                guard let self, self.endpoints[id] != nil else { return }
+                self.stickSnapshotsByEndpoint[id] = snapshot
+                self.publishStickSnapshot(for: side)
             }
         )
         guard endpoint.open() else { return }
         endpoints[id] = endpoint
         publishMotionSnapshot(for: side)
         publishShoulderSnapshot(for: side)
+        publishStickSnapshot(for: side)
     }
 
     fileprivate func remove(_ device: IOHIDDevice) {
@@ -415,8 +426,10 @@ final class JoyConHIDMotionManager {
         endpoint.close()
         motionSnapshotsByEndpoint.removeValue(forKey: id)
         shoulderSnapshotsByEndpoint.removeValue(forKey: id)
+        stickSnapshotsByEndpoint.removeValue(forKey: id)
         publishMotionSnapshot(for: endpoint.side)
         publishShoulderSnapshot(for: endpoint.side)
+        publishStickSnapshot(for: endpoint.side)
     }
 
     private func publishMotionSnapshot(for side: JoyConSide) {
@@ -443,6 +456,18 @@ final class JoyConHIDMotionManager {
         onShoulderChange?(side, next)
     }
 
+    private func publishStickSnapshot(for side: JoyConSide) {
+        let next = JoyConHIDSnapshotResolver.unambiguous(
+            for: side,
+            candidates: endpoints.map { id, endpoint in
+                (endpoint.side, stickSnapshotsByEndpoint[id])
+            }
+        )
+        guard stickSnapshots[side] != next else { return }
+        stickSnapshots[side] = next
+        onStickChange?(side, next)
+    }
+
     private func side(for productID: Int) -> JoyConSide? {
         switch productID {
         case Self.leftProductID: .left
@@ -455,6 +480,8 @@ final class JoyConHIDMotionManager {
 private final class JoyConHIDMotionEndpoint {
     private enum Stage: Equatable {
         case idle
+        case stickUserCalibration
+        case stickFactoryCalibration
         case userMagic
         case calibration(address: UInt32, source: JoyConIMUCalibrationSource)
         case enablingIMU
@@ -475,23 +502,29 @@ private final class JoyConHIDMotionEndpoint {
     private let inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: inputBufferLength)
     private let onSample: (JoyConIMUSample, JoyConIMUCalibrationSource) -> Void
     private let onShoulderChange: (JoyConHIDShoulderSnapshot) -> Void
+    private let onStickChange: (JoyConHIDStickSnapshot) -> Void
     private var stage = Stage.idle
     private var calibration = JoyConIMUCalibration.default
+    private var stickCalibration = JoyConStickCalibration.default
+    private var stickCalibrationReady = false
     private var packetNumber: UInt8 = 0
     private var lastPublishedAt: TimeInterval = 0
     private var lastShoulderSnapshot: JoyConHIDShoulderSnapshot?
+    private var lastStickSnapshot: JoyConHIDStickSnapshot?
     private var timeoutGeneration: UInt64 = 0
 
     init(
         device: IOHIDDevice,
         side: JoyConSide,
         onSample: @escaping (JoyConIMUSample, JoyConIMUCalibrationSource) -> Void,
-        onShoulderChange: @escaping (JoyConHIDShoulderSnapshot) -> Void
+        onShoulderChange: @escaping (JoyConHIDShoulderSnapshot) -> Void,
+        onStickChange: @escaping (JoyConHIDStickSnapshot) -> Void
     ) {
         self.device = device
         self.side = side
         self.onSample = onSample
         self.onShoulderChange = onShoulderChange
+        self.onStickChange = onStickChange
         inputBuffer.initialize(repeating: 0, count: Self.inputBufferLength)
     }
 
@@ -519,7 +552,7 @@ private final class JoyConHIDMotionEndpoint {
             CFRunLoopGetMain(),
             CFRunLoopMode.defaultMode.rawValue
         )
-        requestUserCalibrationMagic()
+        requestUserStickCalibration()
         return true
     }
 
@@ -542,6 +575,7 @@ private final class JoyConHIDMotionEndpoint {
         let id = UInt8(truncatingIfNeeded: reportID)
         if bytes.first != id { bytes.insert(id, at: 0) }
         handleShoulderReport(bytes)
+        handleStickReport(bytes)
         switch id {
         case 0x21:
             handleSubcommandReply(bytes)
@@ -565,6 +599,45 @@ private final class JoyConHIDMotionEndpoint {
         scheduleFallback(for: .userMagic) { [weak self] in
             self?.requestCalibration(address: Self.factoryCalibrationAddress, source: .factory)
         }
+    }
+
+    private var userStickCalibrationAddress: UInt32 {
+        side == .left ? 0x8010 : 0x801b
+    }
+
+    private var factoryStickCalibrationAddress: UInt32 {
+        side == .left ? 0x603d : 0x6046
+    }
+
+    private func requestUserStickCalibration() {
+        stage = .stickUserCalibration
+        sendSPIRead(address: userStickCalibrationAddress, length: 11)
+        scheduleFallback(for: .stickUserCalibration) { [weak self] in
+            self?.requestFactoryStickCalibration()
+        }
+    }
+
+    private func requestFactoryStickCalibration() {
+        stage = .stickFactoryCalibration
+        sendSPIRead(address: factoryStickCalibrationAddress, length: 9)
+        scheduleFallback(for: .stickFactoryCalibration) { [weak self] in
+            self?.finishStickCalibration(.default)
+        }
+    }
+
+    private func finishStickCalibration(_ calibration: JoyConStickCalibration) {
+        stickCalibration = calibration
+        stickCalibrationReady = true
+        requestUserCalibrationMagic()
+    }
+
+    private func handleStickReport(_ report: [UInt8]) {
+        guard stickCalibrationReady,
+              let snapshot = JoyConHIDStickReportParser.snapshot(
+                from: report, side: side, calibration: stickCalibration
+              ), snapshot != lastStickSnapshot else { return }
+        lastStickSnapshot = snapshot
+        onStickChange(snapshot)
     }
 
     private func requestCalibration(address: UInt32, source: JoyConIMUCalibrationSource) {
@@ -596,6 +669,21 @@ private final class JoyConHIDMotionEndpoint {
         guard report.count >= 15, report[13] & 0x80 != 0 else { return }
         let subcommand = report[14]
         switch (stage, subcommand) {
+        case (.stickUserCalibration, 0x10):
+            guard let reply = spiReply(report), reply.address == userStickCalibrationAddress else { return }
+            if reply.data.starts(with: [0xb2, 0xa1]),
+               let calibration = JoyConStickCalibration(
+                data: Array(reply.data.dropFirst(2)), side: side, source: .user
+               ) {
+                finishStickCalibration(calibration)
+            } else {
+                requestFactoryStickCalibration()
+            }
+        case (.stickFactoryCalibration, 0x10):
+            guard let reply = spiReply(report), reply.address == factoryStickCalibrationAddress else { return }
+            finishStickCalibration(JoyConStickCalibration(
+                data: reply.data, side: side, source: .factory
+            ) ?? .default)
         case (.userMagic, 0x10):
             guard let reply = spiReply(report), reply.address == Self.userMagicAddress else { return }
             let hasUserCalibration = reply.data.starts(with: [0xb2, 0xa1])
@@ -612,7 +700,7 @@ private final class JoyConHIDMotionEndpoint {
             setFullReportMode()
         case (.settingReportMode, 0x03):
             stage = .streaming
-            print("[agent-deck] Joy-Con \(side.rawValue) HID IMU ready calibration=\(calibration.source.rawValue)")
+            print("[agent-deck] Joy-Con \(side.rawValue) HID IMU ready calibration=\(calibration.source.rawValue) stick=\(stickCalibration.source.rawValue)")
         default:
             break
         }

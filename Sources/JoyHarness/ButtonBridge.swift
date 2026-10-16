@@ -251,6 +251,7 @@ final class ButtonBridge {
     private var joyConInputSnapshot = JoyConInputSnapshot.neutral
     private var joyConActiveInputs: [ControllerInput: ControllerInput] = [:]
     private var joyConHIDShoulderSnapshots: [JoyConSide: JoyConHIDShoulderSnapshot] = [:]
+    private var joyConHIDStickSnapshots: [JoyConSide: JoyConHIDStickSnapshot] = [:]
     private var pressedButtons: Set<ObjectIdentifier> = []
     private var controllerInputsByButton: [ObjectIdentifier: ControllerInput] = [:]
     private var publishedInputs: Set<ControllerInput> = []
@@ -404,6 +405,7 @@ final class ButtonBridge {
         joyConControllersByID.removeAll()
         joyConComposition = joyConCoordinator.reconcile([])
         joyConHIDShoulderSnapshots.removeAll()
+        joyConHIDStickSnapshots.removeAll()
         onControllerChange?(nil, .generic)
         onControllerSetChange?([])
         onJoyConChange?(nil)
@@ -691,7 +693,9 @@ final class ButtonBridge {
                     paired: mode == .pair,
                     orientation: joyConOrientationProvider?() ?? .horizontal
                 )
-                samples.append(projectJoyConShoulders(sample, side: .left, mode: mode))
+                samples.append(projectJoyConSticks(
+                    projectJoyConShoulders(sample, side: .left, mode: mode), side: .left, mode: mode
+                ))
             }
             if let rightID = joyConComposition.rightID,
                let right = joyConControllersByID[rightID] {
@@ -701,7 +705,9 @@ final class ButtonBridge {
                     paired: mode == .pair,
                     orientation: joyConOrientationProvider?() ?? .horizontal
                 )
-                samples.append(projectJoyConShoulders(sample, side: .right, mode: mode))
+                samples.append(projectJoyConSticks(
+                    projectJoyConShoulders(sample, side: .right, mode: mode), side: .right, mode: mode
+                ))
             }
         }
         let next = samples.reduce(JoyConInputSnapshot.neutral) { $0.merging($1.snapshot) }
@@ -760,6 +766,35 @@ final class ButtonBridge {
               joyConComposition.combinedID == nil,
               mode == .pair || mode == (side == .left ? .left : .right) else { return }
         handleJoyConProfiles(generation: joyConComposition.generation)
+    }
+
+    private func projectJoyConSticks(
+        _ sample: JoyConProfileSample,
+        side: JoyConSide,
+        mode: JoyConMode
+    ) -> JoyConProfileSample {
+        let matchingEndpointCount = joyConControllersByID.values.filter {
+            $0.joyConHardwareKind == (side == .left ? .left : .right)
+        }.count
+        return JoyConHIDStickAdapter.apply(
+            matchingEndpointCount == 1 ? joyConHIDStickSnapshots[side] : nil,
+            to: sample,
+            side: side,
+            paired: mode == .pair,
+            orientation: joyConOrientationProvider?() ?? .horizontal
+        )
+    }
+
+    func updateJoyConHIDStick(side: JoyConSide, snapshot: JoyConHIDStickSnapshot?) {
+        joyConHIDStickSnapshots[side] = snapshot
+        guard joyConComposition.combinedID == nil else { return }
+        let sideIsActive = side == .left
+            ? joyConComposition.leftID != nil : joyConComposition.rightID != nil
+        guard sideIsActive else { return }
+        let generation = joyConComposition.generation
+        joyConInputRefreshScheduler.schedule(generation: generation) { [weak self] in
+            self?.handleJoyConProfiles(generation: generation)
+        }
     }
 
     func refreshJoyConOrientation() {

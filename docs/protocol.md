@@ -53,6 +53,8 @@ JSON 对象至少包含 `state` 或 `action` 之一：
 
 连接 Joy-Con 时还可出现 `joycon_mode`、`joycon_orientation`、`joycon_primary_stick`、`joycon_secondary_stick`、`joycon_left_connected`、`joycon_right_connected`、`joycon_left_battery_level`、`joycon_right_battery_level`、`joycon_left_battery_state`、`joycon_right_battery_state`、`joycon_left_haptics`、`joycon_right_haptics`、`joycon_left_motion`、`joycon_right_motion`、`joycon_left_profile_elements`、`joycon_right_profile_elements`、`joycon_left_imu`、`joycon_right_imu` 和 `joycon_inactive_endpoints`。单只 Joy-Con 的 `joycon_orientation` 为 `horizontal` 或 `vertical`；成对模式省略该字段。摇杆对象包含 `x`、`y`，IMU 对象包含加速度、旋转速率和校准来源。
 
+单端点 Joy-Con 优先使用 HID 报告中的连续摇杆推幅，避免系统 Direction Pad 将轻推和满推都报告为 ±1。`joycon_left_stick_calibration_source`、`joycon_right_stick_calibration_source` 在读取到 HID 摇杆后出现，取值为 `user`、`factory` 或 `default`。`joycon_primary_stick`、`joycon_secondary_stick` 已应用握姿转换；无法取得明确的 HID 来源时回退到 GameController。
+
 ## RP2040 CDC
 
 主机以 115200 baud、原始串行模式向 RP2040 CDC 端口发送一行命令。固件每行最多累积 127 个字符；超过限制的未完成行被丢弃，不返回错误。

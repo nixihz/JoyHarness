@@ -491,6 +491,9 @@ final class JoyHarnessRuntime {
         joyConMotion.onShoulderChange = { [weak self] side, snapshot in
             self?.buttons.updateJoyConHIDShoulders(side: side, snapshot: snapshot)
         }
+        joyConMotion.onStickChange = { [weak self] side, snapshot in
+            self?.buttons.updateJoyConHIDStick(side: side, snapshot: snapshot)
+        }
         xiaomiRemote.onConnectionChange = { [weak self] isConnected in
             guard let self else { return }
             if isConnected { self.xiaomiVoice.start() }
@@ -873,6 +876,12 @@ final class JoyHarnessRuntime {
             }
             if let left = joyConMotion.snapshots[.left] {
                 payload["joycon_left_imu"] = motionPayload(left)
+            }
+            if let left = joyConMotion.stickSnapshots[.left] {
+                payload["joycon_left_stick_calibration_source"] = left.calibrationSource.rawValue
+            }
+            if let right = joyConMotion.stickSnapshots[.right] {
+                payload["joycon_right_stick_calibration_source"] = right.calibrationSource.rawValue
             }
             if let right = joyConMotion.snapshots[.right] {
                 payload["joycon_right_imu"] = motionPayload(right)
