@@ -210,21 +210,72 @@ struct HomeButtonPressMerger {
     }
 }
 
+/// Captured alongside the button event, before delivery to the main queue.
+/// The source's current routing policy is filled in before handing it off.
+struct MotionJumpInputSnapshot {
+    var triggerValue: Float
+    var hasConflictingInput: Bool
+    var timestamp: TimeInterval
+    var allowsGesture: Bool
+}
+
+/// Voice owns analog output until each held channel returns to neutral. The
+/// timestamp fence also rejects callbacks captured before voice released it.
+struct AIVoiceAnalogNeutralGate {
+    enum Channel: CaseIterable { case leftStick, rightStick, touchpad }
+
+    private(set) var isCapturing = false
+    private var awaitingNeutral: Set<Channel> = []
+    private var ignoreEventsThrough: TimeInterval = -.infinity
+
+    mutating func setCaptureActive(
+        _ active: Bool,
+        at timestamp: TimeInterval,
+        neutralChannels: Set<Channel> = []
+    ) {
+        guard active != isCapturing else { return }
+        isCapturing = active
+        ignoreEventsThrough = timestamp
+        awaitingNeutral = Set(Channel.allCases).subtracting(neutralChannels)
+    }
+
+    mutating func permits(_ channel: Channel, isNeutral: Bool, at timestamp: TimeInterval) -> Bool {
+        guard !isCapturing, timestamp > ignoreEventsThrough else { return false }
+        guard awaitingNeutral.contains(channel) else { return true }
+        if isNeutral { awaitingNeutral.remove(channel) }
+        // The release belongs to the voice interaction, not a fresh input.
+        return false
+    }
+}
+
 private struct StandardGamepadEventSnapshot {
+    let motionJumpInput: MotionJumpInputSnapshot
     let changedButtonPressed: Bool?
     let changedButtonValue: Float?
     let leftStickX: Float
     let leftStickY: Float
+    let rightStickX: Float
+    let rightStickY: Float
+    let touchpadX: Float?
+    let touchpadY: Float?
+    let secondaryTouching: Bool
     let dpadUp: Bool
     let dpadDown: Bool
     let dpadLeft: Bool
     let dpadRight: Bool
 
     init(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
+        motionJumpInput = ButtonBridge.motionJumpSnapshot(gamepad: gamepad)
         changedButtonPressed = (changedElement as? GCControllerButtonInput)?.isPressed
         changedButtonValue = (changedElement as? GCControllerButtonInput)?.value
         leftStickX = gamepad.leftThumbstick.xAxis.value
         leftStickY = gamepad.leftThumbstick.yAxis.value
+        rightStickX = gamepad.rightThumbstick.xAxis.value
+        rightStickY = gamepad.rightThumbstick.yAxis.value
+        let primary = ButtonBridge.touchpadPrimary(for: gamepad)
+        touchpadX = primary?.xAxis.value
+        touchpadY = primary?.yAxis.value
+        secondaryTouching = ButtonBridge.secondaryTouchpadIsActive(for: gamepad)
         dpadUp = gamepad.dpad.up.isPressed
         dpadDown = gamepad.dpad.down.isPressed
         dpadLeft = gamepad.dpad.left.isPressed
@@ -257,9 +308,14 @@ final class ButtonBridge {
     private var publishedInputs: Set<ControllerInput> = []
     private var activeControllerActions: [ObjectIdentifier: ControllerAction] = [:]
     private var activeActionCounts: [ControllerAction: Int] = [:]
-    private var functionPressed = false
+    private var functionPressed = false {
+        didSet { publishMouseSpeedBoost() }
+    }
     private var lastJoystick: (angle: Float, distance: Float)?
-    private var mouseSpeedBoostPressed = false
+    private var mouseSpeedBoostPressed = false {
+        didSet { publishMouseSpeedBoost() }
+    }
+    private var publishedMouseSpeedBoost = false
     private var mousePrecisionPressed = false
     private var controllerFamily: ControllerFamily = .generic
     private var isRemoteControllerActive = false
@@ -275,6 +331,42 @@ final class ButtonBridge {
     private let joyConInputRefreshScheduler = JoyConInputRefreshScheduler()
     private var controllerObservers: [NSObjectProtocol] = []
     private var overlaySuppressedButtons: Set<ObjectIdentifier> = []
+    private var suppressedJoyConModifiers: Set<ControllerInput> = []
+    private var motionJumpSuppressesInputUntilNeutral = false
+    private var aiVoiceAnalogGate = AIVoiceAnalogNeutralGate()
+    private let externalMicrophoneGate = ControllerInputIsolationGate()
+    var usesExternalVoiceControls = false
+
+    /// Hardware exclusivity protects other apps; this gate also drops queued
+    /// GameController events. It must not cancel the trusted PS/L2 gesture.
+    func setExternalAudioCaptureActive(_ active: Bool) {
+        guard externalMicrophoneGate.isBlocked != active else { return }
+        externalMicrophoneGate.setBlocked(active)
+        suspendMappedOutputs()
+        if !active {
+            overlaySuppressedButtons.removeAll()
+            controllerInputsByButton.removeAll()
+        }
+    }
+
+    func handleExternalAudioPSInput(_ sample: DualSensePSInputSample) {
+        handleDualSensePSInput(sample, externalAudio: true)
+    }
+
+    func tapExternalVoiceShortcut() {
+        guard usesExternalVoiceControls, operationMode == .mapping else { return }
+        handleRemoteButton(.menu, isPressed: true)
+        handleRemoteButton(.menu, isPressed: false)
+    }
+
+    func cancelExternalVoiceInput() {
+        guard usesExternalVoiceControls, externalMicrophoneGate.isBlocked,
+              operationMode == .mapping else { return }
+        // Only overlay cancellation crosses the capture gate. Never dispatch
+        // the user's ordinary B mapping while another app owns the controller.
+        _ = inputInterceptor?(.buttonB, true)
+        _ = inputInterceptor?(.buttonB, false)
+    }
 
     var isRunning: Bool { !controllerObservers.isEmpty }
     var controllerObserverCount: Int { controllerObservers.count }
@@ -309,11 +401,30 @@ final class ButtonBridge {
     var onInputStateChange: ((ControllerInput, Bool) -> Void)?
     var inputInterceptor: ((ControllerInput, Bool) -> Bool)?
     var onHarnessSwitcherPresent: (() -> Void)?
+    var aiVoiceEnabled = false {
+        didSet {
+            if oldValue && !aiVoiceEnabled { cancelAIVoiceInput() }
+        }
+    }
+    var onAIVoiceBegin: (() -> Void)?
+    var onAIVoiceEnd: (() -> Void)?
+    var onAIVoiceRelease: ((TimeInterval) -> Void)?
+    var onAIVoiceCancel: (() -> Void)?
+    /// Return true to consume this device's input while recording or testing.
+    var motionJumpInputHandler: ((MotionJumpInputSnapshot) -> Bool)?
+    var motionJumpCancelHandler: (() -> Void)?
+    var motionJumpIsCapturing: (() -> Bool)?
     var homeButtonClock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     var mappingProvider: (ControllerInput) -> ControllerMappedAction
+    /// Only the physical input owner may replace a new PTT press. Releases
+    /// of already active actions bypass resolution and always reach end().
+    var shouldSuppressPTTInput: ((ControllerInput) -> Bool)?
+    private var lastTrustedBatterySnapshot: ControllerBatterySnapshot?
 
     var batterySnapshot: ControllerBatterySnapshot? {
-        ControllerBatterySnapshot(controller?.battery)
+        guard !externalMicrophoneGate.isBlocked else { return lastTrustedBatterySnapshot }
+        lastTrustedBatterySnapshot = ControllerBatterySnapshot(controller?.battery)
+        return lastTrustedBatterySnapshot
     }
 
     var joyConSticks: JoyConStickProjection {
@@ -340,11 +451,27 @@ final class ButtonBridge {
     }
 
     init(
+        controllerFamily: ControllerFamily = .generic,
         mappingProvider: @escaping (ControllerInput) -> ControllerMappedAction = {
             ControllerMappingStore.defaultMappings[$0] ?? .disabled
         }
     ) {
+        self.controllerFamily = controllerFamily
         self.mappingProvider = mappingProvider
+    }
+
+    private var functionLeftStickScrolls: Bool {
+        functionPressed && controllerFamily.usesSingleJoyConStick
+    }
+
+    private func publishMouseSpeedBoost() {
+        // L3/custom boost and the dual-stick function layer are independent
+        // holds. Releasing either one must not cancel the other or stack speed.
+        let active = mouseSpeedBoostPressed ||
+            (functionPressed && !controllerFamily.usesSingleJoyConStick)
+        guard active != publishedMouseSpeedBoost else { return }
+        publishedMouseSpeedBoost = active
+        mouseSpeedBoostHandler?(active)
     }
 
     func start() {
@@ -500,17 +627,20 @@ final class ButtonBridge {
         resetInputState()
         detachObservedHandlers()
         controller = selected
+        lastTrustedBatterySnapshot = nil
         let family = ControllerFamily.detect(controller: selected)
         controllerFamily = family
         let generation = inputSourceGeneration
         let endpointID = ObjectIdentifier(selected)
         gamepad.valueChangedHandler = { [weak self] gamepad, element in
+            guard let token = self?.externalMicrophoneGate.token() else { return }
             let event = StandardGamepadEventSnapshot(
                 gamepad: gamepad,
                 changedElement: element
             )
             DispatchQueue.main.async {
                 guard let self,
+                      self.externalMicrophoneGate.permits(token),
                       self.inputSourceGeneration == generation,
                       let activeController = self.controller,
                       ObjectIdentifier(activeController) == endpointID else { return }
@@ -526,30 +656,38 @@ final class ButtonBridge {
             // swallow it for the Game Overlay. The system may still ignore this
             // preference, which is why DualSense also reads Home over raw HID.
             homeButton.preferredSystemGestureState = .disabled
-            homeButton.pressedChangedHandler = { [weak self] button, _, isPressed in
+            homeButton.pressedChangedHandler = { [weak self, weak gamepad] button, _, isPressed in
+                guard let token = self?.externalMicrophoneGate.token() else { return }
+                guard let gamepad else { return }
+                let motionInput = Self.motionJumpSnapshot(gamepad: gamepad)
                 DispatchQueue.main.async {
                     guard let self,
+                          self.externalMicrophoneGate.permits(token),
                           self.inputSourceGeneration == generation,
                           let activeController = self.controller,
                           ObjectIdentifier(activeController) == endpointID else { return }
-                    self.handleHomeButton(isPressed: isPressed)
+                    self.handleHomeButton(isPressed: isPressed, motionInput: motionInput)
                 }
             }
         }
         if #available(macOS 14.0, *) {
-            selected.physicalInputProfile.valueDidChangeHandler = { [weak self] profile, element in
+            selected.physicalInputProfile.valueDidChangeHandler = { [weak self, weak gamepad] profile, element in
+                guard let token = self?.externalMicrophoneGate.token() else { return }
+                guard let gamepad else { return }
                 let homePressed: Bool? = if element.aliases.contains(GCInputButtonHome) {
                     (element as? GCControllerButtonInput)?.isPressed
                 } else {
                     nil
                 }
+                let motionInput = Self.motionJumpSnapshot(gamepad: gamepad)
                 DispatchQueue.main.async {
                     guard let self,
+                          self.externalMicrophoneGate.permits(token),
                           self.inputSourceGeneration == generation,
                           let activeController = self.controller,
                           ObjectIdentifier(activeController) == endpointID else { return }
                     if let homePressed {
-                        self.handleHomeButton(isPressed: homePressed)
+                        self.handleHomeButton(isPressed: homePressed, motionInput: motionInput)
                     }
                 }
             }
@@ -644,6 +782,13 @@ final class ButtonBridge {
     }
 
     private func detachObservedHandlers() {
+        interruptDualSensePSInput()
+        rawPSInputIsAuthoritative = false
+        motionJumpSuppressesInputUntilNeutral = false
+        psChordMotionStartedAt = nil
+        psChordMotionBlockThrough = -.infinity
+        gcTriggerHeldForPSChord = false
+        psChordRawInterrupted = false
         inputSourceGeneration &+= 1
         controller?.extendedGamepad?.valueChangedHandler = nil
         controller?.extendedGamepad?.buttonHome?.pressedChangedHandler = nil
@@ -806,9 +951,17 @@ final class ButtonBridge {
     func applyJoyConSnapshot(_ next: JoyConInputSnapshot) {
         let previous = joyConInputSnapshot
         let allInputs = Set(previous.buttons.keys).union(next.buttons.keys)
+        // A Harness change can remap a held modifier before it is released.
+        // Clear suppression from physical releases, independent of that mapping.
+        suppressedJoyConModifiers = suppressedJoyConModifiers.filter { next.buttons[$0] == true }
+        let sticks = voiceFilteredSticks(
+            leftX: next.primaryStick.x, leftY: next.primaryStick.y,
+            rightX: next.secondaryStick.x, rightY: next.secondaryStick.y,
+            timestamp: homeButtonClock()
+        )
         let overlayConsumesStick = overlayStickHandler?(
-            next.primaryStick.x,
-            next.primaryStick.y
+            sticks.leftX,
+            sticks.leftY
         ) == true
 
         if operationMode == .native {
@@ -835,7 +988,18 @@ final class ButtonBridge {
 
         var modifierActive = false
         for input in allInputs where mappingProvider(input) == .functionModifier {
-            if next.buttons[input] == true {
+            let isPressed = next.buttons[input] == true
+            if (previous.buttons[input] == true) != isPressed {
+                let changed = publishInput(input, pressed: isPressed)
+                let consumed = changed && inputInterceptor?(input, isPressed) == true
+                if isPressed && consumed { suppressedJoyConModifiers.insert(input) }
+            }
+            if !isPressed {
+                suppressedJoyConModifiers.remove(input)
+                joyConActiveInputs.removeValue(forKey: input)
+            } else if overlayConsumesStick {
+                suppressedJoyConModifiers.insert(input)
+            } else if !suppressedJoyConModifiers.contains(input) {
                 modifierActive = true
             }
         }
@@ -848,23 +1012,17 @@ final class ButtonBridge {
 
             if input == .home {
                 handleHomeButton(isPressed: isPressed)
-            } else if mappingProvider(input) == .functionModifier {
-                let changed = publishInput(input, pressed: isPressed)
-                _ = changed && inputInterceptor?(input, isPressed) == true
-                if !isPressed {
-                    joyConActiveInputs.removeValue(forKey: input)
-                }
-            } else {
+            } else if mappingProvider(input) != .functionModifier {
                 handleJoyConButton(input, isPressed: isPressed)
             }
         }
 
         if !overlayConsumesStick {
-            leftStickHandler?(next.primaryStick.x, next.primaryStick.y, functionPressed)
+            leftStickHandler?(sticks.leftX, sticks.leftY, functionLeftStickScrolls)
         }
-        publishRightStickScroll(x: next.secondaryStick.x, y: next.secondaryStick.y)
+        publishRightStickScroll(x: sticks.rightX, y: sticks.rightY)
         updateJoyConJoystick(next)
-        updateFunctionRightStick(x: next.secondaryStick.x, y: next.secondaryStick.y)
+        updateFunctionRightStick(x: sticks.rightX, y: sticks.rightY)
         joyConInputSnapshot = next
     }
 
@@ -954,14 +1112,26 @@ final class ButtonBridge {
         changedElement: GCControllerElement,
         event: StandardGamepadEventSnapshot
     ) {
+        if usesExternalVoiceControls {
+            if changedElement === gamepad.buttonMenu || changedElement === gamepad.buttonHome { return }
+        }
         if let homeButton = gamepad.buttonHome, changedElement === homeButton {
-            handleHomeButton(isPressed: event.changedButtonPressed ?? homeButton.isPressed)
+            handleHomeButton(
+                isPressed: event.changedButtonPressed ?? homeButton.isPressed,
+                motionInput: event.motionJumpInput
+            )
             return
         }
+        let sticks = voiceFilteredSticks(
+            leftX: event.leftStickX, leftY: event.leftStickY,
+            rightX: event.rightStickX, rightY: event.rightStickY,
+            timestamp: event.motionJumpInput.timestamp
+        )
+        if routeMotionJumpInput(event.motionJumpInput) { return }
         if Self.isLeftStickElement(changedElement, in: gamepad),
            overlayStickHandler?(
-               event.leftStickX,
-               event.leftStickY
+               sticks.leftX,
+               sticks.leftY
            ) == true {
             return
         }
@@ -998,46 +1168,52 @@ final class ButtonBridge {
             return
         }
 
-        sampleTouchpadPointer(from: gamepad)
+        if let x = event.touchpadX, let y = event.touchpadY {
+            sampleTouchpadPointer(
+                x: x, y: y, secondaryTouching: event.secondaryTouching,
+                timestamp: event.motionJumpInput.timestamp
+            )
+        }
 
         if changedElement === gamepad.leftTrigger {
             if mappingProvider(.leftTrigger) == .functionModifier {
-                functionPressed = (event.changedButtonValue ?? gamepad.leftTrigger.value) >= 0.55
+                var nextFunctionPressed = (event.changedButtonValue ?? gamepad.leftTrigger.value) >= 0.55
                 let id = ObjectIdentifier(gamepad.leftTrigger)
-                if functionPressed {
+                if nextFunctionPressed {
                     if overlaySuppressedButtons.contains(id) {
-                        functionPressed = false
+                        nextFunctionPressed = false
                     } else {
                         controllerInputsByButton[id] = .leftTrigger
                         let changed = publishInput(.leftTrigger, pressed: true)
                         if changed, inputInterceptor?(.leftTrigger, true) == true {
                             overlaySuppressedButtons.insert(id)
-                            functionPressed = false
+                            nextFunctionPressed = false
                         }
                     }
                 } else {
                     release(gamepad.leftTrigger)
                 }
+                functionPressed = nextFunctionPressed
             } else {
                 functionPressed = false
                 handleMappedButton(gamepad.leftTrigger, input: .leftTrigger)
             }
         }
         leftStickHandler?(
-            event.leftStickX,
-            event.leftStickY,
-            functionPressed
+            sticks.leftX,
+            sticks.leftY,
+            functionLeftStickScrolls
         )
         publishRightStickScroll(
-            x: gamepad.rightThumbstick.xAxis.value,
-            y: gamepad.rightThumbstick.yAxis.value
+            x: sticks.rightX,
+            y: sticks.rightY
         )
         updateJoystick(gamepad)
         updateDPadButtons(
             gamepad,
             event: event
         )
-        updateFunctionRightStick(gamepad)
+        updateFunctionRightStick(x: sticks.rightX, y: sticks.rightY)
         if changedElement === gamepad.leftTrigger { return }
 
         let faceButtons: [(GCControllerButtonInput, ControllerInput, ControllerInput)] = [
@@ -1134,10 +1310,121 @@ final class ButtonBridge {
             element === gamepad.leftThumbstick.yAxis
     }
 
-    private static func touchpadPrimary(for gamepad: GCExtendedGamepad) -> GCControllerDirectionPad? {
+    fileprivate static func touchpadPrimary(for gamepad: GCExtendedGamepad) -> GCControllerDirectionPad? {
         if let dualSense = gamepad as? GCDualSenseGamepad { return dualSense.touchpadPrimary }
         if let dualShock = gamepad as? GCDualShockGamepad { return dualShock.touchpadPrimary }
         return nil
+    }
+
+    fileprivate static func secondaryTouchpadIsActive(for gamepad: GCExtendedGamepad) -> Bool {
+        let secondary: GCControllerDirectionPad?
+        if let dualSense = gamepad as? GCDualSenseGamepad { secondary = dualSense.touchpadSecondary }
+        else if let dualShock = gamepad as? GCDualShockGamepad { secondary = dualShock.touchpadSecondary }
+        else { secondary = nil }
+        guard let secondary else { return false }
+        return abs(secondary.xAxis.value) > TouchpadPointerTracker.liftEpsilon ||
+            abs(secondary.yAxis.value) > TouchpadPointerTracker.liftEpsilon
+    }
+
+    static func motionJumpSnapshot(gamepad: GCExtendedGamepad) -> MotionJumpInputSnapshot {
+        // allButtons also exposes synthesized stick-direction buttons. Their
+        // isPressed threshold is not the pointer's radial dead zone.
+        let analogDirections = [gamepad.leftThumbstick, gamepad.rightThumbstick].flatMap {
+            [$0.up, $0.down, $0.left, $0.right]
+        }
+        let otherButtonPressed = gamepad.allButtons.contains {
+            let button = $0
+            return button !== gamepad.leftTrigger && button.isPressed &&
+                !analogDirections.contains(where: { $0 === button })
+        }
+        // Use the same radial dead zones as pointer/scroll output. Checking
+        // each axis separately would miss a diagonal push outside the circle.
+        let leftStickActive = hypot(
+            gamepad.leftThumbstick.xAxis.value,
+            gamepad.leftThumbstick.yAxis.value
+        ) > 0.10
+        let rightStickActive = hypot(
+            gamepad.rightThumbstick.xAxis.value,
+            gamepad.rightThumbstick.yAxis.value
+        ) > 0.15
+        let touchpads: [GCControllerDirectionPad]
+        if let dualSense = gamepad as? GCDualSenseGamepad {
+            touchpads = [dualSense.touchpadPrimary, dualSense.touchpadSecondary]
+        } else if let dualShock = gamepad as? GCDualShockGamepad {
+            touchpads = [dualShock.touchpadPrimary, dualShock.touchpadSecondary]
+        } else {
+            touchpads = []
+        }
+        let touching = touchpads.contains {
+            abs($0.xAxis.value) > TouchpadPointerTracker.liftEpsilon ||
+                abs($0.yAxis.value) > TouchpadPointerTracker.liftEpsilon
+        }
+        return MotionJumpInputSnapshot(
+            triggerValue: gamepad.leftTrigger.value,
+            hasConflictingInput: otherButtonPressed || leftStickActive || rightStickActive || touching,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            allowsGesture: true
+        )
+    }
+
+    /// Calibration consumes the entire selected endpoint, before Home,
+    /// touchpad and stick routing. On exit, held inputs must first return to
+    /// neutral; they must not become a fresh mapped press in the next callback.
+    private func routeMotionJumpInput(_ captured: MotionJumpInputSnapshot) -> Bool {
+        var snapshot = captured
+        if captured.triggerValue >= PSButtonGesture.triggerPressThreshold {
+            gcTriggerHeldForPSChord = true
+        } else if captured.triggerValue <= PSButtonGesture.triggerReleaseThreshold {
+            gcTriggerHeldForPSChord = false
+        }
+        let blockedByPSChord = psChordMotionStartedAt != nil ||
+            captured.timestamp <= psChordMotionBlockThrough
+        snapshot.hasConflictingInput = snapshot.hasConflictingInput || homeButtonMerger.isPressed ||
+            psGesture.isPressed || blockedByPSChord
+        if let startedAt = psChordMotionStartedAt, captured.timestamp >= startedAt {
+            if gcTriggerHeldForPSChord { psChordSawGCHeld = true }
+            psChordSawGCNeutral = psChordSawGCHeld && !gcTriggerHeldForPSChord
+            finishPSChordMotionBlockIfNeutral()
+        }
+        snapshot.allowsGesture = operationMode == .mapping &&
+            mappingProvider(.leftTrigger) == .functionModifier &&
+            overlaySuppressedButtons.isEmpty
+        let consumed = motionJumpInputHandler?(snapshot) == true
+        if consumed {
+            if !motionJumpSuppressesInputUntilNeutral {
+                suspendMotionJumpOutputs(cancellingMotionJump: false)
+            }
+            motionJumpSuppressesInputUntilNeutral = true
+            if snapshot.triggerValue <= 0.1, !snapshot.hasConflictingInput {
+                overlaySuppressedButtons.removeAll()
+            }
+            return true
+        }
+        guard motionJumpSuppressesInputUntilNeutral else { return false }
+        if snapshot.triggerValue <= 0.1, !snapshot.hasConflictingInput {
+            motionJumpSuppressesInputUntilNeutral = false
+            overlaySuppressedButtons.removeAll()
+        }
+        // Also consume the final release. It belongs to the calibration, not
+        // to an action that was never pressed in normal mapping mode.
+        return true
+    }
+
+    func suspendMotionJumpInput() {
+        suspendMotionJumpOutputs(cancellingMotionJump: true)
+        motionJumpSuppressesInputUntilNeutral = true
+    }
+
+    private func suspendMotionJumpOutputs(cancellingMotionJump: Bool) {
+        suspendMappedOutputs(cancellingMotionJump: cancellingMotionJump)
+        rightTriggerPressState = AnalogButtonPressState(
+            pressPoint: RightTriggerPressState.releasePoint,
+            resetPoint: RightTriggerPressState.resetPoint
+        )
+        rightTriggerFeedbackHandler?(0)
+        controllerInputsByButton.removeAll()
+        for input in publishedInputs { onInputStateChange?(input, false) }
+        publishedInputs.removeAll()
     }
 
     private func inputForElement(_ element: GCControllerElement, in gamepad: GCExtendedGamepad) -> ControllerInput? {
@@ -1163,13 +1450,76 @@ final class ButtonBridge {
         return nil
     }
 
-    private func sampleTouchpadPointer(from gamepad: GCExtendedGamepad) {
-        guard let primary = Self.touchpadPrimary(for: gamepad) else { return }
-        if let delta = touchpadTracker.update(
-            x: primary.xAxis.value,
-            y: primary.yAxis.value
-        ) {
+    func sampleTouchpadPointer(
+        x: Float, y: Float,
+        secondaryTouching: Bool = false,
+        timestamp: TimeInterval
+    ) {
+        let touching = abs(x) > TouchpadPointerTracker.liftEpsilon ||
+            abs(y) > TouchpadPointerTracker.liftEpsilon || secondaryTouching
+        guard aiVoiceAnalogGate.permits(.touchpad, isNeutral: !touching, at: timestamp) else {
+            touchpadTracker.reset()
+            return
+        }
+        if let delta = touchpadTracker.update(x: x, y: y) {
             touchpadPointerHandler?(delta.x, delta.y)
+        }
+    }
+
+    private func voiceFilteredSticks(
+        leftX: Float, leftY: Float, rightX: Float, rightY: Float,
+        timestamp: TimeInterval
+    ) -> (leftX: Float, leftY: Float, rightX: Float, rightY: Float) {
+        let permitsLeft = aiVoiceAnalogGate.permits(
+            .leftStick, isNeutral: hypot(leftX, leftY) <= 0.10, at: timestamp
+        )
+        let permitsRight = aiVoiceAnalogGate.permits(
+            .rightStick, isNeutral: hypot(rightX, rightY) <= 0.15, at: timestamp
+        )
+        return (
+            permitsLeft ? leftX : 0, permitsLeft ? leftY : 0,
+            permitsRight ? rightX : 0, permitsRight ? rightY : 0
+        )
+    }
+
+    /// This gate is independent of Home routing: physical PS release must
+    /// still reach the voice session while all mapped analog output is held.
+    func setAIVoiceCaptureActive(_ capturing: Bool) {
+        guard capturing != aiVoiceAnalogGate.isCapturing else { return }
+        var neutralChannels: Set<AIVoiceAnalogNeutralGate.Channel> = []
+        if !capturing, joyConComposition.mode == nil, let gamepad = controller?.extendedGamepad {
+            if hypot(gamepad.leftThumbstick.xAxis.value, gamepad.leftThumbstick.yAxis.value) <= 0.10 {
+                neutralChannels.insert(.leftStick)
+            }
+            if hypot(gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value) <= 0.15 {
+                neutralChannels.insert(.rightStick)
+            }
+            let primary = Self.touchpadPrimary(for: gamepad)
+            let primaryTouching = abs(primary?.xAxis.value ?? 0) > TouchpadPointerTracker.liftEpsilon ||
+                abs(primary?.yAxis.value ?? 0) > TouchpadPointerTracker.liftEpsilon
+            if !primaryTouching && !Self.secondaryTouchpadIsActive(for: gamepad) {
+                neutralChannels.insert(.touchpad)
+            }
+        }
+        aiVoiceAnalogGate.setCaptureActive(
+            capturing, at: homeButtonClock(), neutralChannels: neutralChannels
+        )
+        suspendMappedOutputs()
+    }
+
+    func setExternalMicrophoneIsolation(_ isolated: Bool) {
+        guard externalMicrophoneGate.isBlocked != isolated else { return }
+        if isolated {
+            externalMicrophoneGate.setBlocked(true)
+            suspendMappedOutputs()
+            interruptDualSensePSInput(allowLegacyFallback: false)
+            motionJumpCancelHandler?()
+        } else {
+            // The owner has confirmed fresh raw neutral after hardware close.
+            // GC releases during audio were intentionally discarded, so no
+            // previous suppressed ID or highlighted key may survive recovery.
+            resetInputState()
+            externalMicrophoneGate.setBlocked(false)
         }
     }
 
@@ -1178,21 +1528,184 @@ final class ButtonBridge {
     }
 
     private var homeButtonMerger = HomeButtonPressMerger()
+    private var psGesture = PSButtonGesture()
+    private var rawPSInputIsAuthoritative = false
+    private var legacyHomeSuppressedUntil: TimeInterval = 0
+    private var psInputTimeout: DispatchWorkItem?
+    private var psChordMotionStartedAt: TimeInterval?
+    private var psChordSawRawNeutral = false
+    private var psChordSawGCHeld = false
+    private var psChordSawGCNeutral = false
+    private var gcTriggerHeldForPSChord = false
+    private var psChordRawInterrupted = false
+    private var psChordMotionBlockThrough: TimeInterval = -.infinity
+
+    var hasReliableAIVoiceInput: Bool {
+        guard rawPSInputIsAuthoritative, !psGesture.isAwaitingNeutral,
+              let last = psGesture.lastTimestamp else { return false }
+        return homeButtonClock() - last < PSButtonGesture.maximumReportGap
+    }
+
+    /// Full, unfiltered reports are the only authority that may start voice.
+    /// GameController Home may be delayed or synthesized by system gestures.
+    func handleDualSensePSInput(_ sample: DualSensePSInputSample, externalAudio: Bool = false) {
+        guard externalAudio || !externalMicrophoneGate.isBlocked else { return }
+        if let last = psGesture.lastTimestamp, sample.timestamp <= last { return }
+        if !rawPSInputIsAuthoritative { homeButtonMerger.reset() }
+        rawPSInputIsAuthoritative = true
+        psChordRawInterrupted = false
+        // GameController is the sole authority for motion-jump L2 edges. Raw
+        // HID reports may arrive out of order relative to its queued events.
+        // PS only cancels a pending jump and queries calibration ownership.
+        if sample.isPressed {
+            motionJumpCancelHandler?()
+            if sample.leftTriggerValue > PSButtonGesture.triggerReleaseThreshold,
+               psChordMotionStartedAt == nil {
+                psChordMotionStartedAt = sample.timestamp
+                psChordSawRawNeutral = false
+                psChordSawGCHeld = gcTriggerHeldForPSChord
+                psChordSawGCNeutral = false
+            }
+        }
+        if psChordMotionStartedAt != nil {
+            psChordSawRawNeutral = !sample.isPressed &&
+                sample.leftTriggerValue <= PSButtonGesture.triggerReleaseThreshold
+            if psChordSawRawNeutral {
+                psChordMotionBlockThrough = max(psChordMotionBlockThrough, sample.timestamp)
+            }
+            finishPSChordMotionBlockIfNeutral()
+        }
+        let consumedByMotion = motionJumpIsCapturing?() == true
+        let pressEdge = sample.isPressed && !psGesture.isPressed && !psGesture.isAwaitingNeutral
+        let releaseEdge = !sample.isPressed && psGesture.isPressed
+        var priority = PSButtonGesture.Priority.normal
+        if consumedByMotion { priority = .intercepted }
+        if pressEdge {
+            _ = publishInput(.home, pressed: true)
+            if psGesture.acceptsNewPSPress {
+                if consumedByMotion || inputInterceptor?(.home, true) == true {
+                    priority = .intercepted
+                } else if operationMode == .native {
+                    priority = .nativeMode
+                }
+            }
+        } else if releaseEdge {
+            _ = publishInput(.home, pressed: false)
+            _ = inputInterceptor?(.home, false)
+        }
+        if consumedByMotion { performPSGestureEffects(psGesture.cancel()) }
+        let effects = psGesture.ingest(sample, voiceEnabled: aiVoiceEnabled, priority: priority)
+        performPSGestureEffects(effects, releaseTimestamp: sample.timestamp)
+        if psGesture.needsInputWatchdog { schedulePSInputTimeoutIfNeeded() }
+        else {
+            psInputTimeout?.cancel()
+            psInputTimeout = nil
+        }
+    }
+
+    func cancelAIVoiceInput() {
+        performPSGestureEffects(psGesture.cancel())
+    }
+
+    /// Raw and GameController queues can arrive in either order. Keep the
+    /// whole L2 cycle conflicted until both sources observed release; the
+    /// timestamp fence also rejects older GC events still queued afterward.
+    private func finishPSChordMotionBlockIfNeutral() {
+        guard psChordSawRawNeutral, psChordSawGCNeutral else { return }
+        psChordMotionStartedAt = nil
+        psChordSawRawNeutral = false
+        psChordSawGCHeld = false
+        psChordSawGCNeutral = false
+    }
+
+    /// Synthetic releases from resets/disconnection cancel; they never submit.
+    func interruptDualSensePSInput(allowLegacyFallback: Bool = true) {
+        psInputTimeout?.cancel()
+        psInputTimeout = nil
+        if psChordMotionStartedAt != nil, !psChordRawInterrupted {
+            // Raw HID can disappear while GameController remains connected.
+            // Require a new GC release instead of waiting forever for raw
+            // neutral. Repeated interruptions must not move this boundary.
+            psChordRawInterrupted = true
+            let interruptedAt = homeButtonClock()
+            psChordMotionStartedAt = interruptedAt
+            psChordMotionBlockThrough = max(psChordMotionBlockThrough, interruptedAt)
+            psChordSawRawNeutral = true
+            psChordSawGCNeutral = false
+        }
+        if rawPSInputIsAuthoritative {
+            legacyHomeSuppressedUntil = homeButtonClock() + HomeButtonPressMerger.defaultEchoWindow
+        }
+        if allowLegacyFallback { rawPSInputIsAuthoritative = false }
+        performPSGestureEffects(psGesture.interrupt())
+        if publishedInputs.contains(.home) {
+            _ = publishInput(.home, pressed: false)
+            _ = inputInterceptor?(.home, false)
+        }
+    }
+
+    private func schedulePSInputTimeoutIfNeeded() {
+        guard psInputTimeout == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.psInputTimeout = nil
+            guard self.psGesture.needsInputWatchdog, let last = self.psGesture.lastTimestamp else { return }
+            if self.homeButtonClock() - last >= PSButtonGesture.maximumReportGap {
+                self.interruptDualSensePSInput(allowLegacyFallback: false)
+            } else {
+                self.schedulePSInputTimeoutIfNeeded()
+            }
+        }
+        psInputTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + PSButtonGesture.maximumReportGap, execute: work)
+    }
+
+    private func performPSGestureEffects(
+        _ effects: [PSButtonGesture.Effect], releaseTimestamp: TimeInterval? = nil
+    ) {
+        for effect in effects {
+            switch effect {
+            case .showSwitcher: onHarnessSwitcherPresent?()
+            case .restoreMapping: toggleOperationMode()
+            case .beginVoice: onAIVoiceBegin?()
+            case .submitVoice:
+                if let releaseTimestamp, let onAIVoiceRelease { onAIVoiceRelease(releaseTimestamp) }
+                else { onAIVoiceEnd?() }
+            case .cancelVoice: onAIVoiceCancel?()
+            }
+        }
+    }
 
     func handleRawHomeButton(isPressed: Bool) {
         updateHomeButton(from: .rawHID, isPressed: isPressed)
     }
 
-    func handleHomeButton(isPressed: Bool) {
-        updateHomeButton(from: .gameController, isPressed: isPressed)
+    func handleHomeButton(isPressed: Bool, motionInput: MotionJumpInputSnapshot? = nil) {
+        updateHomeButton(from: .gameController, isPressed: isPressed, motionInput: motionInput)
     }
 
-    private func updateHomeButton(from source: HomeButtonPressMerger.Source, isPressed sourceIsPressed: Bool) {
-        guard let isPressed = homeButtonMerger.update(
+    private func updateHomeButton(
+        from source: HomeButtonPressMerger.Source,
+        isPressed sourceIsPressed: Bool,
+        motionInput: MotionJumpInputSnapshot? = nil
+    ) {
+        guard !externalMicrophoneGate.isBlocked, !usesExternalVoiceControls else { return }
+        guard !rawPSInputIsAuthoritative, homeButtonClock() >= legacyHomeSuppressedUntil else { return }
+        let edge = homeButtonMerger.update(
             source,
             isPressed: sourceIsPressed,
             at: homeButtonClock()
-        ) else { return }
+        )
+        var snapshot = motionInput ?? controller?.extendedGamepad.map(Self.motionJumpSnapshot)
+            ?? MotionJumpInputSnapshot(
+                triggerValue: 0,
+                hasConflictingInput: false,
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                allowsGesture: true
+            )
+        snapshot.hasConflictingInput = snapshot.hasConflictingInput || sourceIsPressed
+        if routeMotionJumpInput(snapshot) { return }
+        guard let isPressed = edge else { return }
         print("[agent-deck] Home \(isPressed ? "pressed" : "released") via \(source)")
         _ = publishInput(.home, pressed: isPressed)
 
@@ -1204,6 +1717,13 @@ final class ButtonBridge {
                 toggleOperationMode()
                 return
             }
+            // L2 is a physical chord modifier even when its mapping changed.
+            if controllerFamily == .dualSense,
+               snapshot.triggerValue >= PSButtonGesture.triggerPressThreshold {
+                return
+            }
+            // Untrusted GameController Home can open the switcher immediately,
+            // but can never start voice or infer a microphone release.
             onHarnessSwitcherPresent?()
             return
         }
@@ -1253,6 +1773,11 @@ final class ButtonBridge {
             return
         }
         guard let action = resolvedAction(for: input) else {
+            if mappingProvider(input) == .pushToTalk {
+                // A routed press remains consumed until its physical release,
+                // even if settings/availability change during the hold.
+                overlaySuppressedButtons.insert(id)
+            }
             return
         }
         print("[agent-deck] button press input=\(input.rawValue) action=\(action)")
@@ -1261,6 +1786,7 @@ final class ButtonBridge {
 
     private func resolvedAction(for input: ControllerInput) -> ControllerAction? {
         let mapped = mappingProvider(input)
+        if mapped == .pushToTalk, shouldSuppressPTTInput?(input) == true { return nil }
         if mapped == .openApplication {
             guard let bundleIdentifier = openApplicationTargetProvider?(input)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1346,7 +1872,6 @@ final class ButtonBridge {
             return true
         case .mouseSpeedBoost:
             mouseSpeedBoostPressed = true
-            mouseSpeedBoostHandler?(true)
             succeeded = true
         case .mousePrecision:
             mousePrecisionPressed = true
@@ -1394,7 +1919,6 @@ final class ButtonBridge {
             break
         case .mouseSpeedBoost:
             mouseSpeedBoostPressed = false
-            mouseSpeedBoostHandler?(false)
         case .mousePrecision:
             mousePrecisionPressed = false
             mousePrecisionHandler?(false)
@@ -1615,8 +2139,12 @@ final class ButtonBridge {
 
     /// Ends mapped outputs without disturbing the active Home button. Buttons
     /// that are still physically down remain suppressed until their release.
-    func suspendMappedOutputs() {
+    func suspendMappedOutputs(cancellingMotionJump: Bool = true) {
+        if cancellingMotionJump { motionJumpCancelHandler?() }
         overlaySuppressedButtons.formUnion(controllerInputsByButton.keys)
+        suppressedJoyConModifiers.formUnion(joyConInputSnapshot.buttons.compactMap { input, pressed in
+            pressed && mappingProvider(input) == .functionModifier ? input : nil
+        })
         for action in activeControllerActions.values { end(action) }
         for action in activeDirectionActions.values { end(action) }
         pressedButtons.removeAll()
@@ -1638,10 +2166,12 @@ final class ButtonBridge {
     }
 
     func resetInputState(preservingHomeButtonState: Bool = false) {
+        interruptDualSensePSInput(allowLegacyFallback: false)
+        motionJumpCancelHandler?()
         overlaySuppressedButtons.removeAll()
+        suppressedJoyConModifiers.removeAll()
         for action in activeControllerActions.values { end(action) }
         for action in activeDirectionActions.values { end(action) }
-        if mouseSpeedBoostPressed { mouseSpeedBoostHandler?(false) }
         if mousePrecisionPressed { mousePrecisionHandler?(false) }
         pressedButtons.removeAll()
         controllerInputsByButton.removeAll()

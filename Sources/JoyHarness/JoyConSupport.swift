@@ -287,6 +287,7 @@ struct JoyConProfileSample {
 enum JoyConSingleShoulderAdapter {
     private static let physicalInputs: Set<ControllerInput> = [
         .leftShoulder, .rightShoulder, .leftTrigger, .rightTrigger,
+        .joyConSL, .joyConSR,
     ]
     private static let derivedInputs: Set<ControllerInput> = [
         .functionLeftShoulder, .functionRightShoulder, .functionRightTrigger,
@@ -307,11 +308,15 @@ enum JoyConSingleShoulderAdapter {
             [
                 .leftShoulder: snapshot.outerShoulder,
                 .rightShoulder: snapshot.outerTrigger,
+                .joyConSL: snapshot.sl,
+                .joyConSR: snapshot.sr,
             ]
         case (.right, .vertical):
             [
                 .leftShoulder: snapshot.outerTrigger,
                 .rightShoulder: snapshot.outerShoulder,
+                .joyConSL: snapshot.sl,
+                .joyConSR: snapshot.sr,
             ]
         }
         if side == .left {
@@ -321,18 +326,12 @@ enum JoyConSingleShoulderAdapter {
             if snapshot.minus {
                 projected[.menu] = true
             }
-            if snapshot.left {
-                projected[.buttonA] = true
-            }
-            if snapshot.down {
-                projected[.buttonB] = true
-            }
-            if snapshot.up {
-                projected[.buttonX] = true
-            }
-            if snapshot.right {
-                projected[.buttonY] = true
-            }
+            // HID owns the entire face-button state, including releases.
+            // Keeping Apple's aliases here can turn one physical press into two.
+            projected[.buttonA] = snapshot.left
+            projected[.buttonB] = snapshot.down
+            projected[.buttonX] = snapshot.up
+            projected[.buttonY] = snapshot.right
         } else {
             if snapshot.home {
                 projected[.options] = true
@@ -340,18 +339,13 @@ enum JoyConSingleShoulderAdapter {
             if snapshot.plus {
                 projected[.menu] = true
             }
-            if snapshot.right {
-                projected[.buttonA] = true
-            }
-            if snapshot.down {
-                projected[.buttonB] = true
-            }
-            if snapshot.up {
-                projected[.buttonX] = true
-            }
-            if snapshot.left {
-                projected[.buttonY] = true
-            }
+            projected[.buttonA] = snapshot.right
+            projected[.buttonB] = snapshot.up
+            projected[.buttonX] = snapshot.down
+            projected[.buttonY] = snapshot.left
+        }
+        if let pressed = snapshot.stickPressed {
+            projected[.leftThumbstickButton] = pressed
         }
         return projected
     }
@@ -417,17 +411,20 @@ enum JoyConPairedShoulderAdapter {
         }
         if side == .left {
             if hidSnapshot.minus { projectedButtons[.options] = true }
-            if hidSnapshot.up { projectedButtons[.dpadUp] = true }
-            if hidSnapshot.down { projectedButtons[.dpadDown] = true }
-            if hidSnapshot.left { projectedButtons[.dpadLeft] = true }
-            if hidSnapshot.right { projectedButtons[.dpadRight] = true }
+            projectedButtons[.dpadUp] = hidSnapshot.up
+            projectedButtons[.dpadDown] = hidSnapshot.down
+            projectedButtons[.dpadLeft] = hidSnapshot.left
+            projectedButtons[.dpadRight] = hidSnapshot.right
         } else {
             if hidSnapshot.home { projectedButtons[.home] = true }
             if hidSnapshot.plus { projectedButtons[.menu] = true }
-            if hidSnapshot.up { projectedButtons[.buttonX] = true }
-            if hidSnapshot.down { projectedButtons[.buttonB] = true }
-            if hidSnapshot.left { projectedButtons[.buttonY] = true }
-            if hidSnapshot.right { projectedButtons[.buttonA] = true }
+            projectedButtons[.buttonX] = hidSnapshot.up
+            projectedButtons[.buttonB] = hidSnapshot.down
+            projectedButtons[.buttonY] = hidSnapshot.left
+            projectedButtons[.buttonA] = hidSnapshot.right
+        }
+        if let pressed = hidSnapshot.stickPressed {
+            projectedButtons[side == .left ? .leftThumbstickButton : .rightThumbstickButton] = pressed
         }
         return replacingShoulders(in: sample, side: side, with: projectedButtons)
     }
@@ -749,10 +746,11 @@ enum JoyConProfileReader {
 
     static func expandedAvailableInputs(
         from buttons: Set<ControllerInput>,
-        hasSecondaryStick: Bool
+        hasSecondaryStick: Bool,
+        modifierInputs: Set<ControllerInput> = [.leftTrigger]
     ) -> Set<ControllerInput> {
         var result = buttons
-        if buttons.contains(.leftTrigger) {
+        if !buttons.isDisjoint(with: modifierInputs) {
             let variants: [(ControllerInput, ControllerInput)] = [
                 (.buttonA, .functionButtonA), (.buttonB, .functionButtonB),
                 (.buttonX, .functionButtonX), (.buttonY, .functionButtonY),
@@ -763,7 +761,9 @@ enum JoyConProfileReader {
                 (.dpadUp, .functionDpadUp), (.dpadLeft, .functionDpadLeft),
                 (.dpadDown, .functionDpadDown), (.dpadRight, .functionDpadRight),
             ]
-            for (base, modified) in variants where buttons.contains(base) { result.insert(modified) }
+            for (base, modified) in variants where buttons.contains(base) && !modifierInputs.contains(base) {
+                result.insert(modified)
+            }
             if hasSecondaryStick {
                 result.formUnion([
                     .functionRightStickUp, .functionRightStickLeft,

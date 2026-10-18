@@ -68,7 +68,7 @@ struct DashboardView: View {
         let provider = harnessProviderSettings.activeProvider
         let name = provider?.displayName ?? L10n.text("未启用 Harness", "No Active Harness")
         let applicationURL = provider?.installedApplicationURL()
-        let hint = L10n.text("当前 Harness：\(name)。按 PS/Home 键切换。", "Current Harness: \(name). Press PS/Home to switch.")
+        let hint = L10n.text("当前 Harness：\(name)。短按 PS/Home 键切换。", "Current Harness: \(name). Short press PS/Home to switch.")
         return Label {
             Text(name)
         } icon: {

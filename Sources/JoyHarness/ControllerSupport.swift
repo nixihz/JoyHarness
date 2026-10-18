@@ -27,6 +27,7 @@ enum ControllerFamily: String {
     }
 
     var isJoyCon: Bool { joyConMode != nil }
+    var usesSingleJoyConStick: Bool { self == .joyConLeft || self == .joyConRight }
     var isXiaomiRemote: Bool { self == .xiaomiRemote }
 
     var displayName: String {

@@ -16,13 +16,15 @@ struct DashboardControllerView: View {
     private var family: ControllerFamily { presentation.family }
     private var displayedInputs: Set<ControllerInput> { mappingStore.displayedInputs(for: family) }
     private var inputs: [ControllerInput] {
-        ControllerInput.allCases.filter {
-            displayedInputs.contains($0) && (($0.group == .functionLayer) == functionLayer)
+        let available = displayedInputs
+        return ControllerInput.allCases.filter {
+            available.contains($0) && (($0.group == .functionLayer) == functionLayer)
         }
     }
     private var sections: [(group: ControllerInputGroup, inputs: [ControllerInput])] {
-        ControllerInputGroup.allCases.compactMap { group in
-            let members = inputs.filter { $0.group == group }
+        let visibleInputs = inputs
+        return ControllerInputGroup.allCases.compactMap { group in
+            let members = visibleInputs.filter { $0.group == group }
             return members.isEmpty ? nil : (group, members)
         }
     }

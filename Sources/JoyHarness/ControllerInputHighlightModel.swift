@@ -94,6 +94,8 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
         marker(.options, 0.538, 0.664, size: CGSize(width: 34, height: 34), cornerRadius: 7),
         marker(.leftShoulder, 0.400, 0.057, size: CGSize(width: 58, height: 18), cornerRadius: 9),
         marker(.rightShoulder, 0.530, 0.028, size: CGSize(width: 54, height: 18), cornerRadius: 8),
+        marker(.joyConSL, 0.715, 0.275, size: CGSize(width: 12, height: 48), cornerRadius: 6),
+        marker(.joyConSR, 0.715, 0.650, size: CGSize(width: 12, height: 48), cornerRadius: 6),
     ].map { ($0.input, $0) })
 
     private static let joyConRightVerticalLayout: [ControllerInput: Self] = Dictionary(uniqueKeysWithValues: [
@@ -106,6 +108,8 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
         marker(.options, 0.451, 0.653, size: CGSize(width: 44, height: 44), cornerRadius: 22),
         marker(.leftShoulder, 0.480, 0.025, size: CGSize(width: 54, height: 18), cornerRadius: 8),
         marker(.rightShoulder, 0.650, 0.060, size: CGSize(width: 58, height: 18), cornerRadius: 9),
+        marker(.joyConSL, 0.285, 0.635, size: CGSize(width: 12, height: 48), cornerRadius: 6),
+        marker(.joyConSR, 0.285, 0.265, size: CGSize(width: 12, height: 48), cornerRadius: 6),
     ].map { ($0.input, $0) })
 
     private static var joyConLeftHorizontalLayout: [ControllerInput: Self] {
@@ -122,6 +126,8 @@ struct ControllerInputHighlightModel: Identifiable, Equatable {
                  size: CGSize(width: item.size.height, height: item.size.width), cornerRadius: item.cornerRadius)
         }
         // SL/SR sit on the exposed rail; they replace L/ZL or ZR/R for solo horizontal grip.
+        result.removeValue(forKey: .joyConSL)
+        result.removeValue(forKey: .joyConSR)
         result[.leftShoulder] = marker(.leftShoulder, clockwise ? 0.365 : 0.275, 0.285,
             size: CGSize(width: 48, height: 12), cornerRadius: 6)
         result[.rightShoulder] = marker(.rightShoulder, clockwise ? 0.735 : 0.650, 0.285,

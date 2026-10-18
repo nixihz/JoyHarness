@@ -1,4 +1,4 @@
-import AVFAudio
+import AVFoundation
 import AudioToolbox
 import CoreAudio
 import Foundation
@@ -41,7 +41,9 @@ final class RemoteMicrophoneOutput {
 
     init(
         streamEndTimeout: TimeInterval = 1,
-        makePlayback: @escaping () throws -> RemoteMicrophonePlayback = { try CoreAudioRemoteMicrophonePlayback() }
+        makePlayback: @escaping () throws -> RemoteMicrophonePlayback = {
+            try RemoteMicrophoneOutput.makeAuthorizedPlayback { try CoreAudioRemoteMicrophonePlayback() }
+        }
     ) {
         self.streamEndTimeout = streamEndTimeout
         self.makePlayback = makePlayback
@@ -51,6 +53,26 @@ final class RemoteMicrophoneOutput {
     static var selected: Bool {
         guard let device = deviceID() else { return false }
         return defaultInput() == device
+    }
+
+    /// The loopback device has both input and output streams. Selecting it can
+    /// synchronously ask Core Audio/TCC for microphone access even though this
+    /// backend only writes audio. Startup warm-up must never trigger that
+    /// implicit permission prompt or block the main queue waiting for it.
+    static func makeAuthorizedPlayback(
+        authorizationStatus: () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .audio) },
+        makePlayback: () throws -> RemoteMicrophonePlayback
+    ) throws -> RemoteMicrophonePlayback {
+        try requireRecordingAuthorization(authorizationStatus())
+        return try makePlayback()
+    }
+
+    fileprivate static func requireRecordingAuthorization(
+        _ status: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+    ) throws {
+        guard status == .authorized else {
+            throw outputError("遥控器麦克风需要录音权限。请前往通用设置 → 遥控器麦克风 → 检查麦克风权限，完成授权后重新按语音键。")
+        }
     }
 
     static func selectAsDefaultInput() throws {
@@ -294,6 +316,9 @@ private final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback 
     }
 
     private func selectOutputDevice() throws {
+        // Permission can be revoked after the engine was prepared, so recovery
+        // must also fail before accessing the HAL output unit.
+        try RemoteMicrophoneOutput.requireRecordingAuthorization()
         guard var device = RemoteMicrophoneOutput.deviceID() else {
             throw RemoteMicrophoneOutput.outputError("请在设置中启用 Joy Harness 麦克风组件")
         }

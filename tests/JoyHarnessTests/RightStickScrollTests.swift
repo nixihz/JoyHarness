@@ -112,7 +112,7 @@ struct RightStickScrollTests {
     }
 
     @Test
-    func rightStickAndLTLeftStickScrollAtTheSameSpeed() {
+    func rightStickAndSingleJoyConFunctionStickScrollAtTheSameSpeed() {
         let rightStick = MouseBridge.stickMotionVelocities(
             leftStick: .zero,
             leftStickScrolls: false,

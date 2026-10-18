@@ -57,6 +57,12 @@ final class ControllerHub {
     private var lastPublishedScrollStick: SIMD2<Float>?
     private var lastPublishedJoystick: JoystickState?
     private var harnessSwitcherOwnerID: String?
+    private var aiVoiceOwnerID: String?
+    private var aiVoiceCaptureActive = false
+    private var dualSenseMicrophoneIsolated = false
+    /// The application additionally checks HID identity, enabled settings,
+    /// supported physical inputs and the current Codex/transport context.
+    var shouldRouteDualSensePTT: ((ControllerInput) -> Bool)?
 
     private(set) var selectedSlot = 0
     private(set) var operationMode: ControllerOperationMode = .mapping
@@ -84,6 +90,9 @@ final class ControllerHub {
     var recordedShortcutHandler: ((RecordedKeyboardShortcut, Bool) -> Void)?
     var joyConOrientationProvider: ((ControllerFamily) -> JoyConOrientation)?
     var rightTriggerFeedbackHandler: ((ControllerFamily, Float) -> Void)?
+    var motionJumpInputHandler: ((String, MotionJumpInputSnapshot) -> Bool)?
+    var motionJumpCancelHandler: ((String) -> Void)?
+    var motionJumpIsCapturing: ((String) -> Bool)?
 
     var openApplicationTargetProvider: FamilyTargetProvider?
     var recordedShortcutProvider: FamilyShortcutProvider?
@@ -98,6 +107,25 @@ final class ControllerHub {
     var inputInterceptor: ((ControllerInput, Bool) -> Bool)?
     var onHarnessSwitcherPresent: (() -> Void)?
     var onHarnessSwitcherCancel: (() -> Void)?
+    var aiVoiceEnabled = false {
+        didSet {
+            for session in sessions.values { session.aiVoiceEnabled = aiVoiceEnabled }
+        }
+    }
+    var onAIVoiceBegin: (() -> Void)?
+    var onAIVoiceEnd: (() -> Void)?
+    var onAIVoiceRelease: ((TimeInterval) -> Void)?
+    var onAIVoiceCancel: (() -> Void)?
+
+    var aiVoiceInputIssue: String? {
+        let ids = families.filter { $0.value == .dualSense }.map(\.key)
+        guard !ids.isEmpty else { return L10n.text("请连接 DualSense 手柄以使用 L2 + PS 语音。", "Connect a DualSense to use L2 + PS voice.") }
+        guard ids.count == 1 else { return L10n.text("检测到多只 DualSense；请只保留一只连接后使用语音。", "Multiple DualSense controllers detected. Connect only one to use voice.") }
+        guard sessions[ids[0]]?.hasReliableAIVoiceInput == true else {
+            return L10n.text("尚未收到可靠的手柄输入，语音暂不可用；请松开 L2 和 PS 后重新连接手柄。", "Reliable controller input is unavailable. Release L2 and PS, then reconnect the controller to use voice.")
+        }
+        return nil
+    }
 
     var batterySnapshot: ControllerBatterySnapshot? {
         selectedSession?.batterySnapshot
@@ -267,9 +295,62 @@ final class ControllerHub {
     /// Raw HID reports the button even when GameController has not surfaced the
     /// device yet, so fall back to the selected session rather than drop it.
     func handleRawHomeButton(for family: ControllerFamily, isPressed: Bool) {
-        let matchingID = families.first(where: { $0.value == family })?.key
+        let matchingIDs = families.filter { $0.value == family }.map(\.key)
+        // The legacy HID callback has no endpoint identity. Never combine one
+        // DualSense's PS with another DualSense's L2 or voice session.
+        guard matchingIDs.count <= 1 else { return }
+        let matchingID = matchingIDs.first
         let session = matchingID.flatMap { sessions[$0] } ?? selectedSession
         session?.handleRawHomeButton(isPressed: isPressed)
+    }
+
+    private var externalAudioControls = false
+    private var externalAudioCapturing = false
+
+    func setExternalAudioState(available: Bool, capturing: Bool) {
+        externalAudioControls = available
+        externalAudioCapturing = capturing
+        let hasUniqueOwner = families.values.filter { $0 == .dualSense }.count == 1
+        for (id, family) in families where family == .dualSense {
+            let routesExternally = available && hasUniqueOwner
+            if sessions[id]?.usesExternalVoiceControls == true && !routesExternally {
+                sessions[id]?.interruptDualSensePSInput()
+            }
+            sessions[id]?.usesExternalVoiceControls = routesExternally
+            sessions[id]?.setExternalAudioCaptureActive(capturing)
+        }
+    }
+
+    func handleExternalAudioControl(_ effect: DualSenseExternalControlRouter.Effect) {
+        let ids = families.filter { $0.value == .dualSense }.map(\.key)
+        guard ids.count == 1, let session = sessions[ids[0]] else {
+            interruptDualSensePSInput(); return
+        }
+        switch effect {
+        case .interrupted: session.interruptDualSensePSInput(allowLegacyFallback: false)
+        case .optionsTap: session.tapExternalVoiceShortcut()
+        case .cancelTap: session.cancelExternalVoiceInput()
+        case .ps(let sample): session.handleExternalAudioPSInput(sample)
+        }
+    }
+
+    func handleDualSensePSInput(_ sample: DualSensePSInputSample) {
+        let matchingIDs = families.filter { $0.value == .dualSense }.map(\.key)
+        guard matchingIDs.count == 1, let id = matchingIDs.first else {
+            interruptDualSensePSInput()
+            return
+        }
+        sessions[id]?.handleDualSensePSInput(sample)
+    }
+
+    func interruptDualSensePSInput() {
+        for (id, family) in families where family == .dualSense {
+            sessions[id]?.interruptDualSensePSInput()
+        }
+    }
+
+    func cancelAIVoiceInput() {
+        for session in sessions.values { session.cancelAIVoiceInput() }
     }
 
     func finishHarnessSwitcher() {
@@ -280,6 +361,29 @@ final class ControllerHub {
         for session in sessions.values { session.suspendMappedOutputs() }
         remoteSession?.suspendMappedOutputs()
         joyConFallback?.suspendMappedOutputs()
+    }
+
+    func setDualSenseMicrophoneIsolation(_ isolated: Bool) {
+        dualSenseMicrophoneIsolated = isolated
+        for (id, family) in families where family == .dualSense {
+            sessions[id]?.setExternalMicrophoneIsolation(isolated)
+            if isolated { releaseSourceState(id) }
+        }
+    }
+
+    func setAIVoiceCaptureActive(_ capturing: Bool) {
+        aiVoiceCaptureActive = capturing
+        for session in sessions.values { session.setAIVoiceCaptureActive(capturing) }
+        remoteSession?.setAIVoiceCaptureActive(capturing)
+        joyConFallback?.setAIVoiceCaptureActive(capturing)
+    }
+
+    /// Stops only the device chosen for motion recording/testing. Outputs
+    /// owned by any other connected controller remain active.
+    func suspendMotionJumpDevice(id: String) {
+        guard let session = sessions[id] else { return }
+        session.suspendMotionJumpInput()
+        releaseSourceState(id)
     }
 
     func updateJoyConHIDShoulders(side: JoyConSide, snapshot: JoyConHIDShoulderSnapshot?) {
@@ -407,6 +511,7 @@ final class ControllerHub {
                 ?? standard.first.map(Self.controllerID)
         }
 
+        setExternalAudioState(available: externalAudioControls, capturing: externalAudioCapturing)
         emitControllerSetIfNeeded(Array(controllers.values))
         refreshConnectedDeviceList()
         emitSelectedControllerIfNeeded()
@@ -456,6 +561,7 @@ final class ControllerHub {
 
     private func makeSession(id: String, family: ControllerFamily) -> ButtonBridge {
         let session = ButtonBridge(
+            controllerFamily: family,
             mappingProvider: { [weak self] input in
                 self?.mappingProvider(family, input) ?? .disabled
             }
@@ -471,6 +577,53 @@ final class ControllerHub {
         familyProvider: (() -> ControllerFamily)? = nil
     ) {
         let currentFamily = { familyProvider?() ?? family }
+        if family == .dualSense {
+            session.setExternalMicrophoneIsolation(dualSenseMicrophoneIsolated)
+            session.usesExternalVoiceControls = externalAudioControls
+            if externalAudioControls { session.setExternalAudioCaptureActive(externalAudioCapturing) }
+        }
+        session.shouldSuppressPTTInput = { [weak self] input in
+            guard let self, self.families[id] == .dualSense,
+                  self.families.values.filter({ $0 == .dualSense }).count == 1 else { return false }
+            return !self.externalAudioControls && self.shouldRouteDualSensePTT?(input) == true
+        }
+        session.aiVoiceEnabled = aiVoiceEnabled
+        session.setAIVoiceCaptureActive(aiVoiceCaptureActive)
+        session.onAIVoiceBegin = { [weak self, weak session] in
+            guard let self else { return }
+            guard self.aiVoiceOwnerID == nil else {
+                session?.cancelAIVoiceInput()
+                return
+            }
+            self.aiVoiceOwnerID = id
+            self.onAIVoiceBegin?()
+        }
+        session.onAIVoiceEnd = { [weak self] in
+            guard let self, self.aiVoiceOwnerID == id else { return }
+            self.aiVoiceOwnerID = nil
+            self.onAIVoiceEnd?()
+        }
+        session.onAIVoiceRelease = { [weak self] timestamp in
+            guard let self, self.aiVoiceOwnerID == id else { return }
+            self.aiVoiceOwnerID = nil
+            if let onAIVoiceRelease = self.onAIVoiceRelease { onAIVoiceRelease(timestamp) }
+            else { self.onAIVoiceEnd?() }
+        }
+        session.onAIVoiceCancel = { [weak self] in
+            guard let self, self.aiVoiceOwnerID == id else { return }
+            self.aiVoiceOwnerID = nil
+            self.onAIVoiceCancel?()
+        }
+        session.motionJumpInputHandler = { [weak self] snapshot in
+            guard let self else { return false }
+            var snapshot = snapshot
+            snapshot.allowsGesture = snapshot.allowsGesture && self.harnessSwitcherOwnerID == nil
+            return self.motionJumpInputHandler?(id, snapshot) ?? false
+        }
+        session.motionJumpCancelHandler = { [weak self] in
+            self?.motionJumpCancelHandler?(id)
+        }
+        session.motionJumpIsCapturing = { [weak self] in self?.motionJumpIsCapturing?(id) ?? false }
         session.keyHandler = { [weak self] key, action in
             self?.handleKey(source: id, key: key, action: action) ?? false
         }
@@ -971,5 +1124,11 @@ final class ControllerHub {
 
     private static func controllerID(_ controller: GCController) -> String {
         "gamecontroller-\(ObjectIdentifier(controller))"
+    }
+
+    /// Process-local session identity. This is deliberately not a persistent
+    /// hardware ID and must not be used as the calibration storage key.
+    static func motionJumpDeviceID(_ controller: GCController) -> String {
+        controllerID(controller)
     }
 }

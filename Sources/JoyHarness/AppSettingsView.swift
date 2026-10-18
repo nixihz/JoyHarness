@@ -8,11 +8,16 @@ struct AppSettingsView: View {
     @ObservedObject var updater: AppUpdater
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
+    @ObservedObject var motionJump: MotionJumpCoordinator
     @ObservedObject var nativeModeSettings: NativeGamepadAppSettings
     @ObservedObject var harnessProviderSettings: HarnessProviderSettings
     @ObservedObject var settingsCoordinator: SettingsCoordinator
     @ObservedObject var slotShortcutSettings: SlotShortcutSettings
     @ObservedObject var edgeLightSettings: EdgeLightSettings
+    @ObservedObject var aiVoiceSettings: AIVoiceSettings
+    @ObservedObject var aiVoiceSession: AIVoiceSession
+    var aiVoiceInputIssue: () -> String?
+    @ObservedObject var dualSenseMicrophone: DualSenseMicrophoneSession
 
     var body: some View {
         HStack(spacing: 0) {
@@ -38,7 +43,9 @@ struct AppSettingsView: View {
                     updater: updater,
                     scrollDirectionSettings: scrollDirectionSettings,
                     pointerSensitivitySettings: pointerSensitivitySettings,
-                    edgeLightSettings: edgeLightSettings
+                    motionJump: motionJump,
+                    edgeLightSettings: edgeLightSettings,
+                    dualSenseMicrophone: dualSenseMicrophone
                 )
             case .harness:
                 HarnessSettingsPane(settings: harnessProviderSettings)
@@ -51,6 +58,8 @@ struct AppSettingsView: View {
                 SlotShortcutSettingsPane(settings: slotShortcutSettings)
             case .nativeMode:
                 NativeModeSettingsPane(settings: nativeModeSettings)
+            case .aiVoice:
+                AIVoiceSettingsPane(settings: aiVoiceSettings, session: aiVoiceSession, inputIssue: aiVoiceInputIssue)
             }
         }
         .frame(width: 620, height: 640)
@@ -60,13 +69,17 @@ struct AppSettingsView: View {
 private struct GeneralSettingsView: View {
     @State private var remoteVoiceMessage: String?
     @State private var installingMicrophone = false
+    @State private var remoteComponentInstalled = false
+    @State private var remoteComponentNeedsUpdate = false
     @ObservedObject var appearanceSettings: AppearanceSettings
     @ObservedObject var languageSettings: AppLanguageSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
     @ObservedObject var updater: AppUpdater
     @ObservedObject var scrollDirectionSettings: ScrollDirectionSettings
     @ObservedObject var pointerSensitivitySettings: PointerSensitivitySettings
+    @ObservedObject var motionJump: MotionJumpCoordinator
     @ObservedObject var edgeLightSettings: EdgeLightSettings
+    @ObservedObject var dualSenseMicrophone: DualSenseMicrophoneSession
 
     var body: some View {
         Form {
@@ -106,12 +119,21 @@ private struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            DualSenseAudioSettingsSection()
             Section(L10n.text("遥控器麦克风", "Remote Microphone")) {
                 Text(L10n.text(
                     "使用 RC003-MS 内置麦克风说话。首次使用时启用 Joy Harness 自带的麦克风组件，之后选择为语音输入。只在按住语音键时接收，不保存录音。",
                     "Use the RC003-MS built-in microphone. Enable the microphone component included with Joy Harness, then select it as your voice input. Audio is received while the voice key is held and is not saved."
                 ))
                 .font(.caption)
+                Button(L10n.text("检查麦克风权限", "Check Microphone Permission")) {
+                    Task { @MainActor in
+                        let allowed = await AIVoiceAudioRecorder.requestMicrophonePermission()
+                        remoteVoiceMessage = allowed
+                            ? L10n.text("麦克风权限已就绪；可再次按遥控器语音键。", "Microphone permission is ready. Press the remote voice key again.")
+                            : L10n.text("请在系统设置 → 隐私与安全性 → 麦克风中允许 Joy Harness。", "Allow Joy Harness in System Settings → Privacy & Security → Microphone.")
+                    }
+                }
                 Button(L10n.text("使用遥控器作为系统麦克风", "Use Remote as System Microphone")) {
                     do {
                         try RemoteMicrophoneOutput.selectAsDefaultInput()
@@ -119,14 +141,14 @@ private struct GeneralSettingsView: View {
                     } catch { remoteVoiceMessage = error.localizedDescription }
                 }
                 .disabled(installingMicrophone)
-                Text(remoteVoiceMessage ?? (RemoteMicrophoneInstallation.updateRequired
+                Text(remoteVoiceMessage ?? (remoteComponentNeedsUpdate
                     ? L10n.text("麦克风组件有更新；安装需要管理员验证，并会短暂中断声音。", "A microphone component update is available. Installation requires administrator authentication and briefly interrupts audio.")
-                    : RemoteMicrophoneOutput.installed
+                    : remoteComponentInstalled
                         ? L10n.text("这会切换系统默认输入；可在系统声音设置中切回其他麦克风。", "This changes the default input. Switch back in System Sound settings.")
                         : L10n.text("麦克风组件尚未启用；安装需要管理员验证，并会短暂中断声音。", "Enable the microphone component first; installation requires administrator authentication and briefly interrupts audio.")))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button(RemoteMicrophoneInstallation.updateRequired
+                Button(remoteComponentNeedsUpdate
                     ? L10n.text("更新 Joy Harness 麦克风组件", "Update Joy Harness Microphone")
                     : L10n.text("启用 Joy Harness 麦克风组件", "Enable Joy Harness Microphone")) {
                     installingMicrophone = true
@@ -236,8 +258,8 @@ private struct GeneralSettingsView: View {
 
                 HStack {
                     Text(L10n.text(
-                        "普通用于左摇杆，快速用于加速模式，慢速用于精细模式和触控板。",
-                        "Normal applies to the left stick, Fast to boost mode, and Slow to precision mode and the touchpad."
+                        "普通用于左摇杆；按住 L3，或双摇杆手柄的 LT / L2 功能层键使用快速；慢速用于精细模式和触控板。",
+                        "Normal applies to the left stick. Hold L3 or the LT / L2 function modifier on a dual-stick controller for Fast. Slow applies to precision mode and the touchpad."
                     ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -256,6 +278,8 @@ private struct GeneralSettingsView: View {
                 Text(L10n.text("鼠标灵敏度", "Pointer Sensitivity"))
             }
 
+            MotionJumpSettingsView(coordinator: motionJump, settings: motionJump.settings)
+
             Section {
                 Picker(
                     L10n.text("滚动方向", "Scroll Direction"),
@@ -272,8 +296,8 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Text(L10n.text(
-                    "用于右摇杆和 LT / L2 + 左摇杆滚动网页或文档。可随时切换。",
-                    "Applies to right stick and LT / L2 + left stick scrolling in browsers and documents. You can change it anytime."
+                    "用于右摇杆滚动网页或文档，也适用于单只 Joy-Con 的功能层 + 摇杆滚动。可随时切换。",
+                    "Applies to right-stick scrolling in browsers and documents, and function modifier + stick scrolling on a single Joy-Con. You can change it anytime."
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -317,6 +341,14 @@ private struct GeneralSettingsView: View {
             launchAtLogin.refresh()
             updater.refresh()
         }
+        .task {
+            while !Task.isCancelled {
+                remoteComponentInstalled = RemoteMicrophoneOutput.installed
+                remoteComponentNeedsUpdate = RemoteMicrophoneInstallation.updateRequired
+                do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
+            }
+        }
+        .onDisappear { motionJump.stopSession() }
     }
 
     private var isLaunchAtLoginUnavailable: Bool {

@@ -1,4 +1,5 @@
 import Foundation
+import IOKit
 import IOKit.hid
 
 enum DualSenseHIDTransport: String {
@@ -97,6 +98,20 @@ enum DualSenseBluetoothOutputReport {
 }
 
 enum DualSenseInputReport {
+    static func psInputSample(
+        in report: UnsafeBufferPointer<UInt8>,
+        transport: DualSenseHIDTransport,
+        timestamp: TimeInterval
+    ) -> DualSensePSInputSample? {
+        guard let pressed = isHomeButtonPressed(in: report, transport: transport) else { return nil }
+        let triggerIndex = transport == .usb ? 5 : 6
+        return DualSensePSInputSample(
+            isPressed: pressed,
+            leftTriggerValue: Float(report[triggerIndex]) / 255,
+            timestamp: timestamp
+        )
+    }
+
     /// USB report 0x01 and Bluetooth extended report 0x31 share the input
     /// state layout; Bluetooth adds one header byte after the report ID.
     /// Other reports, such as the short Bluetooth 0x01 report sent before
@@ -109,7 +124,8 @@ enum DualSenseInputReport {
         case .usb: (0x01, 10)
         case .bluetooth: (0x31, 11)
         }
-        guard report.count > homeButtonIndex, report[0] == reportID else { return nil }
+        guard report.count == (transport == .usb ? 64 : 78), report[0] == reportID else { return nil }
+        if transport == .bluetooth, report[1] & 0x0f != 0x01 { return nil }
         return report[homeButtonIndex] & 0x01 != 0
     }
 }
@@ -157,6 +173,29 @@ struct DualSenseHomeButtonFilter {
 }
 
 final class DualSenseHIDOutput {
+    private final class InputContext {
+        weak var owner: DualSenseHIDOutput?
+        let generation: UInt64
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 1_024)
+
+        init(owner: DualSenseHIDOutput, generation: UInt64) {
+            self.owner = owner
+            self.generation = generation
+        }
+
+        deinit { buffer.deallocate() }
+    }
+
+    private struct InputConfiguration {
+        let transport: DualSenseHIDTransport
+        let identity: DualSenseHIDEndpointIdentity
+        var isolated = false
+        var sessionGeneration: UInt64?
+        var latestControl: DualSenseHIDControlSample?
+        var lastAudioTimestamp: TimeInterval = -.infinity
+        var closeTimestamp: TimeInterval?
+    }
+
     private static let sonyVendorID = 0x054c
     private static let dualSenseProductID = 0x0ce6
     private static let buttonUsagePage = UInt32(kHIDPage_Button)
@@ -165,11 +204,47 @@ final class DualSenseHIDOutput {
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var transport: DualSenseHIDTransport?
-    private var inputBuffer = [UInt8](repeating: 0, count: 78)
     private var homeButtonFilter = DualSenseHomeButtonFilter()
     private var homeReleaseWorkItem: DispatchWorkItem?
+    private let inputQueue = DispatchQueue(label: "tech.keli.joyharness.dualsense-input")
+    private let inputConfigurationLock = NSLock()
+    private var inputConfiguration: InputConfiguration?
+    private var inputGeneration: UInt64 = 0
+    private let psInputMailbox = DualSensePSInputMailbox()
+    private let controlMailbox = DualSenseHIDControlMailbox()
+    private let output = DualSenseHIDWriteCoordinator()
+    private var microphonePacketHandler: ((DualSenseHIDMicrophonePacket) -> Void)?
 
+    // Public operations and callbacks are main-queue-only, except the bounded
+    // microphone packet callback, which runs on the HID input queue.
     var onHomeButtonChange: ((Bool) -> Void)?
+    var onPSInputSample: ((DualSensePSInputSample) -> Void)?
+    var onPSInputInterrupted: (() -> Void)?
+    var onTrustedControlSample: ((DualSenseHIDControlSample) -> Void)?
+    var onMicrophoneInterrupted: (() -> Void)?
+    var onMicrophoneAvailabilityChange: ((DualSenseMicrophoneAvailability) -> Void)?
+    private(set) var microphoneAvailability: DualSenseMicrophoneAvailability = .unavailable("未连接 DualSense。")
+
+    var onMicrophonePacket: ((DualSenseHIDMicrophonePacket) -> Void)? {
+        get {
+            inputConfigurationLock.lock(); defer { inputConfigurationLock.unlock() }
+            return microphonePacketHandler
+        }
+        set {
+            inputConfigurationLock.lock(); defer { inputConfigurationLock.unlock() }
+            microphonePacketHandler = newValue
+        }
+    }
+
+    var isMicrophoneInputIsolated: Bool {
+        inputConfigurationLock.lock(); defer { inputConfigurationLock.unlock() }
+        return inputConfiguration?.isolated ?? false
+    }
+
+    func connectIfNeeded() -> Bool {
+        if device != nil { refreshMicrophoneAvailability(); return true }
+        return connect()
+    }
 
     func connect() -> Bool {
         disconnect()
@@ -179,175 +254,419 @@ final class DualSenseHIDOutput {
             kIOHIDProductIDKey as String: Self.dualSenseProductID,
         ]
         IOHIDManagerSetDeviceMatching(manager, matching as CFDictionary)
-        let openResult = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        guard openResult == kIOReturnSuccess,
+        guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
               let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             return false
         }
         let connections = devices.compactMap { device -> (IOHIDDevice, DualSenseHIDTransport)? in
-            let rawValue = IOHIDDeviceGetProperty(
-                device,
-                kIOHIDTransportKey as CFString
-            )
-            guard let value = rawValue as? String,
-                let transport = DualSenseHIDTransport(ioKitValue: value) else { return nil }
+            guard let value = IOHIDDeviceGetProperty(device, kIOHIDTransportKey as CFString) as? String,
+                  let transport = DualSenseHIDTransport(ioKitValue: value) else { return nil }
             return (device, transport)
         }
-        guard let connection = connections.first(where: { $0.1 == .usb }) ?? connections.first else {
+        // Preserve ordinary trigger behavior. Microphone availability below
+        // separately rejects USB, unknown identities and multiple endpoints.
+        guard let (device, transport) = connections.first(where: { $0.1 == .usb }) ?? connections.first else {
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             return false
         }
-        let (device, transport) = connection
+        var registryID: UInt64 = 0
+        _ = IORegistryEntryGetRegistryEntryID(IOHIDDeviceGetService(device), &registryID)
+        let identity = DualSenseHIDEndpointIdentity(registryID: registryID, connectionGeneration: inputGeneration)
         self.manager = manager
         self.device = device
         self.transport = transport
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        inputBuffer.withUnsafeMutableBufferPointer { ptr in
-            if let base = ptr.baseAddress {
-                IOHIDDeviceRegisterInputReportCallback(
-                    device,
-                    base,
-                    ptr.count,
-                    Self.inputReportCallback,
-                    context
-                )
+        inputConfigurationLock.lock()
+        inputConfiguration = InputConfiguration(transport: transport, identity: identity)
+        inputConfigurationLock.unlock()
+        output.attach(generation: inputGeneration, bluetooth: transport == .bluetooth) { report in
+            Self.write(report, to: device)
+        }
+        if transport == .bluetooth {
+            // Reading calibration selects enhanced reports without opening the
+            // mic. A failure is not treated as valid control/identity evidence.
+            output.prepareInput {
+                var bytes = [UInt8](repeating: 0, count: 41)
+                bytes[0] = 0x05
+                var length = CFIndex(bytes.count)
+                _ = IOHIDDeviceGetReport(device, kIOHIDReportTypeFeature, 0x05, &bytes, &length)
             }
         }
+        let inputContext = InputContext(owner: self, generation: inputGeneration)
+        let retainedContext = Unmanaged.passRetained(inputContext)
+        let context = retainedContext.toOpaque()
+        IOHIDDeviceRegisterInputReportCallback(device, inputContext.buffer, 1_024, Self.inputReportCallback, context)
         IOHIDDeviceRegisterInputValueCallback(device, Self.inputValueCallback, context)
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, Self.deviceRemovalCallback, context)
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, Self.deviceMatchingCallback, context)
+        IOHIDManagerSetDispatchQueue(manager, inputQueue)
+        let retainedManager = Unmanaged.passRetained(manager)
+        IOHIDManagerSetCancelHandler(manager) {
+            IOHIDManagerClose(retainedManager.takeUnretainedValue(), IOOptionBits(kIOHIDOptionsTypeNone))
+            retainedContext.release()
+            retainedManager.release()
+        }
+        IOHIDManagerActivate(manager)
+        refreshMicrophoneAvailability()
         print("[agent-deck] DualSense \(transport.rawValue) HID background trigger ready")
         return true
     }
 
-    private static let inputReportCallback: IOHIDReportCallback = { context, result, sender, type, reportID, report, reportLength in
-        guard let context else { return }
-        let instance = Unmanaged<DualSenseHIDOutput>.fromOpaque(context).takeUnretainedValue()
-        instance.handleInputReport(report: report, length: reportLength)
+    private func refreshMicrophoneAvailability() {
+        let next: DualSenseMicrophoneAvailability
+        let devices = manager.flatMap { IOHIDManagerCopyDevices($0) as? Set<IOHIDDevice> } ?? []
+        inputConfigurationLock.lock()
+        let configuration = inputConfiguration
+        inputConfigurationLock.unlock()
+        if devices.count > 1 {
+            next = .unavailable("检测到多只或多个 DualSense 端点，请只保留一只蓝牙手柄。")
+        } else if let configuration, configuration.transport == .usb {
+            next = .unavailable("请拔掉 DualSense 的 USB 数据线并通过蓝牙连接。")
+        } else if devices.count == 1, let configuration,
+                  configuration.transport == .bluetooth, configuration.identity.registryID != 0 {
+            next = .available(configuration.identity)
+        } else {
+            next = .unavailable("尚未确认唯一的 DualSense 蓝牙端点。")
+        }
+        guard next != microphoneAvailability else { return }
+        microphoneAvailability = next
+        onMicrophoneAvailabilityChange?(next)
+        if next.identity == nil, isMicrophoneInputIsolated { onMicrophoneInterrupted?() }
     }
 
-    private static let inputValueCallback: IOHIDValueCallback = { context, result, sender, value in
-        guard let context else { return }
+    private static let inputReportCallback: IOHIDReportCallback = { context, result, _, type, reportID, report, reportLength in
+        guard let context, result == kIOReturnSuccess, type == kIOHIDReportTypeInput,
+              reportLength > 0, reportLength <= 1_024 else { return }
+        let input = Unmanaged<InputContext>.fromOpaque(context).takeUnretainedValue()
+        input.owner?.handleInputReport(reportID: reportID, bytes: Array(UnsafeBufferPointer(start: report, count: reportLength)),
+                                       generation: input.generation)
+    }
+
+    private static let inputValueCallback: IOHIDValueCallback = { context, result, _, value in
+        guard let context, result == kIOReturnSuccess else { return }
         let element = IOHIDValueGetElement(value)
         guard IOHIDElementGetUsagePage(element) == DualSenseHIDOutput.buttonUsagePage,
               IOHIDElementGetUsage(element) == DualSenseHIDOutput.homeButtonUsage else { return }
-        let instance = Unmanaged<DualSenseHIDOutput>.fromOpaque(context).takeUnretainedValue()
-        let isPressed = IOHIDValueGetIntegerValue(value) != 0
-        instance.publishHomeButton(isPressed: isPressed)
+        let input = Unmanaged<InputContext>.fromOpaque(context).takeUnretainedValue()
+        input.owner?.publishHomeButton(isPressed: IOHIDValueGetIntegerValue(value) != 0, generation: input.generation)
     }
 
-    private func handleInputReport(report: UnsafeMutablePointer<UInt8>, length: CFIndex) {
-        guard let transport,
-              let isPressed = DualSenseInputReport.isHomeButtonPressed(
-                  in: UnsafeBufferPointer(start: report, count: length),
-                  transport: transport
-              ) else { return }
-        publishHomeButton(isPressed: isPressed)
-    }
-
-    private func publishHomeButton(isPressed: Bool) {
-        DispatchQueue.main.async { [weak self] in
-            self?.processHomeButton(isPressed: isPressed)
+    private static let deviceRemovalCallback: IOHIDDeviceCallback = { context, _, _, removed in
+        guard let context else { return }
+        let input = Unmanaged<InputContext>.fromOpaque(context).takeUnretainedValue()
+        let generation = input.generation
+        DispatchQueue.main.async { [weak instance = input.owner] in
+            guard let instance, instance.inputGeneration == generation else { return }
+            if instance.device == removed { instance.disconnect() }
+            else { instance.refreshMicrophoneAvailability() }
         }
+    }
+
+    private static let deviceMatchingCallback: IOHIDDeviceCallback = { context, _, _, _ in
+        guard let context else { return }
+        let input = Unmanaged<InputContext>.fromOpaque(context).takeUnretainedValue()
+        let generation = input.generation
+        DispatchQueue.main.async { [weak instance = input.owner] in
+            guard let instance, instance.inputGeneration == generation else { return }
+            instance.refreshMicrophoneAvailability()
+        }
+    }
+
+    private func handleInputReport(reportID: UInt32, bytes: [UInt8], generation: UInt64) {
+        inputConfigurationLock.lock()
+        let configuration = inputConfiguration
+        inputConfigurationLock.unlock()
+        guard let configuration, configuration.identity.connectionGeneration == generation else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        switch configuration.transport {
+        case .usb:
+            // USB HID can likewise include or omit the separate report ID.
+            guard reportID == 0x01 else { return }
+            let normalized = bytes.count == 63 ? [UInt8(0x01)] + bytes : bytes
+            guard let sample = normalized.withUnsafeBufferPointer({
+                DualSenseInputReport.psInputSample(in: $0, transport: .usb, timestamp: now)
+            }) else { return }
+            enqueuePS(sample, generation: generation)
+        case .bluetooth:
+            switch DualSenseBluetoothAudioProtocol.classifyInput(reportID: reportID, bytes: bytes) {
+            case .unknown:
+                // No controls, heartbeat, highlights, motion or audio from an
+                // unknown/truncated/bad-CRC report.
+                return
+            case .microphone(let packet):
+                inputConfigurationLock.lock()
+                guard var current = inputConfiguration, current.identity == configuration.identity else {
+                    inputConfigurationLock.unlock(); return
+                }
+                let unexpected = !current.isolated
+                current.isolated = true
+                current.lastAudioTimestamp = now
+                inputConfiguration = current
+                let handler = microphonePacketHandler
+                inputConfigurationLock.unlock()
+                if unexpected {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.inputGeneration == generation else { return }
+                        self.onPSInputInterrupted?()
+                        self.onMicrophoneInterrupted?()
+                    }
+                }
+                handler?(DualSenseHIDMicrophonePacket(identity: current.identity,
+                    sessionGeneration: current.sessionGeneration ?? 0, payload: packet.opusPayload,
+                    sequence: packet.sequence, timestamp: now))
+            case .control(let frame):
+                let control = Self.controlSample(frame, identity: configuration.identity, timestamp: now)
+                inputConfigurationLock.lock()
+                guard var current = inputConfiguration, current.identity == configuration.identity else {
+                    inputConfigurationLock.unlock(); return
+                }
+                current.latestControl = control
+                inputConfiguration = current
+                let isolated = current.isolated
+                let shouldDrain = controlMailbox.append(control)
+                inputConfigurationLock.unlock()
+                if shouldDrain {
+                    DispatchQueue.main.async { [weak self] in self?.drainControls(generation: generation) }
+                }
+                if !isolated {
+                    enqueuePS(DualSensePSInputSample(isPressed: frame.buttons2 & 1 != 0,
+                        leftTriggerValue: Float(frame.leftTrigger) / 255, timestamp: now), generation: generation)
+                }
+            }
+        }
+    }
+
+    private func drainControls(generation: UInt64) {
+        guard inputGeneration == generation else { return }
+        let batch = controlMailbox.drain()
+        if batch.overflowed {
+            onPSInputInterrupted?()
+            onMicrophoneInterrupted?()
+            return
+        }
+        for sample in batch.samples {
+            guard inputGeneration == generation else { return }
+            onTrustedControlSample?(sample)
+        }
+    }
+
+    static func controlSample(_ frame: DualSenseBluetoothControlFrame,
+                              identity: DualSenseHIDEndpointIdentity, timestamp: TimeInterval) -> DualSenseHIDControlSample {
+        var pressed = Set<ControllerInput>()
+        let buttons: [(UInt8, UInt8, ControllerInput)] = [
+            (frame.buttons0, 0x10, .buttonX), (frame.buttons0, 0x20, .buttonA),
+            (frame.buttons0, 0x40, .buttonB), (frame.buttons0, 0x80, .buttonY),
+            (frame.buttons1, 0x01, .leftShoulder), (frame.buttons1, 0x02, .rightShoulder),
+            (frame.buttons1, 0x10, .options), (frame.buttons1, 0x20, .menu),
+            (frame.buttons1, 0x40, .leftThumbstickButton), (frame.buttons1, 0x80, .rightThumbstickButton),
+            (frame.buttons2, 0x01, .home), (frame.buttons2, 0x02, .touchpadButton),
+        ]
+        for (byte, mask, input) in buttons where byte & mask != 0 { pressed.insert(input) }
+        switch frame.buttons0 & 0x0f {
+        case 0: pressed.insert(.dpadUp)
+        case 1: pressed.formUnion([.dpadUp, .dpadRight])
+        case 2: pressed.insert(.dpadRight)
+        case 3: pressed.formUnion([.dpadRight, .dpadDown])
+        case 4: pressed.insert(.dpadDown)
+        case 5: pressed.formUnion([.dpadDown, .dpadLeft])
+        case 6: pressed.insert(.dpadLeft)
+        case 7: pressed.formUnion([.dpadLeft, .dpadUp])
+        default: break
+        }
+        // Triggers are not supported PTT keys; still preserve their reported
+        // digital bits for neutral-state and diagnostics consumers.
+        if frame.buttons1 & 0x04 != 0 { pressed.insert(.leftTrigger) }
+        if frame.buttons1 & 0x08 != 0 { pressed.insert(.rightTrigger) }
+        return DualSenseHIDControlSample(identity: identity, pressedInputs: pressed, timestamp: timestamp,
+            isNeutral: frame.isNeutral, microphoneMuted: frame.microphoneMuted,
+            leftTriggerValue: Float(frame.leftTrigger) / 255, rightTriggerValue: Float(frame.rightTrigger) / 255)
+    }
+
+    private func enqueuePS(_ sample: DualSensePSInputSample, generation: UInt64) {
+        inputConfigurationLock.lock()
+        guard let configuration = inputConfiguration,
+              configuration.identity.connectionGeneration == generation, !configuration.isolated else {
+            inputConfigurationLock.unlock(); return
+        }
+        let shouldDrain = psInputMailbox.append(sample)
+        inputConfigurationLock.unlock()
+        if shouldDrain {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.inputGeneration == generation, !self.isMicrophoneInputIsolated else { return }
+                for var sample in self.psInputMailbox.drain() {
+                    guard self.inputGeneration == generation, !self.isMicrophoneInputIsolated else { return }
+                    sample.allowsVoiceStart = sample.allowsVoiceStart && self.psInputMailbox.canStartVoice(sample)
+                    self.onPSInputSample?(sample)
+                    self.processHomeButton(isPressed: sample.isPressed)
+                }
+            }
+        }
+    }
+
+    private func publishHomeButton(isPressed: Bool, generation: UInt64) {
+        inputConfigurationLock.lock()
+        let allowed = inputConfiguration?.identity.connectionGeneration == generation &&
+            inputConfiguration?.isolated == false && inputConfiguration?.transport == .usb
+        inputConfigurationLock.unlock()
+        // Bluetooth value events do not retain report provenance. Use only
+        // validated raw control frames, even before a microphone session.
+        guard allowed else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.inputGeneration == generation, !self.isMicrophoneInputIsolated else { return }
+            self.processHomeButton(isPressed: isPressed)
+        }
+    }
+
+    @discardableResult
+    func beginMicrophone(identity: DualSenseHIDEndpointIdentity, sessionGeneration: UInt64,
+                         completion: @escaping (Result<Void, Error>) -> Void) -> Bool {
+        refreshMicrophoneAvailability()
+        guard microphoneAvailability.identity == identity else {
+            completion(.failure(DualSenseHIDMicrophoneError.unavailable)); return false
+        }
+        inputConfigurationLock.lock()
+        guard var configuration = inputConfiguration, configuration.identity == identity, !configuration.isolated else {
+            inputConfigurationLock.unlock()
+            completion(.failure(DualSenseHIDMicrophoneError.recoveryRequired)); return false
+        }
+        guard let control = configuration.latestControl,
+              ProcessInfo.processInfo.systemUptime - control.timestamp <= 0.25 else {
+            inputConfigurationLock.unlock()
+            completion(.failure(DualSenseHIDMicrophoneError.missingControlState)); return false
+        }
+        configuration.isolated = true
+        configuration.sessionGeneration = sessionGeneration
+        configuration.closeTimestamp = nil
+        inputConfiguration = configuration
+        psInputMailbox.reset()
+        inputConfigurationLock.unlock()
+        homeReleaseWorkItem?.cancel(); homeReleaseWorkItem = nil
+        homeButtonFilter.reset()
+        onPSInputInterrupted?()
+        return output.begin(connection: identity.connectionGeneration, session: sessionGeneration,
+                            muted: control.microphoneMuted, completion: completion)
+    }
+
+    func endMicrophone(sessionGeneration: UInt64, completion: @escaping (Result<Void, Error>) -> Void) {
+        inputConfigurationLock.lock()
+        guard var configuration = inputConfiguration, configuration.transport == .bluetooth,
+              configuration.sessionGeneration == nil || configuration.sessionGeneration == sessionGeneration else {
+            inputConfigurationLock.unlock()
+            completion(.failure(DualSenseHIDMicrophoneError.cancelled)); return
+        }
+        configuration.isolated = true
+        configuration.sessionGeneration = sessionGeneration
+        configuration.closeTimestamp = nil
+        inputConfiguration = configuration
+        psInputMailbox.reset()
+        inputConfigurationLock.unlock()
+        let identity = configuration.identity
+        output.end(connection: identity.connectionGeneration, session: sessionGeneration) { [weak self] result in
+            guard let self else { completion(.failure(DualSenseHIDMicrophoneError.cancelled)); return }
+            self.inputConfigurationLock.lock()
+            let current = self.inputConfiguration?.identity == identity &&
+                self.inputConfiguration?.sessionGeneration == sessionGeneration
+            if current, case .success = result {
+                self.inputConfiguration?.closeTimestamp = ProcessInfo.processInfo.systemUptime
+            }
+            self.inputConfigurationLock.unlock()
+            completion(current ? result : .failure(DualSenseHIDMicrophoneError.cancelled))
+        }
+    }
+
+    /// The close write alone is insufficient. Require a newer neutral control
+    /// frame, recent control continuity and at least 100 ms without audio.
+    @discardableResult
+    func finishMicrophoneIsolation(identity: DualSenseHIDEndpointIdentity) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        inputConfigurationLock.lock()
+        guard var configuration = inputConfiguration, configuration.identity == identity,
+              let closed = configuration.closeTimestamp, let control = configuration.latestControl,
+              control.isNeutral, control.timestamp >= closed, now - control.timestamp <= 0.25,
+              now - configuration.lastAudioTimestamp >= 0.1,
+              output.finishIsolation(connection: identity.connectionGeneration) else {
+            inputConfigurationLock.unlock(); return false
+        }
+        configuration.isolated = false
+        configuration.sessionGeneration = nil
+        configuration.closeTimestamp = nil
+        inputConfiguration = configuration
+        psInputMailbox.reset()
+        inputConfigurationLock.unlock()
+        return true
     }
 
     private func processHomeButton(isPressed: Bool) {
         let now = ProcessInfo.processInfo.systemUptime
-        if let event = homeButtonFilter.ingest(isPressed: isPressed, at: now) {
-            onHomeButtonChange?(event)
-        }
+        if let event = homeButtonFilter.ingest(isPressed: isPressed, at: now) { onHomeButtonChange?(event) }
         flushHomeButtonRelease(at: now)
     }
 
-    /// Streaming reports flush a due release themselves; the timer only covers
-    /// a device that stops reporting while the release is pending.
     private func flushHomeButtonRelease(at now: TimeInterval) {
-        if let event = homeButtonFilter.flush(at: now) {
-            onHomeButtonChange?(event)
-        }
+        if let event = homeButtonFilter.flush(at: now) { onHomeButtonChange?(event) }
         guard let releaseDeadline = homeButtonFilter.releaseDeadline else {
-            homeReleaseWorkItem?.cancel()
-            homeReleaseWorkItem = nil
-            return
+            homeReleaseWorkItem?.cancel(); homeReleaseWorkItem = nil; return
         }
         guard homeReleaseWorkItem == nil else { return }
-
+        let generation = inputGeneration
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
+            guard let self, self.inputGeneration == generation, !self.isMicrophoneInputIsolated else { return }
             self.homeReleaseWorkItem = nil
             self.flushHomeButtonRelease(at: ProcessInfo.processInfo.systemUptime)
         }
         homeReleaseWorkItem = workItem
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + max(0.001, releaseDeadline - now),
-            execute: workItem
-        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.001, releaseDeadline - now), execute: workItem)
     }
 
     func disconnect() {
-        homeReleaseWorkItem?.cancel()
-        homeReleaseWorkItem = nil
-        if let device {
-            if let report = offReport() {
-                _ = send(report)
-            }
-            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 0)
-            IOHIDDeviceRegisterInputReportCallback(device, buffer, 0, nil, nil)
-            buffer.deallocate()
-            IOHIDDeviceRegisterInputValueCallback(device, nil, nil)
-        }
+        let wasConnected = device != nil
+        let retiredManager = manager
+        let off = offReport()
+        inputConfigurationLock.lock()
+        inputConfiguration = nil
+        inputGeneration &+= 1
+        psInputMailbox.reset()
+        controlMailbox.reset()
+        inputConfigurationLock.unlock()
         device = nil
         transport = nil
-        if let manager {
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
-            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        }
         manager = nil
+        homeReleaseWorkItem?.cancel(); homeReleaseWorkItem = nil
         homeButtonFilter.reset()
+        output.detach(triggerOff: off) {
+            if let retiredManager { IOHIDManagerCancel(retiredManager) }
+        }
+        microphoneAvailability = .unavailable("未连接 DualSense。")
+        onMicrophoneAvailabilityChange?(microphoneAvailability)
+        if wasConnected {
+            onPSInputInterrupted?()
+            onMicrophoneInterrupted?()
+        }
     }
 
+    /// Returns whether work was accepted, not an IOHID acknowledgement.
     func applyWeaponEffect() -> Bool {
+        guard !isMicrophoneInputIsolated else { return false }
         let report: [UInt8]
         switch transport {
         case .usb:
-            report = DualSenseUSBOutputReport.weapon(
-                startPosition: RightTriggerPressState.resistanceStart,
-                endPosition: RightTriggerPressState.releasePoint,
-                strength: RightTriggerPressState.resistanceStrength
-            )
+            report = DualSenseUSBOutputReport.weapon(startPosition: RightTriggerPressState.resistanceStart,
+                endPosition: RightTriggerPressState.releasePoint, strength: RightTriggerPressState.resistanceStrength)
         case .bluetooth:
-            report = DualSenseBluetoothOutputReport.weapon(
-                startPosition: RightTriggerPressState.resistanceStart,
-                endPosition: RightTriggerPressState.releasePoint,
-                strength: RightTriggerPressState.resistanceStrength
-            )
-        case nil:
-            return false
+            report = DualSenseBluetoothOutputReport.weapon(startPosition: RightTriggerPressState.resistanceStart,
+                endPosition: RightTriggerPressState.releasePoint, strength: RightTriggerPressState.resistanceStrength)
+        case nil: return false
         }
-        let succeeded = send(report)
-        if succeeded {
-            print("[agent-deck] DualSense R2 background effect restored")
-        }
-        return succeeded
+        return output.enqueueTrigger(report)
     }
 
-    private func send(_ report: [UInt8]) -> Bool {
-        guard let device, let transport else { return false }
+    private static func write(_ report: [UInt8], to device: IOHIDDevice) -> Bool {
+        guard let reportID = report.first else { return false }
         let result = report.withUnsafeBytes { buffer in
-            guard let baseAddress = buffer.bindMemory(to: UInt8.self).baseAddress else {
-                return kIOReturnBadArgument
-            }
-            return IOHIDDeviceSetReport(
-                device,
-                kIOHIDReportTypeOutput,
-                CFIndex(report[0]),
-                baseAddress,
-                report.count
-            )
+            IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, CFIndex(reportID),
+                                 buffer.bindMemory(to: UInt8.self).baseAddress!, report.count)
         }
-        if result != kIOReturnSuccess {
-            print("[agent-deck] DualSense \(transport.rawValue) HID trigger write failed: \(result)")
-        }
+        if result != kIOReturnSuccess { print("[agent-deck] DualSense HID output failed: \(result)") }
         return result == kIOReturnSuccess
     }
 
@@ -358,4 +677,6 @@ final class DualSenseHIDOutput {
         case nil: nil
         }
     }
+
+    deinit { disconnect() }
 }

@@ -1,9 +1,62 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import JoyHarness
 
 @MainActor
 struct RemoteMicrophoneOutputTests {
+    @Test(arguments: [AVAuthorizationStatus.notDetermined, .denied, .restricted])
+    func unauthorizedWarmupAndVoiceStartNeverConstructTheAudioBackend(status: AVAuthorizationStatus) {
+        let playback = FakeMicrophonePlayback()
+        var backendCreations = 0
+        let output = RemoteMicrophoneOutput(makePlayback: {
+            try RemoteMicrophoneOutput.makeAuthorizedPlayback(authorizationStatus: { status }) {
+                backendCreations += 1
+                return playback
+            }
+        })
+        defer { output.stop() }
+
+        output.warmUp()
+        output.prepareForPress()
+        output.handle(.started)
+        output.append([1, 2, 3])
+        var releases = 0
+        output.releaseWhenFinished { releases += 1 }
+
+        #expect(backendCreations == 0)
+        #expect(playback.samples.isEmpty)
+        #expect(output.queuedSamples == 0)
+        #expect(output.failure?.contains("检查麦克风权限") == true)
+        #expect(releases == 1)
+    }
+
+    @Test func explicitAuthorizationThenRetryCanPrepareAndDeliverRemoteAudio() {
+        let playback = FakeMicrophonePlayback()
+        var authorization = AVAuthorizationStatus.notDetermined
+        var backendCreations = 0
+        let output = RemoteMicrophoneOutput(makePlayback: {
+            try RemoteMicrophoneOutput.makeAuthorizedPlayback(authorizationStatus: { authorization }) {
+                backendCreations += 1
+                return playback
+            }
+        })
+        defer { output.stop() }
+        output.warmUp()
+        #expect(backendCreations == 0)
+
+        // Only an explicit permission flow outside warmUp changes this state.
+        authorization = .authorized
+        output.warmUp()
+        output.prepareForPress()
+        output.handle(.started)
+        output.append([120, -240, 360])
+
+        #expect(backendCreations == 1)
+        #expect(playback.samples == [120, -240, 360])
+        #expect(output.failure == nil)
+    }
+
     @Test(arguments: [false, true])
     func releasesShortcutOnlyAfterBLEStopAndLastPlayback(hidReleaseFirst: Bool) async throws {
         let playback = FakeMicrophonePlayback()

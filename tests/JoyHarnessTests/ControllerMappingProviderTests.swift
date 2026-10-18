@@ -125,8 +125,15 @@ struct ControllerMappingProviderTests {
 
         for family in [ControllerFamily.joyConLeft, .joyConRight, .xiaomiRemote] {
             let defaults = ControllerMappingStore.defaultMappings(for: family, provider: .claude)
-            #expect(defaults[.leftShoulder] == .claudePreviousSession)
-            #expect(defaults[.rightShoulder] == .claudeNextSession)
+            if family == .joyConLeft {
+                #expect(defaults[.leftShoulder] == .mouseLeft)
+                #expect(defaults[.rightShoulder] == .functionModifier)
+                #expect(defaults[.joyConSL] == .claudePreviousSession)
+                #expect(defaults[.joyConSR] == .claudeNextSession)
+            } else {
+                #expect(defaults[.leftShoulder] == .claudePreviousSession)
+                #expect(defaults[.rightShoulder] == .claudeNextSession)
+            }
             #expect(defaults[.rightTrigger] == .disabled)
         }
         for provider in HarnessProviderID.builtIns + [HarnessProviderID(rawValue: "custom.test")] where provider != .claude {

@@ -192,7 +192,9 @@ struct ControllerMappingMigrationTests {
         #expect(store.availableInputs == [.buttonA, .leftShoulder])
 
         store.setConnectedDevices([remote])
-        #expect(store.displayedInputs(for: .joyConLeft) == ControllerInput.availableInputs(for: .joyConLeft))
+        // Rail buttons require a connected endpoint with unambiguous HID reports.
+        #expect(store.displayedInputs(for: .joyConLeft) == ControllerInput.availableInputs(for: .joyConLeft)
+            .subtracting([.joyConSL, .joyConSR]))
     }
 
     @Test

@@ -64,8 +64,12 @@ struct DashboardConnectionDetails: View {
                     value: presentation.isFresh ? presentation.voiceInputDescription : presentation.unknown
                 )
                 DashboardDetailRow(
-                    label: L10n.text("录音归属", "Recording Owner"),
+                    label: L10n.text("Codex 语音", "Codex Voice"),
                     value: L10n.text("由 Codex Desktop 管理", "Managed by Codex Desktop")
+                )
+                DashboardDetailRow(
+                    label: L10n.text("AI 语音", "AI Voice"),
+                    value: L10n.text("在 Joy Harness 设置中配置", "Configure in Joy Harness Settings")
                 )
                 Button(L10n.text("打开声音输入设置", "Open Sound Input Settings")) { DashboardSystemSettings.open(.sound) }
                     .buttonStyle(.link)

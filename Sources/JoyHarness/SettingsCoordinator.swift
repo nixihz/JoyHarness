@@ -9,6 +9,7 @@ final class SettingsCoordinator: ObservableObject {
         case controllerMapping
         case slotShortcuts
         case nativeMode
+        case aiVoice
 
         var id: String { rawValue }
 
@@ -24,6 +25,8 @@ final class SettingsCoordinator: ObservableObject {
                 L10n.text("槽位快捷键", "Slot Shortcuts")
             case .nativeMode:
                 L10n.text("原生模式", "Native Mode")
+            case .aiVoice:
+                L10n.text("AI 语音", "AI Voice")
             }
         }
 
@@ -39,6 +42,8 @@ final class SettingsCoordinator: ObservableObject {
                 "keyboard"
             case .nativeMode:
                 "gamecontroller.fill"
+            case .aiVoice:
+                "mic.fill"
             }
         }
     }

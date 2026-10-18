@@ -1278,9 +1278,10 @@ struct JoyHarnessTests {
 
     @Test
     func mouseStickUsesADeadZoneAndAcceleratesTowardTheEdge() {
-        #expect(MouseBridge.pointerVelocity(x: 0.1, y: 0.1) == .zero)
+        #expect(MouseBridge.pointerVelocity(x: 0.06, y: 0.06) == .zero)
+        #expect(MouseBridge.pointerVelocity(x: 0.1, y: 0) == .zero)
 
-        let precision = MouseBridge.pointerVelocity(x: 0.2, y: 0)
+        let precision = MouseBridge.pointerVelocity(x: 0.12, y: 0)
         let medium = MouseBridge.pointerVelocity(x: 0.5, y: 0)
         let maximum = MouseBridge.pointerVelocity(x: 1, y: 0)
         #expect(precision.x > 0)
@@ -1296,8 +1297,8 @@ struct JoyHarnessTests {
         let fast = MouseBridge.pointerVelocity(x: 0.75, y: 0).x
         let maximum = MouseBridge.pointerVelocity(x: 1, y: 0).x
 
-        #expect(quarter > 0 && quarter <= 20)
-        #expect(precisionEdge > quarter && precisionEdge <= 45)
+        #expect(quarter >= 20 && quarter <= 45)
+        #expect(precisionEdge > quarter && precisionEdge <= 90)
         #expect(fast >= 450)
         #expect(abs(maximum - 1_250) < 0.000_001)
     }
@@ -1919,8 +1920,8 @@ struct JoyHarnessTests {
         #expect(sample.snapshot.buttons[.leftShoulder] == true)
         #expect(sample.snapshot.buttons[.buttonX] == true) // Up arrow
         #expect(sample.snapshot.buttons[.buttonA] == true) // Left arrow
-        #expect(sample.snapshot.buttons[.buttonB] == nil)
-        #expect(sample.snapshot.buttons[.buttonY] == nil)
+        #expect(sample.snapshot.buttons[.buttonB] == false)
+        #expect(sample.snapshot.buttons[.buttonY] == false)
     }
 
     @Test
@@ -1966,6 +1967,7 @@ struct JoyHarnessTests {
 
     @Test
     func singleJoyConHIDShouldersSelectTheConfiguredGripPair() {
+        let shoulders: Set<ControllerInput> = [.leftShoulder, .rightShoulder, .joyConSL, .joyConSR]
         let snapshot = JoyConHIDShoulderSnapshot(
             sl: true,
             sr: false,
@@ -1978,7 +1980,7 @@ struct JoyHarnessTests {
                 side: side,
                 orientation: .horizontal,
                 snapshot: snapshot
-            ) == [
+            ).filter { shoulders.contains($0.key) } == [
                 .leftShoulder: true,
                 .rightShoulder: false,
             ])
@@ -1987,17 +1989,21 @@ struct JoyHarnessTests {
             side: .left,
             orientation: .vertical,
             snapshot: snapshot
-        ) == [
+        ).filter { shoulders.contains($0.key) } == [
             .leftShoulder: false,
             .rightShoulder: true,
+            .joyConSL: true,
+            .joyConSR: false,
         ])
         #expect(JoyConSingleShoulderAdapter.buttons(
             side: .right,
             orientation: .vertical,
             snapshot: snapshot
-        ) == [
+        ).filter { shoulders.contains($0.key) } == [
             .leftShoulder: true,
             .rightShoulder: false,
+            .joyConSL: true,
+            .joyConSR: false,
         ])
     }
 
@@ -2034,11 +2040,15 @@ struct JoyHarnessTests {
         )
 
         #expect(projected.snapshot.buttons == [
-            .buttonA: true,
+            .buttonA: false, .buttonB: false, .buttonX: false, .buttonY: false,
             .leftShoulder: true,
             .rightShoulder: false,
+            .joyConSL: false,
+            .joyConSR: true,
         ])
-        #expect(projected.availableInputs == [.buttonA, .leftShoulder, .rightShoulder])
+        #expect(projected.availableInputs == [
+            .buttonA, .buttonB, .buttonX, .buttonY, .leftShoulder, .rightShoulder, .joyConSL, .joyConSR,
+        ])
         #expect(projected.snapshot.primaryStick == sample.snapshot.primaryStick)
         #expect(projected.snapshot.secondaryStick == .neutral)
 
@@ -2072,7 +2082,7 @@ struct JoyHarnessTests {
             side: .left
         )
         #expect(left.snapshot.buttons == [
-            .dpadUp: true,
+            .dpadUp: false, .dpadDown: false, .dpadLeft: false, .dpadRight: false,
             .leftShoulder: false,
             .leftTrigger: true,
         ])
@@ -2096,7 +2106,7 @@ struct JoyHarnessTests {
             side: .right
         )
         #expect(right.snapshot.buttons == [
-            .buttonA: true,
+            .buttonA: false, .buttonB: false, .buttonX: false, .buttonY: false,
             .rightShoulder: true,
             .rightTrigger: false,
         ])
@@ -2592,10 +2602,12 @@ struct JoyHarnessTests {
             #expect(!available.contains(.functionRightStickLeft))
             #expect(!available.contains(.leftTrigger))
             #expect(!available.contains(.rightTrigger))
-            #expect(defaults[.buttonA] == .mouseLeft)
-            #expect(defaults[.buttonB] == .mouseRight)
-            #expect(defaults[.leftShoulder] == .previousSlot)
-            #expect(defaults[.rightShoulder] == .nextSlot)
+            if family == .joyConRight {
+                #expect(defaults[.buttonA] == .mouseLeft)
+                #expect(defaults[.buttonB] == .mouseRight)
+                #expect(defaults[.leftShoulder] == .previousSlot)
+                #expect(defaults[.rightShoulder] == .nextSlot)
+            }
             #expect(defaults[.leftTrigger] == .disabled)
             #expect(defaults[.menu] == .pushToTalk)
             #expect(defaults[.functionRightStickLeft] == .disabled)
@@ -2796,7 +2808,7 @@ struct JoyHarnessTests {
             #expect(input.availableActions.contains(.functionModifier))
         }
 
-        let bridge = ButtonBridge { input in
+        let bridge = ButtonBridge(controllerFamily: .joyConLeft) { input in
             switch input {
             case .leftShoulder: .functionModifier
             case .functionButtonA: .approve
@@ -3576,6 +3588,7 @@ struct JoyHarnessTests {
         func report(id: UInt8, length: Int, setting index: Int? = nil) -> [UInt8] {
             var bytes = [UInt8](repeating: 0, count: length)
             bytes[0] = id
+            if id == 0x31, length > 1 { bytes[1] = 0x01 }
             if let index { bytes[index] = 0x01 }
             return bytes
         }

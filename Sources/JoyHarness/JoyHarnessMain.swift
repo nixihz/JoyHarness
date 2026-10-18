@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import SwiftUI
 
@@ -45,6 +46,9 @@ struct JoyHarnessApp: App {
                 .exposeOpenMainWindow { [runtime = appDelegate.runtime] openMainWindow in
                     runtime.mainWindowOpener = openMainWindow
                 }
+                .background(AIVoiceSettingsOpener(coordinator: settingsCoordinator) { opener in
+                    appDelegate.runtime.aiVoiceSettingsOpener = opener
+                })
         }
         .defaultSize(width: DashboardStyle.windowWidth, height: DashboardStyle.windowHeight)
         .windowResizability(.contentSize)
@@ -76,11 +80,16 @@ struct JoyHarnessApp: App {
                 updater: appDelegate.updater,
                 scrollDirectionSettings: appDelegate.runtime.scrollDirectionSettings,
                 pointerSensitivitySettings: appDelegate.runtime.pointerSensitivitySettings,
+                motionJump: appDelegate.runtime.motionJump,
                 nativeModeSettings: appDelegate.runtime.nativeGamepadAppSettings,
                 harnessProviderSettings: appDelegate.runtime.harnessProviderSettings,
                 settingsCoordinator: settingsCoordinator,
                 slotShortcutSettings: appDelegate.runtime.slotShortcutSettings,
-                edgeLightSettings: appDelegate.runtime.edgeLightSettings
+                edgeLightSettings: appDelegate.runtime.edgeLightSettings,
+                aiVoiceSettings: appDelegate.runtime.aiVoiceSettings,
+                aiVoiceSession: appDelegate.runtime.aiVoice,
+                aiVoiceInputIssue: { appDelegate.runtime.aiVoiceInputIssue },
+                dualSenseMicrophone: appDelegate.runtime.dualSenseMicrophone
             )
             .environment(\.locale, languageSettings.locale)
         }
@@ -116,6 +125,15 @@ final class JoyHarnessAppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard runtime.dualSenseMicrophoneNeedsShutdown else { return .terminateNow }
+        Task { @MainActor in
+            await runtime.prepareMicrophoneForTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     /// SwiftUI leaves a Dock click doing nothing once the Dashboard is
     /// closed, since Joy Harness keeps running; reopen it here.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -139,6 +157,16 @@ final class JoyHarnessRuntime {
     let mappings: ControllerMappingStore
     let scrollDirectionSettings: ScrollDirectionSettings
     let pointerSensitivitySettings: PointerSensitivitySettings
+    let motionJump = MotionJumpCoordinator()
+    let aiVoiceSettings = AIVoiceSettings()
+    let externalDualSenseAudio = DualSenseExternalAudio()
+    private(set) lazy var aiVoice = AIVoiceSession(settings: aiVoiceSettings)
+    private lazy var aiVoiceOverlay = AIVoiceOverlay(session: aiVoice)
+    var aiVoiceSettingsOpener: (() -> Void)?
+    var aiVoiceInputIssue: String? { buttons.aiVoiceInputIssue }
+    private var aiVoiceObservers: [NSObjectProtocol] = []
+    private var aiVoiceLockObservers: [NSObjectProtocol] = []
+    private var aiVoiceSystemSuspended = false
     let nativeGamepadAppSettings: NativeGamepadAppSettings
     let harnessProviderSettings: HarnessProviderSettings
     /// Opens a new Dashboard window. The main window installs it because only
@@ -166,6 +194,11 @@ final class JoyHarnessRuntime {
     private let xiaomiRemote = XiaomiRemoteHIDManager()
     private let xiaomiVoice = XiaomiRemoteVoice()
     private let remoteMicrophoneOutput = RemoteMicrophoneOutput()
+    private let dualSenseAudioOutput = DualSenseSystemAudioOutput()
+    private let dualSenseAudioDecoder = DualSenseMicrophoneDecodeQueue()
+    private(set) lazy var dualSenseMicrophone = makeDualSenseMicrophone()
+    private lazy var dualSenseMicrophoneOverlay = DualSenseMicrophoneOverlay(session: dualSenseMicrophone)
+    private var pendingMicrophoneNativeMode: String?
     private var current: PadState = .idle
     private var controllerFamily: ControllerFamily = .generic
     private var lastStatusControllerID: String?
@@ -292,14 +325,37 @@ final class JoyHarnessRuntime {
         checkFrontmostAppMode()
 
         print("[agent-deck] physical Codex Micro mode; task metadata enabled")
-        print("[agent-deck] ready - left stick=pointer, right stick=scroll, L3=speed boost, touchpad=slow slide, LT+left stick=scroll, LT+face=Codex actions")
+        print("[agent-deck] ready - left stick=pointer, right stick=scroll, L3=speed boost, touchpad=slow slide, LT+left stick=speed boost (solo Joy-Con=scroll), LT+face=Codex actions")
     }
 
     private func registerSlotHotkeys() {
         slotShortcutSettings.errors = slotHotkeys.start(shortcuts: slotShortcutSettings.shortcuts)
     }
 
+    var dualSenseMicrophoneNeedsShutdown: Bool { dualSenseMicrophone.isEngaged }
+
+    func prepareMicrophoneForTermination() async {
+        pendingMicrophoneNativeMode = nil
+        aiVoiceSystemSuspended = true
+        dualSenseMicrophone.stop(reason: "Joy Harness 正在退出，已停止供音。")
+        let deadline = ProcessInfo.processInfo.systemUptime + 2.1
+        while dualSenseMicrophone.isEngaged, dualSenseMicrophone.phase != .fault,
+              ProcessInfo.processInfo.systemUptime < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
     func stopHotkeys() {
+        dualSenseMicrophone.stop(reason: "Joy Harness 正在退出，已停止供音。")
+        dualSenseMicrophoneOverlay.hide()
+        aiVoice.stop()
+        externalDualSenseAudio.stop()
+        aiVoiceOverlay.hide()
+        for token in aiVoiceObservers { NSWorkspace.shared.notificationCenter.removeObserver(token) }
+        aiVoiceObservers.removeAll()
+        for token in aiVoiceLockObservers { DistributedNotificationCenter.default().removeObserver(token) }
+        aiVoiceLockObservers.removeAll()
+        motionJump.stop()
         microMirror.stop()
         edgeLights.stop()
         slotHotkeys.stop()
@@ -351,7 +407,7 @@ final class JoyHarnessRuntime {
     private func configureBridge() {
         buttons.keyHandler = { [weak self] key, action in
             guard let self else { return false }
-            guard action == 0 || (self.isCodexHarnessActive && !self.harnessSwitcher.isPresented) else {
+            guard action == 0 || (self.isCodexHarnessActive && !self.harnessSwitcher.isPresented && !self.aiVoice.interceptsInput) else {
                 return false
             }
             return self.rp2040.sendKey(key, action: action)
@@ -359,27 +415,30 @@ final class JoyHarnessRuntime {
         buttons.joystickHandler = { [weak self] angle, distance in
             guard let self else { return false }
             if distance > 0,
-               (!self.isCodexHarnessActive || self.harnessSwitcher.isPresented) {
+               (!self.isCodexHarnessActive || self.harnessSwitcher.isPresented || self.aiVoice.interceptsInput) {
                 return true
             }
             return self.rp2040.sendJoystick(angle: angle, distance: distance)
         }
         buttons.leftStickHandler = { [weak self] x, y, scrolling in
-            guard let self, !self.harnessSwitcher.isPresented else { return }
+            guard let self, !self.harnessSwitcher.isPresented, !self.aiVoice.interceptsInput else { return }
             self.mouse.updateStick(x: x, y: y, scrolling: scrolling)
         }
         buttons.rightStickHandler = { [weak self] x, y in
-            guard let self, !self.harnessSwitcher.isPresented else { return }
+            guard let self, !self.harnessSwitcher.isPresented, !self.aiVoice.interceptsInput else { return }
             self.mouse.updateScrollStick(x: x, y: y)
         }
         buttons.mouseButtonHandler = { [weak self] button, pressed in
+            guard !pressed || self?.aiVoice.interceptsInput != true else { return }
             self?.mouse.setMouseButton(button, pressed: pressed)
         }
         buttons.systemKeyHandler = { [weak self] key, pressed in
+            guard !pressed || self?.aiVoice.interceptsInput != true else { return }
             self?.mouse.setSystemKey(key, pressed: pressed)
         }
         buttons.textInputHandler = { [weak self] text in
-            self?.mouse.typeText(text) ?? false
+            guard let self, !self.aiVoice.interceptsInput else { return false }
+            return self.mouse.typeText(text)
         }
         buttons.mouseSpeedBoostHandler = { [weak self] active in
             self?.mouse.setSpeedBoostActive(active)
@@ -388,12 +447,31 @@ final class JoyHarnessRuntime {
             self?.mouse.setPrecisionActive(active)
         }
         buttons.touchpadPointerHandler = { [weak self] x, y in
-            guard let self, !self.harnessSwitcher.isPresented else { return }
+            guard let self, !self.harnessSwitcher.isPresented, !self.aiVoice.interceptsInput else { return }
             self.mouse.applyPointerDelta(x: x, y: y)
+        }
+        buttons.motionJumpInputHandler = { [weak self] id, input in
+            guard let self else { return false }
+            // Keep physical L2 edges flowing so a release during voice also
+            // clears motion ownership. Capture may suppress starts, not edges.
+            var input = input
+            input.allowsGesture = input.allowsGesture && !self.aiVoice.interceptsInput
+            return self.motionJump.handleInput(deviceID: id, input: input)
+        }
+        buttons.motionJumpCancelHandler = { [weak self] id in self?.motionJump.cancel(deviceID: id) }
+        buttons.motionJumpIsCapturing = { [weak self] id in self?.motionJump.isCapturing(deviceID: id) ?? false }
+        motionJump.suspendDevice = { [weak self] id in self?.buttons.suspendMotionJumpDevice(id: id) }
+        motionJump.capturePointerTarget = { [weak self] in self?.mouse.captureMotionJumpTarget() }
+        motionJump.canMovePointer = { [weak self] in self?.mouse.canPerformMotionJump ?? false }
+        motionJump.jumpPointer = { [weak self] quadrant, target in
+            self?.mouse.performMotionJump(to: quadrant, target: target) ?? false
         }
         harnessSwitcher.bind(to: buttons) { [weak self] in
             self?.presentHarnessSwitcher()
         }
+        configureAIVoice()
+        configureDualSenseMicrophone()
+        configureExternalDualSenseAudio()
         buttons.openApplicationTargetProvider = { [weak self] family, input in
             self?.mappings.openApplicationTarget(for: input, family: family)
         }
@@ -412,10 +490,12 @@ final class JoyHarnessRuntime {
             self?.buttons.selectController(id: id)
         }
         buttons.recordedShortcutHandler = { [weak self] shortcut, pressed in
+            guard !pressed || self?.aiVoice.interceptsInput != true else { return }
             self?.mouse.setRecordedShortcut(shortcut, pressed: pressed)
         }
         buttons.openApplicationHandler = { [weak self] bundleIdentifier in
-            self?.openApplication(bundleIdentifier: bundleIdentifier) ?? false
+            guard let self, !self.aiVoice.interceptsInput else { return false }
+            return self.openApplication(bundleIdentifier: bundleIdentifier)
         }
         buttons.rightTriggerFeedbackHandler = { [weak self] family, value in
             guard let self else { return }
@@ -432,6 +512,14 @@ final class JoyHarnessRuntime {
         }
         adaptiveTrigger.onHomeButtonChange = { [weak self] isPressed in
             self?.buttons.handleRawHomeButton(for: .dualSense, isPressed: isPressed)
+        }
+        adaptiveTrigger.onPSInputSample = { [weak self] sample in
+            guard let self, !(self.externalDualSenseAudio.available && self.externalDualSenseAudio.connected) else { return }
+            self.buttons.handleDualSensePSInput(sample)
+        }
+        adaptiveTrigger.onPSInputInterrupted = { [weak self] in
+            guard let self, !(self.externalDualSenseAudio.available && self.externalDualSenseAudio.connected) else { return }
+            self.buttons.interruptDualSensePSInput()
         }
         buttons.onSlotSelected = { [weak self] index in
             guard let self else { return }
@@ -462,6 +550,7 @@ final class JoyHarnessRuntime {
         }
         buttons.onControllerSetChange = { [weak self] controllers in
             guard let self else { return }
+            self.motionJump.updateControllers(controllers)
             let dualSense = controllers.first {
                 ControllerFamily.detect(controller: $0) == .dualSense
             }
@@ -590,6 +679,207 @@ final class JoyHarnessRuntime {
         }
     }
 
+    private func makeDualSenseMicrophone() -> DualSenseMicrophoneSession {
+        let output = dualSenseAudioOutput
+        let decoder = dualSenseAudioDecoder
+        let hid = adaptiveTrigger.microphoneHID
+        return DualSenseMicrophoneSession(services: DualSenseMicrophoneServices(
+            requestPermission: { done in
+                Task { @MainActor in done(await AIVoiceAudioRecorder.requestMicrophonePermission()) }
+            },
+            prepareOutput: { generation, done in output.prepare(generation: generation, completion: done) },
+            startHardware: { identity, generation, done in
+                decoder.begin(identity: identity, generation: generation)
+                return hid.beginMicrophone(identity: identity, sessionGeneration: generation, completion: done)
+            },
+            stopHardware: { generation, done in hid.endMicrophone(sessionGeneration: generation, completion: done) },
+            finishIsolation: { hid.finishMicrophoneIsolation(identity: $0) },
+            append: { pcm, generation in output.append(pcm, generation: generation) },
+            drain: { generation, cutoff, done in
+                decoder.freeze(generation: generation, at: cutoff) {
+                    output.drain(generation: generation, completion: done)
+                }
+            },
+            stopOutput: { generation in
+                decoder.cancel(generation: generation)
+                output.stop(generation: generation)
+            },
+            lastPacketTime: { decoder.lastPacketTime },
+            setIsolation: { [weak self] isolated in
+                guard let self else { return }
+                self.buttons.setDualSenseMicrophoneIsolation(isolated)
+                self.adaptiveTrigger.setMicrophoneIsolation(isolated)
+                self.motionJump.setDualSenseMicrophoneIsolation(isolated)
+                if isolated { self.harnessSwitcher.cancel() }
+            },
+            sendPTT: { [weak self] pressed in
+                guard let self, !pressed || self.isCodexHarnessActive else { return false }
+                return self.rp2040.sendKey("ACT10", action: pressed ? 1 : 0)
+            },
+            startIssue: { [weak self] in
+                guard let self else { return "应用正在退出。" }
+                guard !self.externalDualSenseAudio.available else { return "当前使用 DualSense Audio 驱动，请直接在语音应用开始录音。" }
+                guard DualSenseMicrophoneFeature.isEnabled else { return "系统麦克风仍在开发验证阶段。" }
+                guard self.operationMode == .mapping, !self.aiVoiceSystemSuspended else {
+                    return "请返回映射模式并解锁屏幕后开始供音。"
+                }
+                guard !self.aiVoice.interceptsInput else { return "请先结束 Joy Harness 内部 AI 语音。" }
+                guard DualSenseSystemAudioOutput.installed else { return "请先安装或更新 Joy Harness 麦克风组件。" }
+                return nil
+            },
+            pttIssue: { [weak self] in
+                guard let self, DualSenseMicrophoneFeature.isEnabled,
+                      self.isCodexHarnessActive, self.rp2040.isConnected,
+                      self.operationMode == .mapping, !self.harnessSwitcher.isPresented,
+                      !self.aiVoice.interceptsInput, !self.aiVoiceSystemSuspended,
+                      hid.microphoneAvailability.identity != nil,
+                      self.buttons.connectedDevices.filter({ $0.family == .dualSense }).count == 1 else {
+                    return "请切换到 Codex Harness 并连接 RP2040。"
+                }
+                return nil
+            },
+            pttInputs: { [weak self] in
+                guard let self else { return [] }
+                return Set(ControllerInput.allCases.filter {
+                    DualSenseMicrophoneSession.supportedPTTInputs.contains($0) &&
+                        self.mappings.action(for: $0, family: .dualSense) == .pushToTalk
+                })
+            },
+            permissionGranted: { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
+        ))
+    }
+
+    private func configureDualSenseMicrophone() {
+        let session = dualSenseMicrophone
+        let hid = adaptiveTrigger.microphoneHID
+        hid.onMicrophoneAvailabilityChange = { [weak session] in session?.updateAvailability($0) }
+        hid.onTrustedControlSample = { [weak self, weak session] sample in
+            guard self?.externalDualSenseAudio.available != true else { return }
+            session?.handleControl(sample)
+        }
+        hid.onMicrophonePacket = { [decoder = dualSenseAudioDecoder] in decoder.receive($0) }
+        hid.onMicrophoneInterrupted = { [weak self, weak session] in
+            guard self?.externalDualSenseAudio.available != true else { return }
+            session?.recoverUnexpectedAudio()
+        }
+        dualSenseAudioDecoder.onPCM = { [weak session] pcm, generation, time in
+            session?.receivePCM(pcm, generation: generation, timestamp: time)
+        }
+        dualSenseAudioDecoder.onFailure = { [weak session] generation, message in
+            session?.outputFailed(generation: generation, message: message)
+        }
+        dualSenseAudioOutput.onFailure = dualSenseAudioDecoder.onFailure
+        buttons.shouldRouteDualSensePTT = { [weak self, weak session] input in
+            guard let self, let session else { return false }
+            return DualSenseMicrophoneFeature.isEnabled && session.pttEnabled &&
+                self.isCodexHarnessActive && hid.microphoneAvailability.identity != nil &&
+                DualSenseMicrophoneSession.supportedPTTInputs.contains(input) &&
+                self.mappings.action(for: input, family: .dualSense) == .pushToTalk
+        }
+        session.onStateChange = { [weak self] in
+            guard let self else { return }
+            self.dualSenseMicrophoneOverlay.update()
+            if self.dualSenseMicrophone.phase == .idle, let note = self.pendingMicrophoneNativeMode {
+                self.pendingMicrophoneNativeMode = nil
+                self.setOperationMode(.native, note: note)
+            }
+        }
+        session.updateAvailability(hid.microphoneAvailability)
+    }
+
+    private func configureExternalDualSenseAudio() {
+        externalDualSenseAudio.onState = { [weak self] available, capturing in
+            guard let self else { return }
+            self.buttons.setExternalAudioState(available: available, capturing: capturing)
+            self.adaptiveTrigger.setMicrophoneIsolation(capturing)
+            self.motionJump.setDualSenseMicrophoneIsolation(capturing)
+            if capturing { self.harnessSwitcher.cancel() }
+        }
+        externalDualSenseAudio.onControl = { [weak self] effect in
+            guard let self else { return }
+            if self.aiVoiceSystemSuspended {
+                self.buttons.interruptDualSensePSInput(); return
+            }
+            self.buttons.handleExternalAudioControl(effect)
+        }
+        externalDualSenseAudio.start()
+    }
+
+    private func configureAIVoice() {
+        buttons.aiVoiceEnabled = aiVoiceSettings.isEnabled
+        buttons.onAIVoiceBegin = { [weak self] in
+            guard let self else { return }
+            guard !self.aiVoiceSystemSuspended, !self.dualSenseMicrophone.isEngaged else {
+                self.buttons.cancelAIVoiceInput(); return
+            }
+            self.aiVoice.begin()
+        }
+        buttons.onAIVoiceEnd = { [weak self] in self?.aiVoice.release() }
+        buttons.onAIVoiceRelease = { [weak self] timestamp in self?.aiVoice.release(at: timestamp) }
+        buttons.onAIVoiceCancel = { [weak self] in
+            guard let self, self.aiVoice.interceptsInput else { return }
+            self.aiVoice.cancel(reason: L10n.text("手柄输入已中断，本次未发送。", "Controller input was interrupted. Nothing was sent."))
+        }
+        aiVoice.onUserCancel = { [weak self] in self?.buttons.cancelAIVoiceInput() }
+        aiVoice.onPresentationChange = { [weak self] in self?.aiVoiceOverlay.update() }
+        aiVoice.onCaptureChange = { [weak self] capturing in
+            guard let self else { return }
+            self.buttons.setAIVoiceCaptureActive(capturing)
+            self.mouse.updateStick(x: 0, y: 0, scrolling: false)
+            self.mouse.updateScrollStick(x: 0, y: 0)
+            if capturing { self.harnessSwitcher.cancel() }
+        }
+        aiVoiceOverlay.onOpenSettings = { [weak self] in self?.aiVoiceSettingsOpener?() }
+        aiVoiceSettings.onChange = { [weak self] in
+            guard let self else { return }
+            self.aiVoice.settingsChanged()
+            self.buttons.aiVoiceEnabled = self.aiVoiceSettings.isEnabled
+        }
+        let switcherInput = buttons.inputInterceptor
+        buttons.inputInterceptor = { [weak self] input, pressed in
+            if switcherInput?(input, pressed) == true { return true }
+            return self?.aiVoice.handleInput(input, pressed: pressed) ?? false
+        }
+        let switcherStick = buttons.overlayStickHandler
+        buttons.overlayStickHandler = { [weak self] x, y in
+            if self?.aiVoice.interceptsInput == true { return true }
+            return switcherStick?(x, y) ?? false
+        }
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            aiVoiceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.aiVoiceSystemSuspended = true
+                    self?.dualSenseMicrophone.interrupt(reason: "系统会话已暂停，已停止系统麦克风供音。")
+                    self?.buttons.cancelAIVoiceInput()
+                    self?.aiVoice.cancel(reason: L10n.text("系统会话已暂停，语音操作已取消。", "System session paused. Voice command cancelled."))
+                }
+            })
+        }
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
+            aiVoiceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+                    self?.aiVoiceSystemSuspended = session?["CGSSessionScreenIsLocked"] as? Bool == true
+                }
+            })
+        }
+        aiVoiceLockObservers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.aiVoiceSystemSuspended = true
+                self?.dualSenseMicrophone.interrupt(reason: "屏幕已锁定，已停止系统麦克风供音。")
+                self?.buttons.cancelAIVoiceInput()
+                self?.aiVoice.cancel(reason: L10n.text("屏幕已锁定，语音操作已取消。", "Screen locked. Voice command cancelled."))
+            }
+        })
+        aiVoiceLockObservers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.aiVoiceSystemSuspended = false }
+        })
+    }
+
     /// Brings Joy Harness forward with its Dashboard, reopening it when it was
     /// closed. The gamepad pointer can open settings from there.
     @discardableResult
@@ -621,6 +911,7 @@ final class JoyHarnessRuntime {
     /// Called after the active Harness is stored, whether it changed through
     /// the switcher, the settings picker, frontmost-app matching or disabling.
     private func applyActiveHarness(_ providerID: HarnessProviderID?) {
+        if dualSenseMicrophone.isPTTSession { dualSenseMicrophone.stop(reason: "Harness 已变化，已停止联动供音。") }
         // Held outputs and radial input belong to the previous mapping profile.
         buttons.suspendMappedOutputs()
         _ = rp2040.sendJoystick(angle: 0, distance: 0)
@@ -646,7 +937,12 @@ final class JoyHarnessRuntime {
         ) {
             _ = harnessProviderSettings.select(matchedProvider.id)
         }
-        guard nativeGamepadAppSettings.autoSwitchEnabled else { return }
+        guard nativeGamepadAppSettings.autoSwitchEnabled else {
+            if pendingMicrophoneNativeMode?.hasPrefix("auto-switch:") == true {
+                pendingMicrophoneNativeMode = nil
+            }
+            return
+        }
 
         let matches = nativeGamepadAppSettings.matches(runningApp: app)
         if matches, let bundleID, bundleID == manuallySuppressedNativeBundleID {
@@ -654,6 +950,9 @@ final class JoyHarnessRuntime {
         }
         if !matches {
             manuallySuppressedNativeBundleID = nil
+            if pendingMicrophoneNativeMode?.hasPrefix("auto-switch:") == true {
+                pendingMicrophoneNativeMode = nil
+            }
         }
         guard let nextMode = OperationModeAutoSwitchPolicy.targetMode(
             currentMode: operationMode,
@@ -692,11 +991,23 @@ final class JoyHarnessRuntime {
     }
 
     private func handleOperationModeChanged(_ mode: ControllerOperationMode) {
+        if mode == .mapping { pendingMicrophoneNativeMode = nil }
         guard mode != operationMode else { return }
+        if mode == .native, dualSenseMicrophone.isEngaged {
+            manuallyForcedNativeMode = true
+            // ControllerHub already changed its sessions before notifying us.
+            // Restore mapping until the microphone's close barrier completes.
+            buttons.setOperationMode(operationMode)
+            pendingMicrophoneNativeMode = "mode-change: native"
+            dualSenseMicrophone.stop(reason: "正在停止麦克风，以进入原生手柄模式。")
+            return
+        }
+        if mode == .native { aiVoice.cancel() }
         manuallyForcedNativeMode = mode == .native
         let previousMode = operationMode
         operationMode = mode
         xiaomiRemote.setOperationMode(mode)
+        motionJump.setOperationMode(mode)
         xiaomiVoice.enabled = mode == .mapping
         warmUpRemoteMicrophoneIfReady()
         if previousMode == .native && mode == .mapping {
@@ -707,9 +1018,17 @@ final class JoyHarnessRuntime {
     }
 
     func setOperationMode(_ mode: ControllerOperationMode, note: String) {
+        if mode == .mapping { pendingMicrophoneNativeMode = nil }
         guard mode != operationMode else { return }
+        if mode == .native, dualSenseMicrophone.isEngaged {
+            pendingMicrophoneNativeMode = note
+            dualSenseMicrophone.stop(reason: "正在停止麦克风，以进入原生手柄模式。")
+            return
+        }
+        if mode == .native { aiVoice.cancel() }
         let previousMode = operationMode
         operationMode = mode
+        motionJump.setOperationMode(mode)
         xiaomiRemote.setOperationMode(mode)
         xiaomiVoice.enabled = mode == .mapping
         warmUpRemoteMicrophoneIfReady()

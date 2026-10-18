@@ -39,6 +39,8 @@ final class AdaptiveTriggerFeedback {
     private weak var trigger: GCDualSenseAdaptiveTrigger?
     private var pressState = RightTriggerPressState()
     private let hidOutput = DualSenseHIDOutput()
+    var microphoneHID: DualSenseHIDOutput { hidOutput }
+    private var microphoneIsolated = false
     private var backgroundEffectApplied = false
     private var observers: [NSObjectProtocol] = []
 
@@ -46,6 +48,16 @@ final class AdaptiveTriggerFeedback {
     var onHomeButtonChange: ((Bool) -> Void)? {
         get { hidOutput.onHomeButtonChange }
         set { hidOutput.onHomeButtonChange = newValue }
+    }
+
+    var onPSInputSample: ((DualSensePSInputSample) -> Void)? {
+        get { hidOutput.onPSInputSample }
+        set { hidOutput.onPSInputSample = newValue }
+    }
+
+    var onPSInputInterrupted: (() -> Void)? {
+        get { hidOutput.onPSInputInterrupted }
+        set { hidOutput.onPSInputInterrupted = newValue }
     }
 
     var isAvailable: Bool { trigger != nil }
@@ -76,25 +88,31 @@ final class AdaptiveTriggerFeedback {
     }
 
     func startHIDInputMonitoring() {
-        _ = hidOutput.connect()
+        _ = hidOutput.connectIfNeeded()
+    }
+
+    func setMicrophoneIsolation(_ isolated: Bool) {
+        microphoneIsolated = isolated
+        backgroundEffectApplied = false
+        if !isolated { applyGameControllerEffect() }
     }
 
     func attach(_ controller: GCController?) {
-        trigger?.setModeOff()
+        if !microphoneIsolated { trigger?.setModeOff() }
         trigger = nil
         pressState = RightTriggerPressState()
 
         guard let dualSense = controller?.extendedGamepad as? GCDualSenseGamepad else { return }
         let rightTrigger = dualSense.rightTrigger
         trigger = rightTrigger
-        _ = hidOutput.connect()
+        _ = hidOutput.connectIfNeeded()
         applyGameControllerEffect()
         applyBackgroundEffectIfNeeded()
         print("[agent-deck] DualSense R2 adaptive feedback ready")
     }
 
     func update(value: Float) {
-        guard trigger != nil else { return }
+        guard !microphoneIsolated, trigger != nil else { return }
         applyBackgroundEffectIfNeeded()
         if let event = pressState.update(value: value) {
             onFeedback?(event)
@@ -107,14 +125,14 @@ final class AdaptiveTriggerFeedback {
         }
         observers.removeAll()
         hidOutput.disconnect()
-        trigger?.setModeOff()
+        if !microphoneIsolated { trigger?.setModeOff() }
         trigger = nil
         pressState = RightTriggerPressState()
         backgroundEffectApplied = false
     }
 
     private func applyGameControllerEffect() {
-        guard let trigger else { return }
+        guard !microphoneIsolated, let trigger else { return }
         backgroundEffectApplied = false
         trigger.setModeWeaponWithStartPosition(
             RightTriggerPressState.resistanceStart,
@@ -124,7 +142,7 @@ final class AdaptiveTriggerFeedback {
     }
 
     private func applyBackgroundEffectIfNeeded() {
-        guard trigger != nil,
+        guard !microphoneIsolated, trigger != nil,
               !NSRunningApplication.current.isActive,
               !backgroundEffectApplied else { return }
         backgroundEffectApplied = hidOutput.applyWeaponEffect()

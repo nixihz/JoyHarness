@@ -92,6 +92,7 @@ struct JoyConHIDShoulderSnapshot: Codable, Equatable {
     let down: Bool
     let left: Bool
     let right: Bool
+    let stickPressed: Bool?
 
     init(
         sl: Bool,
@@ -105,7 +106,8 @@ struct JoyConHIDShoulderSnapshot: Codable, Equatable {
         up: Bool = false,
         down: Bool = false,
         left: Bool = false,
-        right: Bool = false
+        right: Bool = false,
+        stickPressed: Bool? = nil
     ) {
         self.sl = sl
         self.sr = sr
@@ -119,6 +121,7 @@ struct JoyConHIDShoulderSnapshot: Codable, Equatable {
         self.down = down
         self.left = left
         self.right = right
+        self.stickPressed = stickPressed
     }
 }
 
@@ -188,7 +191,8 @@ enum JoyConHIDInputReportParser {
             up: side == .left ? (buttons & dUpMask != 0) : (buttons & xMask != 0),
             down: side == .left ? (buttons & dDownMask != 0) : (buttons & bMask != 0),
             left: side == .left ? (buttons & dLeftMask != 0) : (buttons & yMask != 0),
-            right: side == .left ? (buttons & dRightMask != 0) : (buttons & aMask != 0)
+            right: side == .left ? (buttons & dRightMask != 0) : (buttons & aMask != 0),
+            stickPressed: sharedButtons & (side == .left ? 0x08 : 0x04) != 0
         )
     }
 }

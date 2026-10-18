@@ -25,6 +25,8 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
     case buttonY
     case leftShoulder
     case rightShoulder
+    case joyConSL
+    case joyConSR
     case leftTrigger
     case menu
     case options
@@ -75,6 +77,8 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         case .buttonY: playStation ? "△" : "Y"
         case .leftShoulder: playStation ? "L1" : "LB"
         case .rightShoulder: playStation ? "R1" : "RB"
+        case .joyConSL: "SL"
+        case .joyConSR: "SR"
         case .leftTrigger: playStation ? "L2" : "LT"
         case .menu: playStation ? "Options" : "Menu"
         case .options: playStation ? "Create" : "Options / View"
@@ -152,6 +156,8 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
         case .buttonY: faceNames.3
         case .leftShoulder: shoulderNames.left
         case .rightShoulder: shoulderNames.right
+        case .joyConSL: "SL"
+        case .joyConSR: "SR"
         case .leftTrigger: modifier
         case .rightTrigger: family == .joyConPair ? "ZR" : (family == .joyConLeft ? "L" : "R")
         case .menu: family == .joyConLeft ? "−" : "+"
@@ -215,17 +221,18 @@ enum ControllerInput: String, CaseIterable, Codable, Identifiable {
             return [
                 .buttonA, .buttonB, .buttonX, .buttonY,
                 .leftShoulder, .rightShoulder,
+                .joyConSL, .joyConSR,
                 .menu, .options, .leftThumbstickButton,
                 .functionButtonA, .functionButtonB, .functionButtonX, .functionButtonY,
                 .functionLeftShoulder, .functionRightShoulder,
                 .functionLeftThumbstickButton,
             ]
         case .joyConPair:
-            return Set(allCases).subtracting([.touchpadButton])
+            return Set(allCases).subtracting([.touchpadButton, .joyConSL, .joyConSR])
         case .dualSense, .dualShock:
-            return Set(allCases)
+            return Set(allCases).subtracting([.joyConSL, .joyConSR])
         case .xbox, .generic:
-            return Set(allCases).subtracting([.touchpadButton])
+            return Set(allCases).subtracting([.touchpadButton, .joyConSL, .joyConSR])
         }
     }
 
@@ -314,7 +321,7 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .disabled: L10n.text("不执行操作", "No Action")
         case .radialInput: L10n.text("Codex 径向输入", "Codex Radial Input")
-        case .functionModifier: L10n.text("LT 功能层与滚动", "LT Function Layer and Scroll")
+        case .functionModifier: L10n.text("功能层", "Function Layer")
         case .mouseLeft: L10n.text("鼠标左键", "Left Mouse Button")
         case .mouseRight: L10n.text("鼠标右键", "Right Mouse Button")
         case .mouseMiddle: L10n.text("鼠标中键", "Middle Mouse Button")
@@ -357,6 +364,13 @@ enum ControllerMappedAction: String, CaseIterable, Codable, Identifiable {
         case .recordedShortcut: L10n.text("录制按键…", "Record Shortcut…")
         case .toggleOperationMode: L10n.text("切换原生/映射模式", "Toggle Native/Mapping Mode")
         }
+    }
+
+    func displayName(for family: ControllerFamily) -> String {
+        guard self == .functionModifier else { return displayName }
+        return family.usesSingleJoyConStick
+            ? L10n.text("功能层与滚动", "Function Layer and Scroll")
+            : L10n.text("功能层与指针加速", "Function Layer and Faster Pointer")
     }
 
     var controllerAction: ControllerAction? {
@@ -505,8 +519,8 @@ struct ControllerMappingProfile {
         input.displayName(for: family, joyConOrientation: joyConOrientation)
     }
 
-    /// Gamepad PS/Home always opens the Harness switcher, so its stored mapping
-    /// never runs. The Xiaomi remote's Home stays an ordinary mapped key.
+    /// Gamepad PS/Home belongs to Harness switching and optional AI Voice, so
+    /// its stored mapping never runs. Xiaomi Home stays an ordinary mapped key.
     func isReservedForHarnessSwitcher(_ input: ControllerInput) -> Bool {
         input == .home && family != .xiaomiRemote
     }
@@ -531,7 +545,7 @@ struct ControllerMappingProfile {
             return L10n.text("Harness 切换", "Harness Switcher")
         }
         let mappedAction = action(for: input)
-        guard mappedAction == .recordedShortcut else { return mappedAction.displayName }
+        guard mappedAction == .recordedShortcut else { return mappedAction.displayName(for: family) }
         let configuration = recordedShortcutConfiguration(for: input)
         let note = configuration.note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !note.isEmpty { return note }
@@ -608,7 +622,7 @@ final class ControllerMappingStore: ObservableObject {
         }
         if provider == .claude {
             let available = ControllerInput.availableInputs(for: family)
-            for (input, action) in claudeSessionDefaults where available.contains(input) {
+            for (input, action) in claudeSessionDefaults(for: family) where available.contains(input) {
                 providerDefaults[input] = action
             }
         }
@@ -622,6 +636,13 @@ final class ControllerMappingStore: ObservableObject {
         .rightShoulder: .claudeNextSession,
         .rightTrigger: .claudeSearch,
     ]
+
+    private static func claudeSessionDefaults(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        if family == .joyConLeft {
+            return [.joyConSL: .claudePreviousSession, .joyConSR: .claudeNextSession]
+        }
+        return claudeSessionDefaults
+    }
 
     private static func codexDefaultMappings(
         for family: ControllerFamily
@@ -657,6 +678,26 @@ final class ControllerMappingStore: ObservableObject {
         }
         guard family == .joyConLeft || family == .joyConRight else { return baseDefaultMappings }
         var defaults = baseDefaultMappings
+        defaults[.joyConSL] = .mouseSpeedBoost
+        defaults[.joyConSR] = .mousePrecision
+        if family == .joyConLeft {
+            // Physical directions for a vertically held left Joy-Con.
+            defaults[.buttonX] = .escape
+            defaults[.buttonY] = .mouseRight
+            defaults[.buttonB] = .enter
+            defaults[.buttonA] = .backspace
+            defaults[.leftShoulder] = .mouseLeft
+            defaults[.rightShoulder] = .functionModifier
+            defaults[.joyConSL] = .previousSlot
+            defaults[.joyConSR] = .nextSlot
+            defaults[.functionButtonX] = .slot1
+            defaults[.functionButtonY] = .slot2
+            defaults[.functionButtonB] = .slot3
+            defaults[.functionButtonA] = .slot4
+            defaults[.functionLeftShoulder] = .mouseMiddle
+            defaults[.functionRightShoulder] = .disabled
+            defaults[.functionLeftThumbstickButton] = .enter
+        }
         let available = ControllerInput.availableInputs(for: family)
         for input in ControllerInput.allCases where !available.contains(input) {
             defaults[input] = .disabled
@@ -693,6 +734,9 @@ final class ControllerMappingStore: ObservableObject {
     var onDisplayedDeviceRequest: ((String) -> Void)?
 
     private let userDefaults: UserDefaults
+    // Input reports can target a family other than the one edited in Settings.
+    // Keep decoding/validating its entire profile out of that hot path.
+    private var cachedStoredMappings: [ControllerFamily: [ControllerInput: ControllerMappedAction]] = [:]
     private let storageKey: String
     private var activeStorageKey: String {
         Self.storageKey(base: storageKey, family: controllerFamily, provider: harnessProvider)
@@ -723,6 +767,7 @@ final class ControllerMappingStore: ObservableObject {
         )
         self.controllerFamily = storedFamily
         self.availableInputs = ControllerInput.availableInputs(for: storedFamily)
+            .subtracting([.joyConSL, .joyConSR])
         self.joyConOrientation = Self.loadJoyConOrientation(
             from: userDefaults,
             key: "\(familyStorageKey).orientation"
@@ -801,6 +846,7 @@ final class ControllerMappingStore: ObservableObject {
     }
 
     private func storedMappings(for family: ControllerFamily) -> [ControllerInput: ControllerMappedAction] {
+        if let cached = cachedStoredMappings[family] { return cached }
         let key = Self.storageKey(base: storageKey, family: family, provider: harnessProvider)
         let stored = Self.loadMappings(
             from: userDefaults,
@@ -812,12 +858,25 @@ final class ControllerMappingStore: ObservableObject {
             : stored
         // Standard gamepads share one stored profile shaped for the family
         // Settings shows; read the other family's defaults in its place.
-        guard key == activeStorageKey, family != controllerFamily else { return migrated }
-        return Self.replacingDefaults(
-            in: migrated,
-            from: Self.defaultMappings(for: controllerFamily, provider: harnessProvider),
-            to: Self.defaultMappings(for: family, provider: harnessProvider)
-        )
+        var resolved = key == activeStorageKey && family != controllerFamily
+            ? Self.replacingDefaults(
+                in: migrated,
+                from: Self.defaultMappings(for: controllerFamily, provider: harnessProvider),
+                to: Self.defaultMappings(for: family, provider: harnessProvider)
+            ) : migrated
+        if family == .dualSense {
+            // A connected PS5 controller needs new defaults even while Settings
+            // edits a Joy-Con or remote. Resolve pending migrations in memory:
+            // persisting here would also change Xbox's shared stored profile.
+            resolved = Self.applyingPendingDualSenseDefaults(
+                to: resolved,
+                provider: harnessProvider,
+                key: key,
+                userDefaults: userDefaults
+            )
+        }
+        cachedStoredMappings[family] = resolved
+        return resolved
     }
 
     func displayName(for input: ControllerInput) -> String {
@@ -897,7 +956,6 @@ final class ControllerMappingStore: ObservableObject {
         let previousDefaults = Self.defaultMappings(for: controllerFamily, provider: harnessProvider)
         let newDefaults = Self.defaultMappings(for: family, provider: harnessProvider)
         controllerFamily = family
-        refreshAvailableInputs()
         joyConOrientation = Self.loadJoyConOrientation(
             from: userDefaults,
             key: joyConOrientationStorageKey
@@ -928,6 +986,7 @@ final class ControllerMappingStore: ObservableObject {
         migrateDualSenseDefaultsIfNeeded()
         userDefaults.set(family.rawValue, forKey: "\(storageKey).controllerFamily")
         persistAll()
+        refreshAvailableInputs()
     }
 
     func setHarnessProvider(_ provider: HarnessProviderID) {
@@ -954,6 +1013,7 @@ final class ControllerMappingStore: ObservableObject {
             migrateClaudeSessionDefaultsIfNeeded()
         }
         migrateDualSenseDefaultsIfNeeded()
+        refreshAvailableInputs()
     }
 
     func setConnectedDevices(_ devices: [ConnectedControllerDescriptor]) {
@@ -1013,9 +1073,20 @@ final class ControllerMappingStore: ObservableObject {
     private func inputs(ofDevice id: String, family: ControllerFamily) -> Set<ControllerInput> {
         guard let device = connectedDevices.first(where: { $0.id == id }),
               device.family == family else {
-            return ControllerInput.availableInputs(for: family)
+            return ControllerInput.availableInputs(for: family).subtracting([.joyConSL, .joyConSR])
         }
-        return device.availableInputs
+        guard family.isJoyCon else { return device.availableInputs }
+        // Solo Joy-Con may expose ZL as a shoulder, so use the configured
+        // modifier rather than requiring an Apple left-trigger element.
+        let familyMappings = family == controllerFamily ? mappings : storedMappings(for: family)
+        let modifiers = Set(device.availableInputs.filter {
+            familyMappings[$0] == .functionModifier
+        })
+        return JoyConProfileReader.expandedAvailableInputs(
+            from: device.availableInputs,
+            hasSecondaryStick: family == .joyConPair,
+            modifierInputs: modifiers
+        ).intersection(ControllerInput.availableInputs(for: family))
     }
 
     private func refreshAvailableInputs() {
@@ -1062,14 +1133,17 @@ final class ControllerMappingStore: ObservableObject {
         guard input.availableActions.contains(newAction), action(for: input) != newAction else { return }
         mappings[input] = newAction
         persist()
+        refreshAvailableInputs()
     }
 
     func resetDefaults() {
         mappings = Self.defaultMappings(for: controllerFamily, provider: harnessProvider)
         persist()
+        refreshAvailableInputs()
     }
 
     private func persist() {
+        cachedStoredMappings.removeAll()
         let encoded = Dictionary(uniqueKeysWithValues: mappings.map { ($0.key.rawValue, $0.value.rawValue) })
         userDefaults.set(encoded, forKey: activeStorageKey)
     }
@@ -1264,7 +1338,7 @@ final class ControllerMappingStore: ObservableObject {
 
         let defaults = defaultMappings(for: family, provider: .claude)
         var migrated = mappings
-        for input in claudeSessionDefaults.keys where migrated[input] == .disabled {
+        for input in claudeSessionDefaults(for: family).keys where migrated[input] == .disabled {
             guard let action = defaults[input], action != .disabled else { continue }
             migrated[input] = action
         }
@@ -1295,21 +1369,39 @@ final class ControllerMappingStore: ObservableObject {
 
     private func migrateDualSenseDefaultsIfNeeded() {
         guard controllerFamily == .dualSense else { return }
-        let oldDefaults = Self.defaultMappings(for: .xbox, provider: harnessProvider)
-        let newDefaults = Self.defaultMappings(for: .dualSense, provider: harnessProvider)
-        var migrated = mappings
+        let migrated = Self.applyingPendingDualSenseDefaults(
+            to: mappings,
+            provider: harnessProvider,
+            key: activeStorageKey,
+            userDefaults: userDefaults
+        )
         for step in Self.dualSenseDefaultMigrations {
             let completedKey = "\(activeStorageKey).\(step.flag)"
             guard !userDefaults.bool(forKey: completedKey) else { continue }
-            for input in step.inputs where migrated[input] == oldDefaults[input] {
-                migrated[input] = newDefaults[input]
-            }
             userDefaults.set(true, forKey: completedKey)
         }
         if migrated != mappings {
             mappings = migrated
             persist()
         }
+    }
+
+    private static func applyingPendingDualSenseDefaults(
+        to mappings: [ControllerInput: ControllerMappedAction],
+        provider: HarnessProviderID,
+        key: String,
+        userDefaults: UserDefaults
+    ) -> [ControllerInput: ControllerMappedAction] {
+        let oldDefaults = defaultMappings(for: .xbox, provider: provider)
+        let newDefaults = defaultMappings(for: .dualSense, provider: provider)
+        var migrated = mappings
+        for step in dualSenseDefaultMigrations {
+            guard !userDefaults.bool(forKey: "\(key).\(step.flag)") else { continue }
+            for input in step.inputs where migrated[input] == oldDefaults[input] {
+                migrated[input] = newDefaults[input]
+            }
+        }
+        return migrated
     }
 
     private static func replacingDefaults(

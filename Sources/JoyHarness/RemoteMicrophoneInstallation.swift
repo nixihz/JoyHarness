@@ -7,10 +7,20 @@ enum RemoteMicrophoneInstallation {
             return false
         }
         let installedDriver = URL(fileURLWithPath: "/Library/Audio/Plug-Ins/HAL/JoyHarnessMicrophone.driver")
-        guard let bundledVersion = Bundle(url: bundledDriver)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-              let installedVersion = Bundle(url: installedDriver)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String else {
-            return false
+        return updateRequired(bundledDriver: bundledDriver, installedDriver: installedDriver)
+    }
+
+    static func updateRequired(bundledDriver: URL, installedDriver: URL) -> Bool {
+        // CFBundle may cache identical identifiers from different locations.
+        // Read metadata directly so the bundled v4 and installed v3 coexist.
+        func version(_ driver: URL) -> String? {
+            guard let data = try? Data(contentsOf: driver.appendingPathComponent("Contents/Info.plist")),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return nil }
+            return plist["CFBundleVersion"] as? String
         }
+        guard let bundledVersion = version(bundledDriver) else { return false }
+        guard FileManager.default.fileExists(atPath: installedDriver.path) else { return false }
+        guard let installedVersion = version(installedDriver) else { return true }
         return bundledVersion.compare(installedVersion, options: .numeric) == .orderedDescending
     }
 
@@ -21,7 +31,16 @@ enum RemoteMicrophoneInstallation {
         }
         // Pin the staged copy to the exact signed code selected before authorization.
         let hash = try codeHash(at: driver)
-        let script = authorizationScript(command: installationCommand(driver: driver, codeHash: hash))
+        try await authorize(command: installationCommand(driver: driver, codeHash: hash))
+    }
+
+    @MainActor private static var isAuthorizing = false
+
+    @MainActor static func authorize(command: String) async throws {
+        guard !isAuthorizing else { throw failure(L10n.text("另一项组件操作尚未完成，请稍后重试。", "Another component operation is still running. Try again later.")) }
+        isAuthorizing = true
+        defer { isAuthorizing = false }
+        let script = authorizationScript(command: command)
         try await Task.detached {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -40,7 +59,7 @@ enum RemoteMicrophoneInstallation {
         }.value
     }
 
-    static func codeHash(at driver: URL) throws -> String {
+    static func codeHash(at driver: URL, identifier: String = "tech.keli.joyharness.microphone") throws -> String {
         var code: SecStaticCode?
         var status = SecStaticCodeCreateWithPath(driver as CFURL, [], &code)
         guard status == errSecSuccess, let code else { throw signatureFailure(status) }
@@ -50,7 +69,7 @@ enum RemoteMicrophoneInstallation {
         status = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
         guard status == errSecSuccess,
               let values = information as? [String: Any],
-              values[kSecCodeInfoIdentifier as String] as? String == "tech.keli.joyharness.microphone",
+              values[kSecCodeInfoIdentifier as String] as? String == identifier,
               let hash = values[kSecCodeInfoUnique as String] as? Data, !hash.isEmpty else {
             throw signatureFailure(status)
         }

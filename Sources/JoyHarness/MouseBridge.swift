@@ -183,11 +183,29 @@ struct StickMotionVelocities: Equatable, Sendable {
     var scroll: CGPoint
 }
 
-/// One smoothed motion output (pointer or scroll) with its own sub-pixel remainder.
+/// Direct pointer motion or smoothed scrolling, with a sub-pixel remainder.
 struct MotionChannel {
-    var targetVelocity = CGPoint.zero
+    var targetVelocity = CGPoint.zero {
+        didSet {
+            guard !allowsCoasting else { return }
+            // A released or reversed axis must not inherit motion from the old direction.
+            if targetVelocity.x == 0 || targetVelocity.x * oldValue.x < 0 {
+                smoothedVelocity.x = 0
+                fractionalDelta.x = 0
+            }
+            if targetVelocity.y == 0 || targetVelocity.y * oldValue.y < 0 {
+                smoothedVelocity.y = 0
+                fractionalDelta.y = 0
+            }
+        }
+    }
+    private let allowsCoasting: Bool
     private var smoothedVelocity = CGPoint.zero
     private var fractionalDelta = CGPoint.zero
+
+    init(allowsCoasting: Bool = false) {
+        self.allowsCoasting = allowsCoasting
+    }
 
     var isIdle: Bool {
         targetVelocity == .zero && hypot(smoothedVelocity.x, smoothedVelocity.y) < 1
@@ -203,15 +221,21 @@ struct MotionChannel {
             reset()
             return .zero
         }
-        let responseTime = targetVelocity == .zero
-            ? MouseBridge.pointerDecelerationResponseTime
-            : MouseBridge.pointerAccelerationResponseTime
-        let smoothing = MouseBridge.smoothingFactor(
-            deltaTime: deltaTime,
-            responseTime: responseTime
-        )
-        smoothedVelocity.x += (targetVelocity.x - smoothedVelocity.x) * smoothing
-        smoothedVelocity.y += (targetVelocity.y - smoothedVelocity.y) * smoothing
+        if allowsCoasting {
+            let responseTime = targetVelocity == .zero
+                ? MouseBridge.pointerDecelerationResponseTime
+                : MouseBridge.pointerAccelerationResponseTime
+            let smoothing = MouseBridge.smoothingFactor(
+                deltaTime: deltaTime,
+                responseTime: responseTime
+            )
+            smoothedVelocity.x += (targetVelocity.x - smoothedVelocity.x) * smoothing
+            smoothedVelocity.y += (targetVelocity.y - smoothedVelocity.y) * smoothing
+        } else {
+            // Stick position already expresses the desired speed. Filtering it
+            // adds inertia to same-direction braking and oblique turns.
+            smoothedVelocity = targetVelocity
+        }
 
         let accumulatedDelta = CGPoint(
             x: fractionalDelta.x + smoothedVelocity.x * deltaTime,
@@ -232,7 +256,7 @@ struct MotionChannel {
 private final class PointerMotionEngine: @unchecked Sendable {
     private let lock = NSLock()
     private var pointer = MotionChannel()
-    private var scroll = MotionChannel()
+    private var scroll = MotionChannel(allowsCoasting: true)
     private var timeAccumulator = MotionTimeAccumulator()
     private var clockWatchdog = PointerMotionClockWatchdog()
     private var lastTickTime: TimeInterval?
@@ -397,7 +421,7 @@ final class MouseBridge: NSObject {
     /// Optional mapped “hold for precise pointer” multiplier (not used by default bindings).
     nonisolated static let precisionSpeedMultiplier = PointerSensitivityValues.defaults.slow
     nonisolated static let boostSpeedMultiplier = PointerSensitivityValues.defaults.fast
-    // 保留少量平滑以吸收输入抖动，同时避免反向和松手后残留明显位移。
+    // 仅滚动使用时间平滑；鼠标直接跟随当前摇杆速度。
     nonisolated static let pointerAccelerationResponseTime: CGFloat = 0.005
     nonisolated static let pointerDecelerationResponseTime: CGFloat = 0.003
 
@@ -499,6 +523,33 @@ final class MouseBridge: NSObject {
         guard active != precisionActive else { return }
         precisionActive = active
         updateTargetVelocity()
+    }
+
+    var canPerformMotionJump: Bool {
+        pressedMouseButtons.isEmpty &&
+        ![CGMouseButton.left, .right, .center].contains {
+            CGEventSource.buttonState(.combinedSessionState, button: $0)
+        } && hypot(stickInput.x, stickInput.y) <= 0.10 &&
+        hypot(scrollStickInput.x, scrollStickInput.y) <= 0.15
+    }
+
+    func captureMotionJumpTarget() -> MotionJumpPointerTarget? {
+        guard canPerformMotionJump, let location = CGEvent(source: nil)?.location,
+              let display = Self.fetchActiveDisplays().first(where: { $0.bounds.contains(location) }) else { return nil }
+        return MotionJumpPointerTarget(displayID: display.id, bounds: display.bounds)
+    }
+
+    @discardableResult
+    func performMotionJump(to quadrant: MotionJumpQuadrant, target: MotionJumpPointerTarget) -> Bool {
+        guard isAccessibilityGranted, canPerformMotionJump,
+              CGDisplayIsActive(target.displayID) != 0,
+              CGDisplayBounds(target.displayID) == target.bounds else { return false }
+        resetMotion()
+        fractionalTouchDelta = .zero
+        guard let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                  mouseCursorPosition: target.point(for: quadrant), mouseButton: .left) else { return false }
+        event.post(tap: .cghidEventTap)
+        return true
     }
 
     /// Applies a one-shot relative pointer nudge (e.g. DualSense touchpad slide).
@@ -662,11 +713,13 @@ final class MouseBridge: NSObject {
         y: CGFloat,
         speedMultiplier: CGFloat = 1
     ) -> CGPoint {
-        let deadZone: CGFloat = 0.15
-        // Lower near-center speed keeps small stick travel usable for UI chrome.
-        let precisionSpeed: CGFloat = 55
+        let deadZone: CGFloat = 0.10
+        // Keep fine travel gradual without making a light push wait multiple
+        // frames to accumulate its first visible point.
+        let precisionSpeed: CGFloat = 180
         let maximumSpeed: CGFloat = 1_250
-        let magnitude = min(hypot(x, y), 1)
+        let inputMagnitude = hypot(x, y)
+        let magnitude = min(inputMagnitude, 1)
         guard magnitude > deadZone else { return .zero }
 
         let normalizedMagnitude = (magnitude - deadZone) / (1 - deadZone)
@@ -674,8 +727,8 @@ final class MouseBridge: NSObject {
         let speed = precisionSpeed * normalizedMagnitude
             + (maximumSpeed - precisionSpeed) * pow(normalizedMagnitude, 2.8)
         return CGPoint(
-            x: x / magnitude * speed * speedMultiplier,
-            y: -y / magnitude * speed * speedMultiplier
+            x: x / inputMagnitude * speed * speedMultiplier,
+            y: -y / inputMagnitude * speed * speedMultiplier
         )
     }
 
@@ -714,8 +767,8 @@ final class MouseBridge: NSObject {
         )
     }
 
-    /// The right stick always scrolls; the left stick moves the pointer, or
-    /// scrolls instead while LT is held (the only scroll path on a single Joy-Con).
+    /// The dedicated scroll input comes from the right stick. Only a single
+    /// Joy-Con uses its function modifier to route the pointer stick to scrolling.
     nonisolated static func stickMotionVelocities(
         leftStick: CGPoint,
         leftStickScrolls: Bool,

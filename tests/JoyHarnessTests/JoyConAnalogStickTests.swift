@@ -108,7 +108,7 @@ struct JoyConAnalogStickTests {
         }
         #expect(velocities.count == 4)
         guard velocities.count == 4 else { return }
-        #expect(velocities[0] > 0 && velocities[0] <= 20)
+        #expect(velocities[0] >= 20 && velocities[0] <= 45)
         #expect(velocities[1] > velocities[0])
         #expect(velocities[2] > velocities[1] * 5)
         #expect(velocities[3] == 0)

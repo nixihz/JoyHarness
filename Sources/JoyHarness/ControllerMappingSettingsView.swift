@@ -91,8 +91,8 @@ struct ControllerMappingSettingsPane: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .help(L10n.text(
-                                    "手柄的 PS/Home 固定用于呼出 Harness 切换浮层。",
-                                    "Gamepad PS/Home always opens the Harness switcher."
+                                    "PS/Home 按下即打开 Harness 切换浮层。DualSense 启用 AI 语音后，按住 L2 再点一下 PS 开始说话，松开 L2 发送；无需长按 PS。",
+                                    "PS/Home opens the Harness switcher on press. With AI Voice enabled on DualSense, hold L2 and tap PS to speak, then release L2 to send. No PS hold is needed."
                                 ))
                             } else {
                                 mappingRow(for: input)
@@ -134,11 +134,19 @@ struct ControllerMappingSettingsPane: View {
         VStack(alignment: .leading, spacing: 8) {
             Picker(store.displayName(for: input), selection: binding(for: input)) {
                 ForEach(input.availableActions) { action in
-                    Text(action.displayName).tag(action)
+                    Text(action.displayName(for: store.controllerFamily)).tag(action)
                 }
             }
             .pickerStyle(.menu)
 
+            if store.controllerFamily == .dualSense && input == .menu {
+                Text(L10n.text(
+                    "用于语音时，请录入语音软件的“开始／结束录音”快捷键：按一次开始，再按一次结束。",
+                    "For voice, record your app’s Start/Stop Recording shortcut: press once to start, again to stop."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             if store.action(for: input) == .openApplication {
                 configurationDivider
                 openApplicationRow(for: input)
