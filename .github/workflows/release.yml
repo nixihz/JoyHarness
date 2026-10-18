@@ -72,7 +72,10 @@ jobs:
       - name: Install release tools
         run: |
           brew install go-task shellcheck cmake ninja
-          bash scripts/install_ci_arm_toolchain.sh
+          # Backfill may check out a tag predating this installer. Resolve it
+          # from the workflow revision while leaving tagged app sources intact.
+          git show "${GITHUB_SHA}:scripts/install_ci_arm_toolchain.sh" > "${RUNNER_TEMP}/install-ci-arm-toolchain.sh"
+          bash "${RUNNER_TEMP}/install-ci-arm-toolchain.sh"
 
       - name: Set architecture-specific artifact names
         env:
