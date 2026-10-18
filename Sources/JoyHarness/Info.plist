@@ -3,7 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>连接小米遥控器内置麦克风，在按住语音键时接收声音。</string>
+  <string>连接手柄及小米遥控器内置麦克风，在用户明确开启供音或按住语音键时接收声音。</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>用于按住 L2 并点按 PS 后录制 AI 语音指令，以及通过遥控器麦克风传送声音。AI 录音松开 L2 后处理，取消则丢弃。也用于在用户明确开启后，把 DualSense 的声音作为系统麦克风提供给 Codex 等应用；停止供音不会撤回外部应用已接收的声音。</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>在设备上将 AI 语音指令转换为文字；本地识别不可用时不会自动上传到云端。</string>
   <key>CFBundleIdentifier</key>
   <string>tech.keli.joyharness</string>
   <key>CFBundleName</key>

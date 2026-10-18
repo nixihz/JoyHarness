@@ -44,6 +44,7 @@ install -m 644 "${PROJECT_ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "$
 "${PROJECT_ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
 mkdir -p "${STAGED_CONTENTS}/PlugIns"
 /usr/bin/ditto "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.driver" "${STAGED_CONTENTS}/PlugIns/JoyHarnessMicrophone.driver"
+"${PROJECT_ROOT}/scripts/embed_dualsense_audio.sh" "${STAGED_APP_BUNDLE}" local
 
 cat > "${STAGED_CONTENTS}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -71,7 +72,11 @@ cat > "${STAGED_CONTENTS}/Info.plist" <<PLIST
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>连接小米遥控器内置麦克风，在按住语音键时接收声音。</string>
+  <string>连接手柄及小米遥控器内置麦克风，在用户明确开启供音或按住语音键时接收声音。</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>用于按住 L2 并点按 PS 后录制 AI 语音指令，以及通过遥控器麦克风传送声音。AI 录音松开 L2 后处理，取消则丢弃。也用于在用户明确开启后，把 DualSense 的声音作为系统麦克风提供给 Codex 等应用；停止供音不会撤回外部应用已接收的声音。</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>在设备上将 AI 语音指令转换为文字；本地识别不可用时不会自动上传到云端。</string>
 </dict>
 </plist>
 PLIST
@@ -105,7 +110,7 @@ codesign -dvvv "${APP_BUNDLE}" 2>&1 | awk -F= '/^Authority=|^TeamIdentifier=|^Id
 open_app() {
   local launch_args=(-n --stdout "${HOME}/.agent-deck/runtime.log" --stderr "${HOME}/.agent-deck/runtime-error.log")
   local variable
-  for variable in AGENT_DECK_RP2040_PORT AGENT_DECK_SOCK JOY_HARNESS_REMOTE_TRACE; do
+  for variable in AGENT_DECK_RP2040_PORT AGENT_DECK_SOCK JOY_HARNESS_REMOTE_TRACE JOY_HARNESS_DUALSENSE_MIC_PREVIEW; do
     if [[ -n "${!variable:-}" ]]; then
       launch_args+=(--env "${variable}=${!variable}")
     fi

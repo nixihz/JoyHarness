@@ -26,6 +26,8 @@ FIXTURE_BINARIES = (
     "Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer",
     "Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader",
     "Contents/PlugIns/JoyHarnessMicrophone.driver/Contents/MacOS/JoyHarnessMicrophone",
+    "Contents/Library/LaunchServices/ds5audiod",
+    "Contents/PlugIns/DualSenseAudio.driver/Contents/MacOS/DualSenseAudio",
 )
 
 
@@ -95,6 +97,13 @@ class PackagedArchitectureTests(unittest.TestCase):
             driver = app / "Contents/PlugIns/JoyHarnessMicrophone.driver/Contents/MacOS/JoyHarnessMicrophone"
             driver.unlink()
             with self.assertRaisesRegex(ValueError, "Packaged binary is missing:.*JoyHarnessMicrophone"):
+                VERIFIER.verify_architecture(app, "arm64")
+
+    def test_rejects_missing_dualsense_helper_on_apple_silicon(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory), "arm64")
+            (app / "Contents/Library/LaunchServices/ds5audiod").unlink()
+            with self.assertRaisesRegex(ValueError, "DualSense helper is missing"):
                 VERIFIER.verify_architecture(app, "arm64")
 
     def run_embed(self, root: Path, arch: str, source_arch: str) -> subprocess.CompletedProcess:

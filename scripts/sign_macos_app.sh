@@ -6,6 +6,12 @@ BUNDLE_ID="${2:?usage: sign_macos_app.sh <app-bundle> <bundle-id>}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SIGNING_MODE="${3:-distribution}"
 IDENTITY_FILE="${HOME}/.agent-deck/signing-identity"
+# This script also signs the microphone .driver. Only the outer .app gets
+# recording access; nested Sparkle code keeps its existing entitlements below.
+APP_ENTITLEMENTS=""
+if [[ "${APP_BUNDLE}" == *.app ]]; then
+  APP_ENTITLEMENTS="${PROJECT_ROOT}/config/JoyHarness.entitlements"
+fi
 
 if [[ -z "${JOY_HARNESS_SIGNING_IDENTITY:-}" && -f "${PROJECT_ROOT}/.env.local" ]]; then
   # shellcheck source=/dev/null
@@ -85,14 +91,18 @@ if [[ -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
   if identity_is_developer_id "${SIGNING_IDENTITY}"; then
     CODESIGN_ARGS+=(--options runtime --timestamp)
   fi
-  codesign "${CODESIGN_ARGS[@]}" "${APP_BUNDLE}"
 else
   echo "==> Signing ${APP_BUNDLE} with a stable ad-hoc requirement"
-  codesign --force --sign - \
-    --identifier "${BUNDLE_ID}" \
-    --requirements "=designated => identifier \"${BUNDLE_ID}\"" \
-    "${APP_BUNDLE}"
+  CODESIGN_ARGS=(
+    --force --sign -
+    --identifier "${BUNDLE_ID}"
+    --requirements "=designated => identifier \"${BUNDLE_ID}\""
+  )
 fi
+if [[ -n "${APP_ENTITLEMENTS}" ]]; then
+  CODESIGN_ARGS+=(--entitlements "${APP_ENTITLEMENTS}")
+fi
+codesign "${CODESIGN_ARGS[@]}" "${APP_BUNDLE}"
 
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 if [[ "${SIGNING_MODE}" == "local" && ! -f "${IDENTITY_FILE}" ]]; then

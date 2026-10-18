@@ -31,6 +31,8 @@ tasks:
     cmds:
       - swift test --no-parallel
       - bash scripts/test_microphone_driver.sh
+      - python3 scripts/test_dualsense_game_mode.py
+      - bash scripts/test_dualsense_controls.sh
       - python3 -m unittest discover -s tests -v
 
   lint:
