@@ -16,6 +16,13 @@ and Xcode's Game Mode tool at runtime. Intel packages omit them; the main app
 continues to require macOS 13 or later on both architectures. Source packaging
 requires CMake and Ninja in addition to the Swift toolchain.
 
+CI installs the complete Arm GNU firmware toolchain with
+`scripts/install_ci_arm_toolchain.sh`, pinning each host architecture's version
+and SHA-256 from the recorded upstream Homebrew cask revision. This avoids stale
+Homebrew API checksums while retaining download verification. The installer is
+restricted to disposable GitHub Actions runners and checks for Newlib before
+adding the compiler to subsequent steps' PATH.
+
 ## Run a release
 
 1. Prepare version references and draft changelogs from Conventional Commits:

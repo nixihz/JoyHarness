@@ -72,7 +72,7 @@ jobs:
       - name: Install release tools
         run: |
           brew install go-task shellcheck cmake ninja
-          brew install --cask gcc-arm-embedded
+          bash scripts/install_ci_arm_toolchain.sh
 
       - name: Set architecture-specific artifact names
         env:

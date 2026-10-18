@@ -44,7 +44,7 @@ jobs:
       - name: Install firmware toolchain
         run: |
           brew install go-task cmake ninja
-          brew install --cask gcc-arm-embedded
+          bash scripts/install_ci_arm_toolchain.sh
 
       - name: Build RP2040 firmware
         run: task firmware
