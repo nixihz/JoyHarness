@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-18
+
+### Added
+- Opt-in L2 + PS AI Voice with on-device speech recognition, configurable OpenAI-compatible services, and 17 registered capability categories.
+- Personal DualSense motion calibration and screen-quadrant pointer jumps, with conflict cancellation and optional pointer previews.
+- Managed DualSense microphone installation, repair, update and removal, plus Game Mode lease restoration and read-only controller forwarding. This optional feature requires Apple silicon, macOS 26 and Xcode.
+- Bundled, statically linked Opus 1.5.2 with licenses and reproducible driver builds.
+
+### Changed
+- Joy-Con rail-button mappings and vertical left-controller defaults; existing custom mappings are preserved.
+- Dual-stick function layers use fast pointer sensitivity, while the unmodified right stick scrolls.
+
+### Fixed
+- Joy-Con analog calibration and pointer smoothing latency, diagonal speed and direction changes.
+- Voice cancellation during exclusive microphone capture, USB input with the helper installed, and ordinary PS fallback with multiple controllers.
+- Microphone preparation now times out; repeated clarification preserves the original request.
+- Control subscriptions are revalidated after console-user changes; clearing motion calibration requires confirmation.
+
 ## [0.9.0] - 2026-10-12
 
 ### Added
@@ -207,6 +225,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local diagnostics dashboard with battery, haptics, RP2040, and permissions monitoring.
 - DMG packaging workflow.
 
+[0.10.0]: https://github.com/nixihz/JoyHarness/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/nixihz/JoyHarness/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/nixihz/JoyHarness/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1

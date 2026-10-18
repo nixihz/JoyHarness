@@ -9,6 +9,24 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-18
+
+### 新增
+- 默认关闭的 L2 + PS AI 语音，支持设备端语音识别、可配置的 OpenAI 兼容服务和 17 类已登记能力。
+- DualSense 个人体感校准及屏幕四分区指针定位，支持冲突取消和可选的实际指针预览。
+- DualSense 麦克风安装、修复、更新与卸载管理，包含 Game Mode 租约恢复和只读控制转发。此可选功能要求 Apple 芯片、macOS 26 和 Xcode。
+- 内置静态链接的 Opus 1.5.2、相关许可证和可复现的驱动构建。
+
+### 优化与重构
+- 调整 Joy-Con SL/SR 和左手柄竖握默认映射，保留已有自定义映射。
+- 双摇杆手柄功能层使用快速指针灵敏度；未按功能层时右摇杆继续滚动。
+
+### 修复
+- 修正 Joy-Con 模拟摇杆校准、指针平滑延迟、斜向速度及转向响应。
+- 修复独占采音期间取消语音、安装 helper 后 USB 输入，以及多手柄普通 PS 回退。
+- 为麦克风准备增加超时，连续追问保留原始指令上下文。
+- 切换 macOS 用户后重新校验控制订阅权限；清除体感校准前要求确认。
+
 ## [0.9.0] - 2026-10-12
 
 ### 新增
@@ -207,6 +225,7 @@
 - 本地诊断 Dashboard（电量、震动、RP2040 与权限监控）。
 - DMG 打包工作流。
 
+[0.10.0]: https://github.com/nixihz/JoyHarness/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/nixihz/JoyHarness/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/nixihz/JoyHarness/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/nixihz/JoyHarness/compare/v0.8.0...v0.8.1

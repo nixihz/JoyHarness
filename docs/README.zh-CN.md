@@ -25,20 +25,20 @@ app-server 子进程获取任务名称和顺序，但不代理 Codex 操作，�
 
 ## 下载
 
-当前版本为 **v0.9.0**，支持 Apple Silicon（arm64）和 Intel（x86_64，也称 AMD64）Mac，均要求 macOS 13.0 或更高版本。请按 Mac 的芯片选择下载：
+当前版本为 **v0.10.0**，支持 Apple Silicon（arm64）和 Intel（x86_64，也称 AMD64）Mac，均要求 macOS 13.0 或更高版本。请按 Mac 的芯片选择下载：
 
-- Apple Silicon：[下载 Joy-Harness-v0.9.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-arm64.dmg) · [SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-arm64.dmg.sha256)
-- Intel：[下载 Joy-Harness-v0.9.0-macOS-x86_64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-x86_64.dmg) · [SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256)
-- [查看 v0.9.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.9.0)
+- Apple Silicon：[下载 Joy-Harness-v0.10.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-arm64.dmg) · [SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-arm64.dmg.sha256)
+- Intel：[下载 Joy-Harness-v0.10.0-macOS-x86_64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-x86_64.dmg) · [SHA-256 校验文件](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-x86_64.dmg.sha256)
+- [查看 v0.10.0 Release](https://github.com/nixihz/JoyHarness/releases/tag/v0.10.0)
 
 DMG 只包含可手动启动的 `Joy Harness.app`。如需本地 CLI，或需要构建和刷写 RP2040 固件，
 请使用下方的[源码安装](#从零安装)。签名与 Apple 公证信息请查看 Release 说明。使用对应架构的校验文件验证下载：
 
 ```bash
 # Apple Silicon
-shasum -a 256 -c Joy-Harness-v0.9.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.10.0-macOS-arm64.dmg.sha256
 # Intel
-shasum -a 256 -c Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.10.0-macOS-x86_64.dmg.sha256
 ```
 
 ## 界面预览
@@ -50,6 +50,14 @@ shasum -a 256 -c Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256
 **小米 RC003-MS 遥控器**
 
 ![Joy Harness 界面展示小米遥控器按键映射和连接详情](images/dashboard-xiaomi-remote.png)
+
+## v0.10.0 更新
+
+- 新增默认关闭的 AI 语音：按住 L2、点按 PS，说话后松开 L2 提交。支持设备端识别搭配本机模型，也可主动配置云端服务；指令只执行已登记能力。
+- 新增 DualSense 个人体感校准，可将指针快速定位到屏幕四分区，支持冲突取消和预览测试。
+- 在设置中统一管理 DualSense 系统麦克风，内置驱动并自动恢复 Game Mode。该可选麦克风功能要求 Apple 芯片、macOS 26 和 Xcode；Intel 版保留其他应用功能。
+- 改进 Joy-Con 模拟摇杆、SL/SR 映射及指针响应。双摇杆手柄的功能层用于指针加速，右摇杆平时继续滚动。
+- 修复语音取消、USB 与多手柄输入路由、连续追问上下文、麦克风准备超时及驱动安装恢复问题。
 
 ## v0.9.0 更新
 
@@ -685,7 +693,7 @@ PlayStation 标准手柄共用标准手柄映射 profile，以保持共同按键
 | 命令 | 用途 |
 |---|---|
 | `task build` | 编译 release 版 macOS 可执行文件 |
-| `task dmg -- 0.9.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
+| `task dmg -- 0.10.0` | 构建版本化 macOS DMG 和 SHA-256 校验文件 |
 | `task run` | 构建并启动固定路径的签名应用 |
 | `task install` | 编译、安装并启动应用 |
 | `task firmware` | 构建 RP2040 UF2 固件 |
@@ -734,15 +742,15 @@ Codex Desktop 会读取项目的 `.codex/environments/environment.toml`，也可
 构建适用于当前 Mac 架构的发布镜像：
 
 ```bash
-task dmg -- 0.9.0
-# 或：bash scripts/package_dmg.sh 0.9.0
+task dmg -- 0.10.0
+# 或：bash scripts/package_dmg.sh 0.10.0
 ```
 
 产物会写入 `dist/`，文件名包含当前 Mac 的架构（`arm64` 或 `x86_64`）。例如 Intel Mac 的产物为：
 
 ```text
-Joy-Harness-v0.9.0-macOS-x86_64.dmg
-Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256
+Joy-Harness-v0.10.0-macOS-x86_64.dmg
+Joy-Harness-v0.10.0-macOS-x86_64.dmg.sha256
 ```
 
 GitHub Release 流程会分别在 Apple Silicon 和 Intel runner 上原生测试和打包，两个架构均成功后一起发布。

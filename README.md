@@ -23,11 +23,11 @@ Both the controller and RP2040 connect to the Mac; no wiring is required between
 
 ## Download
 
-The current release is **v0.9.0** for Apple Silicon (arm64) and Intel (x86_64, also called AMD64) Macs running macOS 13.0 or later. Choose the download for your Mac's chip:
+The current release is **v0.10.0** for Apple Silicon (arm64) and Intel (x86_64, also called AMD64) Macs running macOS 13.0 or later. Choose the download for your Mac's chip:
 
-- Apple Silicon: [Download Joy-Harness-v0.9.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-arm64.dmg) · [SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-arm64.dmg.sha256)
-- Intel: [Download Joy-Harness-v0.9.0-macOS-x86_64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-x86_64.dmg) · [SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.9.0/Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256)
-- [View the v0.9.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.9.0)
+- Apple Silicon: [Download Joy-Harness-v0.10.0-macOS-arm64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-arm64.dmg) · [SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-arm64.dmg.sha256)
+- Intel: [Download Joy-Harness-v0.10.0-macOS-x86_64.dmg](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-x86_64.dmg) · [SHA-256 checksum](https://github.com/nixihz/JoyHarness/releases/download/v0.10.0/Joy-Harness-v0.10.0-macOS-x86_64.dmg.sha256)
+- [View the v0.10.0 release](https://github.com/nixihz/JoyHarness/releases/tag/v0.10.0)
 
 The DMG contains `Joy Harness.app` for manual launch. Use the [source installation](#install-from-source) if you need the local CLI or RP2040 firmware build and flashing tools. See the release notes for signing and notarization details.
 
@@ -35,9 +35,9 @@ Verify the download with the matching checksum file:
 
 ```bash
 # Apple Silicon
-shasum -a 256 -c Joy-Harness-v0.9.0-macOS-arm64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.10.0-macOS-arm64.dmg.sha256
 # Intel
-shasum -a 256 -c Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256
+shasum -a 256 -c Joy-Harness-v0.10.0-macOS-x86_64.dmg.sha256
 ```
 
 ## Dashboard
@@ -49,6 +49,14 @@ shasum -a 256 -c Joy-Harness-v0.9.0-macOS-x86_64.dmg.sha256
 **Xiaomi RC003-MS remote**
 
 ![Joy Harness dashboard showing Xiaomi remote button mappings and connection details](docs/images/dashboard-xiaomi-remote.png)
+
+## What's New in v0.10.0
+
+- Adds opt-in AI Voice: hold L2, tap PS, speak, then release L2 to submit. Choose on-device recognition with a local model or explicitly configure cloud services; commands are limited to registered capabilities.
+- Adds personal DualSense motion calibration for jumping the pointer to a screen quadrant, with conflict cancellation and a preview mode.
+- Manages the DualSense system microphone from Settings, with bundled drivers and automatic Game Mode restoration. This optional microphone requires Apple silicon, macOS 26, and Xcode; Intel retains the other application features.
+- Improves Joy-Con analog input, rail-button mappings and pointer responsiveness. Dual-stick function layers accelerate the pointer while the right stick retains its normal scrolling behavior.
+- Hardens voice cancellation, USB and multiple-controller routing, repeated clarification, microphone preparation timeouts, and driver installation recovery.
 
 ## What's New in v0.9.0
 
@@ -488,7 +496,7 @@ Run this audit separately from the full test suite: native view rendering occupi
 | Command | Purpose |
 |---|---|
 | `task build` | Build the release macOS executable |
-| `task dmg -- 0.9.0` | Build a versioned macOS DMG and SHA-256 checksum |
+| `task dmg -- 0.10.0` | Build a versioned macOS DMG and SHA-256 checksum |
 | `task run` | Build and launch the canonical signed app |
 | `task install` | Build, install, and launch the app |
 | `task firmware` | Build the RP2040 UF2 firmware |
@@ -532,8 +540,8 @@ The script first builds a signed app, stops installed Joy Harness/AgentDeck proc
 Create a release image for the current Mac architecture with:
 
 ```bash
-task dmg -- 0.9.0
-# Or: bash scripts/package_dmg.sh 0.9.0
+task dmg -- 0.10.0
+# Or: bash scripts/package_dmg.sh 0.10.0
 ```
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.
