@@ -9,6 +9,13 @@ architecture, DMG and checksum. Signing and notarization run separately for each
 architecture. Only after both jobs succeed does the workflow upload all assets to
 one draft GitHub Release and publish it.
 
+Apple Silicon packages also embed the managed DualSense audio HAL and helper.
+Their CMake/Ninja build uses the same pinned `Vendor/Opus` sources as the app;
+it does not require Homebrew Opus. These optional components require macOS 26
+and Xcode's Game Mode tool at runtime. Intel packages omit them; the main app
+continues to require macOS 13 or later on both architectures. Source packaging
+requires CMake and Ninja in addition to the Swift toolchain.
+
 ## Run a release
 
 1. Prepare version references and draft changelogs from Conventional Commits:
@@ -34,6 +41,9 @@ one draft GitHub Release and publish it.
    ```bash
    gh workflow run release.yml --ref main -f version=<version> -f prerelease=false -f backfill_arch=none
    ```
+
+   Do not create or push the tag beforehand. The workflow validates that it is
+   unused, then creates it at the validated source commit when publishing.
 
 `backfill_arch=none` is the default and releases both architectures. This mode
 rejects invalid versions and versions whose tag or Release already exists.

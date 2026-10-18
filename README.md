@@ -170,7 +170,7 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) for full historical release notes.
 - **Push-to-talk:** hold Xbox Menu or DualShock Options to send Codex Micro `ACT10`, then release to stop. DualSense has no default push-to-talk button; map Options or the touchpad button to it in Settings. Recording remains native to Codex Desktop.
 - **DualSense audio diagnostics:** detect the controller microphone exposed over USB and report whether it is the default macOS input. Joy Harness does not claim the recording device or change global audio settings.
 - **Graduated trigger feedback:** DualSense R2 provides a light touch, a resistance wall, and a stronger confirmation after the trigger point. Xbox RT uses Impulse Trigger feedback where supported.
-- **Control macOS:** move the pointer with the left stick and scroll with the right stick (or LT + left stick); hold L3 to boost pointer speed; on DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
+- **Control macOS:** move the pointer with the left stick and scroll with the right stick; hold LT/L2/ZL or L3 to boost pointer speed on dual-stick controllers; a single Joy-Con still scrolls with its function modifier and stick. On DualSense/DualShock, slide the touchpad for slow precise aiming; use A/B/R3 as left, right, and middle mouse buttons; use X/Y as Backspace and Escape; and access Enter, copy, and paste through the LT layer.
 - **Manage six task slots:** move sequentially with LB/RB or jump directly to slots 1-6 with LT combinations. Short haptic pulses report the selected slot number.
 - **Global keyboard slot shortcuts:** record or clear a shortcut for each slot in Settings → Slot Shortcuts. None are assigned by default; changes are saved and apply immediately, including in the background. Requires the app to be running and an RP2040 connection; a controller is optional.
 - **Diagnose locally:** inspect controller battery and haptic support, RP2040 connection, microphone input, and Accessibility authorization from the dashboard.
@@ -250,7 +250,7 @@ The RP2040 is optional for mouse control, system shortcuts, the dashboard, and m
 - A Raspberry Pi Pico or compatible RP2040 development board.
 - A data-capable USB cable. Charge-only cables cannot flash firmware or expose serial/HID devices.
 
-Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense R2 resistance is restored through the matching USB or Bluetooth HID output while Joy Harness is in the background, and remains attached when the Xiaomi remote is the selected mapping profile. DualSense microphone input requires USB. Bluetooth still supports controller input and can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
+Controllers can connect over Bluetooth or USB. On the tested Xbox Series controller, haptics work on macOS 26.5.2 over **Bluetooth only**. DualSense R2 resistance is restored through the matching USB or Bluetooth HID output while Joy Harness is in the background, and remains attached when the Xiaomi remote is the selected mapping profile. For the existing system audio path, connect the DualSense microphone over USB. Bluetooth pairing alone does not publish a microphone; a [managed wireless system microphone](#dualsense-wireless-system-microphone) is available on the validated Apple silicon/macOS 26 setup. Existing Bluetooth controls can trigger push-to-talk while Codex records through the Mac microphone, AirPods, or another input device.
 
 Multiple GameController devices can stay connected at the same time, and the Xiaomi RC003-MS remote can be connected alongside them. Xbox, DualSense/DualShock, and the remote keep independent input sessions, so connecting one device no longer disconnects or disables another. First-generation Joy-Con keeps its existing composition priority: when Joy-Con endpoints are present, Joy Harness presents their paired or single logical profile until they disconnect.
 
@@ -298,7 +298,8 @@ task --version
 | Accessibility | Joy Harness | Mouse, Enter, copy, paste, screenshots, and other system keys |
 | Input Monitoring | Joy Harness | Controller input while the app is in the background |
 | Input Monitoring | Codex Desktop | Physical Codex Micro input |
-| Microphone | Codex Desktop | Native push-to-talk recording; Joy Harness does not request microphone access |
+| Microphone | Codex Desktop | Native push-to-talk recording; this is separate from Joy Harness authorization |
+| Microphone | Joy Harness | The remote microphone bridge, internal AI Voice, and explicit audio capture; external apps need their own recording permission |
 
 Permissions are under **System Settings > Privacy & Security**. Without Accessibility access, RP2040/Codex Micro actions and haptics still work, but mouse and system-key actions do not.
 
@@ -412,8 +413,9 @@ Any mappable input can use **Record Shortcut...**. Select **Click to Record**, t
 |---|---|---|
 | Left stick | Move the macOS pointer at 120 Hz with a dead zone and progressive acceleration | Yes |
 | DualSense / DualShock touchpad slide | Slow relative pointer movement for fine aiming; no modifier required. Touchpad click remains the mapped touchpad button action (default left mouse button) | Yes |
-| Right stick | Vertical and horizontal scrolling in every Harness, no modifier; works while the left stick moves the pointer. Same speed and Natural/Traditional direction as LT + left stick | Yes |
-| LT + left stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings. The only scroll input on a single Joy-Con | Yes |
+| Right stick | Vertical and horizontal scrolling in every Harness, no modifier; works while the left stick moves the pointer. Stick travel controls speed; choose Natural or Traditional direction in Settings | Yes |
+| Hold LT / L2 / ZL + left stick | On dual-stick controllers, move the pointer using the configurable Fast sensitivity (default `1.8x`), shared with L3; boosts do not stack | Yes |
+| Single Joy-Con: function modifier + stick | Vertical and horizontal scrolling with speed based on stick travel; choose Natural or Traditional direction in Settings | Yes |
 | Hold L3 | Temporarily use the configurable Fast pointer sensitivity (default `1.8x`) | Yes |
 | A press/release | Left mouse button, including hold and drag | Yes |
 | B press/release | Right mouse button, including hold and drag | Yes |
@@ -429,7 +431,7 @@ Any mappable input can use **Record Shortcut...**. Select **Click to Record**, t
 | D-pad Up press/release (DualSense: Options) | Right Command press/release, useful for voice-input tools | Yes |
 | DualSense D-pad Up / Down / Left / Right | Arrow keys with system-rate key repeat | Yes |
 
-These actions target the foreground application, not only Codex Desktop. LT is a function modifier: it changes the left stick to scrolling, L3/R3 to copy/paste, and LT + right stick left/right to browser back/forward. Hold L3 alone to boost pointer speed. While LT is held, the right stick stops scrolling and triggers its four direction mappings instead. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
+These actions target the foreground application, not only Codex Desktop. The **Function Layer** action uses LT by default (L2 on PlayStation, ZL on a Joy-Con pair). On dual-stick controllers, holding it boosts left-stick pointer movement using the same Fast sensitivity as L3; the boosts do not stack. L3/R3 still become copy/paste, and LT + right stick left/right still perform browser back/forward. While the function modifier is held, the right stick stops scrolling and triggers its four direction mappings instead. A single Joy-Con keeps function modifier + stick scrolling. The Lark screenshot action requires Lark to be running with its shortcut set to `Command-Shift-A`; it can be remapped if the controller driver does not expose Options/View/Create.
 
 ### Codex Micro Controls
 
@@ -536,6 +538,24 @@ task dmg -- 0.9.0
 
 Artifacts are written to `dist/`. The package script verifies the app signature, `Info.plist`, and DMG integrity. Public distribution without Gatekeeper warnings requires a Developer ID signature and Apple notarization.
 
+### DualSense Wireless System Microphone
+
+Joy Harness bundles the validated DualSense Audio driver. On Apple silicon with
+macOS 26 and Xcode installed in Applications:
+
+1. Connect one DualSense over Bluetooth.
+2. Open **Settings → General → PS5 Controller Microphone** and choose **Enable Controller Microphone** or **Update / Repair**. Complete the system administrator prompt; system audio briefly restarts.
+3. Choose **Use as System Microphone**, or select **DualSense Microphone** in your recording app. The app needs its own microphone permission.
+4. Map Options to the external app's recording toggle: press once to start, again to stop. Existing custom mappings are preserved. Internal AI Voice keeps its separate L2 + PS gesture.
+
+Game Mode follows actual capture, restoring the prior policy when all clients
+stop. System Sound's input meter also captures audio. No manual audio-supply
+switch or separate driver app is needed. The same settings section provides
+uninstall; this preserves Xiaomi audio and controller mappings. Updates remove
+the obsolete **Joy Harness DualSense 麦克风** input while keeping Xiaomi's UID.
+RP2040 firmware remains unchanged. For test evidence and limits, see the
+[system microphone spec](docs/specs/dualsense-bluetooth-microphone.md).
+
 ## Installation Footprint
 
 `scripts/install.sh` creates or updates:
@@ -636,7 +656,7 @@ Research notes:
 - Joy Harness does not use Codex Hooks or `notify`; approvals and task-slot actions are handled directly by Codex Micro.
 - Joy Harness reads task IDs, display names, and first-message summaries for unnamed tasks, but does not retain full Codex conversation data. Slot ordering remains managed by Codex app-server.
 - The daemon continues running and updating `status.json` without a controller; haptic requests are logged as skipped.
-- Push-to-talk is entirely managed by Codex Desktop. Joy Harness does not record audio.
+- Codex owns native push-to-talk recording, transcription, and submission. Joy Harness can supply audio through its microphone bridges; the DualSense wireless bridge remains an opt-in development preview pending real hardware and Codex acceptance.
 
 
 ### Codex edge lights

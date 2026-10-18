@@ -22,7 +22,8 @@ Claude Harness 的肩键和右扳机默认发送 Claude Desktop “Go” 菜单�
 ## 决策
 
 - **默认值**：`defaultMappings(for:provider:)` 只对 Claude 叠加这三项，并且只写入该控制器家族实际有的输入。
-  - 单只 Joy-Con 只有 L1/R1，写成 SL/SR（竖握为 L/ZL 或 ZR/R）。
+  - 2026-10-17 左 Joy-Con 默认布局调整：独立 SL/SR 负责前后会话，L 保留鼠标左键、ZL 保留修饰键；已有自定义不强制覆盖。
+  - 右 Joy-Con 仍使用 L1/R1，写成 SL/SR（竖握为 ZR/R）。
   - 小米遥控器也只有 L1/R1，对应音量 −/+。
   - RT 保持为空。
 - **迁移范围**：迁移按配置执行，即“控制器家族 × Harness”，标记为 `<配置存储键>.claudeSessionDefaultsMigrated`。

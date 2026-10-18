@@ -26,6 +26,9 @@ secrets, Sparkle behavior, and packaged resource checks.
 3. Run `task ci` and `task release-check`. Resolve failures before committing the
    preparation, then commit and push the release changes to `main`.
 4. Dispatch the release workflow:
+   Let the workflow create the tag; pre-creating it makes release planning fail.
+   When packaging dependencies change, verify a clean driver build and a local
+   DMG before dispatch, in addition to the shared CI checks.
    ```bash
    gh workflow run release.yml --ref main -f version=<version> -f prerelease=false -f backfill_arch=none
    ```
