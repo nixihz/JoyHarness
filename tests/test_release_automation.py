@@ -251,13 +251,47 @@ xcrun() {
         self.assertIn("task ci", release_workflow)
         self.assertIn('task release-check -- "${TAG}"', release_workflow)
         self.assertIn("task firmware", release_workflow)
-        self.assertIn("brew install --cask gcc-arm-embedded", ci_workflow)
-        self.assertIn("brew install --cask gcc-arm-embedded", release_workflow)
-        self.assertNotIn("brew install go-task cmake ninja arm-none-eabi-gcc", ci_workflow)
-        self.assertNotIn(
-            "brew install go-task shellcheck cmake ninja arm-none-eabi-gcc",
-            release_workflow,
-        )
+
+    def test_toolchain_installer_rejects_non_ci_hosts(self) -> None:
+        env = os.environ.copy()
+        env.pop("GITHUB_ACTIONS", None)
+        result = subprocess.run(["bash", str(ROOT / "scripts/install_ci_arm_toolchain.sh")],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("only for disposable GitHub Actions runners", result.stderr)
+
+    def test_workflows_reject_corrupt_toolchains_before_privileged_install(self) -> None:
+        for filename, step_name in (("ci.yml", "Install firmware toolchain"),
+                                     ("release.yml", "Install release tools")):
+            workflow = (ROOT / ".github/workflows" / filename).read_text()
+            step = workflow.split(f"      - name: {step_name}\n", 1)[1]
+            script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("      - name:", 1)[0])
+            for arch in ("arm64", "x86_64"):
+                with self.subTest(workflow=filename, arch=arch), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    commands = root / "bin"
+                    commands.mkdir()
+                    fixtures = {
+                        "brew": "#!/bin/sh\nexit 0\n",
+                        "uname": f"#!/bin/sh\necho {arch}\n",
+                        "curl": '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n'
+                                '  if [ "$1" = --output ]; then printf damaged > "$2"; exit 0; fi\n'
+                                '  shift\ndone\nexit 1\n',
+                        "sudo": '#!/bin/sh\ntouch "$RUNNER_TEMP/privileged-install"\n',
+                    }
+                    for name, body in fixtures.items():
+                        path = commands / name
+                        path.write_text(body)
+                        path.chmod(0o755)
+                    env = os.environ.copy()
+                    env.update(GITHUB_ACTIONS="true", RUNNER_TEMP=str(root), GITHUB_SHA="HEAD",
+                               GITHUB_PATH=str(root / "github-path"), PATH=str(commands) + os.pathsep + env["PATH"])
+                    result = subprocess.run(["bash", "-e", "-c", script], cwd=ROOT, env=env,
+                                            capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("FAILED", result.stdout)
+                    self.assertFalse((root / "privileged-install").exists())
+                    self.assertFalse((root / "github-path").exists())
 
     def test_release_workflow_supports_complete_or_empty_signing_config(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
