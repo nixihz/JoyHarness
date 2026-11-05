@@ -3,6 +3,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LAUNCH_AFTER_INSTALL=1
+case "${1:-}" in
+  "") ;;
+  --no-launch) LAUNCH_AFTER_INSTALL=0 ;;
+  *) echo "usage: $0 [--no-launch]" >&2; exit 2 ;;
+esac
 VERSION="$(tr -d '[:space:]' < "${ROOT}/Sources/JoyHarness/Resources/VERSION")"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${ROOT}/Sources/JoyHarness/Info.plist")"
 BIN_DIR="${HOME}/.agent-deck/bin"
@@ -264,7 +270,9 @@ for obsolete in "${BIN_DIR}/hook_bridge.py" "${BIN_DIR}/notify_fanout.py"; do
   fi
 done
 
-/usr/bin/open -n "${APP_DIR}"
+if [[ "${LAUNCH_AFTER_INSTALL}" == "1" ]]; then
+  /usr/bin/open -n "${APP_DIR}"
+fi
 
 echo
 echo "Installed."
