@@ -169,4 +169,113 @@ struct DualSenseExternalAudioTests {
         #expect(began == 1 && cancelled == 1 && submitted == 0)
         #expect(mapped == 0)
     }
+
+    @Test func reportsFlushedAfterMicrophoneCloseWaitForNeutralBeforeMapping() async throws {
+        let controller = ExternalAudioTestController()
+        let gamepad = try #require(controller.extendedGamepad)
+        let bridge = ButtonBridge(controllerFamily: .dualSense, mappingProvider: { input in
+            input == .buttonY ? .screenshotTool : .disabled
+        })
+        bridge.attachController(controller)
+        defer { bridge.stop() }
+        var screenshots = 0
+        var now = 1.0
+        bridge.homeButtonClock = { now }
+        bridge.systemKeyHandler = { key, pressed in
+            if key == .screenshotTool, pressed { screenshots += 1 }
+        }
+
+        bridge.setExternalAudioCaptureActive(true)
+        // The driver releases HID while this stale report is still reflected
+        // by GameController. It must not become a screenshot shortcut.
+        gamepad.buttonY.setValue(1)
+        bridge.setExternalAudioCaptureActive(false)
+        gamepad.valueChangedHandler?(gamepad, gamepad.buttonY)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(screenshots == 0)
+
+        now = 1.3
+        gamepad.buttonY.setValue(0)
+        gamepad.valueChangedHandler?(gamepad, gamepad.buttonY)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        gamepad.buttonY.setValue(1)
+        gamepad.valueChangedHandler?(gamepad, gamepad.buttonY)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(screenshots == 1)
+    }
+
+    @Test(arguments: [0.1, 0.3, 1.0], [false, true])
+    func lateReportAfterNeutralCloseIsStillQuarantined(delay: Double, earlyNeutral: Bool) async throws {
+        let controller = ExternalAudioTestController()
+        let gamepad = try #require(controller.extendedGamepad)
+        let create = try #require(gamepad.buttonOptions)
+        let bridge = ButtonBridge(controllerFamily: .dualSense, mappingProvider: { input in
+            input == .options ? .screenshotTool : .disabled
+        })
+        bridge.attachController(controller)
+        bridge.usesExternalVoiceControls = true
+        defer { bridge.stop() }
+        var screenshots = 0
+        var now = 1.0
+        bridge.homeButtonClock = { now }
+        bridge.systemKeyHandler = { key, pressed in
+            if key == .screenshotTool, pressed { screenshots += 1 }
+        }
+
+        // The GameController snapshot is neutral when capture ends, but the
+        // HID release can still enqueue a non-neutral report afterwards.
+        bridge.setExternalAudioCaptureActive(true)
+        bridge.setExternalAudioCaptureActive(false)
+        if earlyNeutral {
+            // Neutral callbacks in the flush window cannot rearm mapping.
+            gamepad.valueChangedHandler?(gamepad, create)
+            await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        }
+        // Exercise both sides of the old 250ms cutoff, including a full second
+        // of delay, with the actual physical Create/screenshot mapping.
+        now = 1.0 + delay
+        create.setValue(1)
+        gamepad.valueChangedHandler?(gamepad, create)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(screenshots == 0)
+
+        now = 1.0 + max(delay, 0.3) + 0.1
+        create.setValue(0)
+        gamepad.valueChangedHandler?(gamepad, create)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        create.setValue(1)
+        gamepad.valueChangedHandler?(gamepad, create)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(screenshots == 1)
+    }
+
+    @Test func neutralRecoveryToleratesStickDriftAndPreservesNextCreatePress() async throws {
+        let controller = ExternalAudioTestController()
+        let gamepad = try #require(controller.extendedGamepad)
+        let create = try #require(gamepad.buttonOptions)
+        let bridge = ButtonBridge(controllerFamily: .dualSense, mappingProvider: { input in
+            input == .options ? .screenshotTool : .disabled
+        })
+        bridge.attachController(controller)
+        defer { bridge.stop() }
+        var now = 1.0, screenshots = 0
+        bridge.homeButtonClock = { now }
+        bridge.systemKeyHandler = { key, pressed in
+            if key == .screenshotTool, pressed { screenshots += 1 }
+        }
+        bridge.setExternalAudioCaptureActive(true)
+        // Within the right stick's 0.15 radial dead zone, above the synthetic
+        // direction button's 0.1 value. This must still count as neutral.
+        gamepad.rightThumbstick.xAxis.setValue(0.12)
+        bridge.setExternalAudioCaptureActive(false)
+        // A fresh neutral callback must rearm mapping despite harmless drift.
+        now = 1.3
+        create.setValue(0)
+        gamepad.valueChangedHandler?(gamepad, create)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        create.setValue(1)
+        gamepad.valueChangedHandler?(gamepad, create)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(screenshots == 1)
+    }
 }

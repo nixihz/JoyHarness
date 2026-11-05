@@ -8,11 +8,11 @@ struct AIVoiceForegroundApplication: Equatable, Sendable {
     let launchDate: Date
     let name: String
 
-    fileprivate var hasUsableIdentity: Bool {
+    var hasUsableIdentity: Bool {
         processID > 0 && !bundleID.isEmpty && launchDate.timeIntervalSince1970.isFinite
     }
 
-    fileprivate func isSameProcess(as other: Self) -> Bool {
+    func isSameProcess(as other: Self) -> Bool {
         processID == other.processID && bundleID == other.bundleID && launchDate == other.launchDate
     }
 }

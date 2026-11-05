@@ -101,6 +101,10 @@ struct AIVoiceSettingsPane: View {
                 }
             }
             Section(L10n.text("使用说明", "Using Voice Commands")) {
+                Text(L10n.text("也可说“切换到微信”“最小化当前窗口”“当前窗口进入全屏”“隐藏当前应用”“在电脑上查找预算表”或“锁屏”。窗口操作期间请保持目标应用在前台；本机搜索仅展示聚焦搜索界面。", "You can also say “switch to WeChat,” “minimize this window,” “make this window full screen,” “hide this app,” “find budget files on this Mac,” or “lock the screen.” Keep the target app in front for window actions. File search opens Spotlight only."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(L10n.text("可说“用 Chrome 打开 YouTube”“打开 github.com”或“在 YouTube 搜索爵士乐”。未指定浏览器时使用系统默认浏览器，普通网页搜索默认使用 Google。", "Say “open YouTube in Chrome,” “open github.com,” or “search YouTube for jazz.” Uses your default browser unless specified; web searches default to Google."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Text(L10n.text("“打开当前应用的设置”会向提交语音时的前台应用发送 Command + 逗号；处理期间请保持该应用在前台。", "“Open the current app’s settings” sends Command-comma to the app in front when the command is submitted. Keep that app in front while processing."))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Text(L10n.text("可说“打开日间模式”“打开夜间模式”或“跟随系统”，切换 macOS 浅色、深色或自动外观。", "Say “turn on Light mode,” “turn on Dark mode,” or “follow system” to set macOS appearance to Light, Dark, or Auto."))
@@ -122,6 +126,8 @@ struct AIVoiceSettingsPane: View {
         [
             (L10n.text("声音", "Sound"), ["adjust_volume", "set_volume", "set_mute", "get_volume"]),
             (L10n.text("显示器", "Display"), ["adjust_brightness", "set_brightness", "get_brightness"]),
+            (L10n.text("浏览器与搜索", "Browser and Search"), ["open_browser", "open_website", "search_web"]),
+            (L10n.text("窗口与本机操作", "Windows and Local Actions"), ["control_window", "search_files", "lock_screen", "sleep_system"]),
             (L10n.text("应用与系统", "Apps and System"), ["open_application", "open_system_settings", "open_wetype_settings", "open_folder", "open_screenshot_tool", "set_system_appearance", "open_current_app_settings"]),
             (L10n.text("媒体与查询", "Media and Information"), ["media_control", "get_datetime", "get_battery"]),
         ]
@@ -129,6 +135,13 @@ struct AIVoiceSettingsPane: View {
 
     private func capabilityTitle(_ id: String) -> String {
         switch id {
+        case "control_window": L10n.text("窗口全屏、最小化与隐藏", "Full Screen, Minimize and Hide")
+        case "search_files": L10n.text("搜索本机文件", "Search Files on This Mac")
+        case "lock_screen": L10n.text("锁定电脑屏幕", "Lock Screen")
+        case "sleep_system": L10n.text("让电脑进入睡眠", "Put Mac to Sleep")
+        case "open_browser": L10n.text("打开浏览器", "Open Browser")
+        case "open_website": L10n.text("用浏览器打开网站", "Open Websites in Browser")
+        case "search_web": L10n.text("网页与视频搜索", "Search Web and Videos")
         case "open_application": L10n.text("打开已安装的应用", "Open Installed Apps")
         case "open_system_settings": L10n.text("打开常用系统设置页", "Open System Settings Pages")
         case "open_wetype_settings": L10n.text("打开微信输入法设置", "Open WeChat Input Settings")
