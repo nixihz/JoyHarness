@@ -36,7 +36,7 @@ install -m 644 "${ROOT}/Sources/JoyHarness/Resources/JoyHarness.icns" "${STAGED_
 "${ROOT}/scripts/build_microphone_driver.sh" "${STAGE_ROOT}/microphone" local
 mkdir -p "${STAGED_CONTENTS}/PlugIns"
 /usr/bin/ditto "${STAGE_ROOT}/microphone/JoyHarnessMicrophone.driver" "${STAGED_CONTENTS}/PlugIns/JoyHarnessMicrophone.driver"
-"${ROOT}/scripts/embed_dualsense_audio.sh" "${STAGED_APP_BUNDLE}" local
+"${ROOT}/scripts/embed_dualsense_audio.sh" "${STAGED_APP_DIR}" local
 cat > "${STAGED_CONTENTS}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
