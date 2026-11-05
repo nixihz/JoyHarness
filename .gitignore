@@ -30,3 +30,5 @@ htmlcov/
 *.log
 dist/
 firmware/rp2040/build/
+
+.agents/skills
