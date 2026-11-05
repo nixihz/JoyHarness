@@ -1,4 +1,5 @@
 version: "3"
+dir: '{{.ROOT_DIR}}'
 
 tasks:
   prototype:
@@ -84,3 +85,86 @@ tasks:
     desc: Show ~/.agent-deck/status.json
     cmds:
       - cat ~/.agent-deck/status.json 2>/dev/null || echo "no status yet"
+
+  macos:prepare:
+    desc: Check macOS build tools and required project files; do not build or install
+    platforms: [darwin]
+    cmds:
+      - >-
+        bash -c 'set -euo pipefail;
+        for tool in xcode-select swift python3 codesign hdiutil; do
+          command -v "${tool}" >/dev/null || { echo "missing required tool: ${tool}" >&2; exit 1; };
+        done;
+        xcode-select -p >/dev/null;
+        test -f Package.swift;
+        test -f Sources/JoyHarness/Info.plist;
+        test -f scripts/package_dmg.sh;
+        test -f scripts/install.sh;
+        echo "macOS prerequisites and project files are present"'
+
+  macos:check:
+    desc: Run the configured macOS static checks without building or launching
+    platforms: [darwin]
+    cmds:
+      - task: macos:prepare
+      - task: lint
+
+  macos:test:
+    desc: Run the repository Swift, shell, and Python test suites
+    platforms: [darwin]
+    cmds:
+      - task: test
+
+  macos:build:
+    desc: Build and verify the release Joy Harness executable only
+    platforms: [darwin]
+    cmds:
+      - swift build -c release --product JoyHarness
+      - >-
+        bash -c 'set -euo pipefail;
+        binary="$(swift build -c release --show-bin-path)/JoyHarness";
+        test -x "${binary}";
+        echo "release executable: ${binary}"'
+
+  macos:package:
+    desc: Build, sign, verify, and create the versioned macOS DMG
+    platforms: [darwin]
+    cmds:
+      - bash scripts/package_dmg.sh {{.CLI_ARGS}}
+
+  macos:install:
+    desc: Build and install Joy Harness, replacing the installed app without launching it
+    platforms: [darwin]
+    cmds:
+      - bash scripts/install.sh --no-launch
+
+  macos:run:
+    desc: Build, replace, sign, and launch the canonical local macOS app
+    platforms: [darwin]
+    cmds:
+      - bash scripts/build_and_run.sh {{.CLI_ARGS}}
+
+  macos:validate:
+    desc: Verify the signature, architecture, and resources of the existing dist macOS app
+    platforms: [darwin]
+    cmds:
+      - >-
+        bash -c 'set -euo pipefail;
+        app="dist/Joy Harness.app";
+        test -d "${app}";
+        codesign --verify --deep --strict "${app}";
+        python3 scripts/verify_packaged_app.py "${app}" --arch "$(uname -m)"'
+
+  macos:clean:
+    desc: Remove SwiftPM build products for this project
+    platforms: [darwin]
+    cmds:
+      - swift package clean
+
+  macos:ci:
+    desc: Run macOS checks, tests, and release executable build without installing or launching
+    platforms: [darwin]
+    cmds:
+      - task: macos:check
+      - task: macos:test
+      - task: macos:build
