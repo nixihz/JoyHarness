@@ -50,6 +50,59 @@ class InstallationTests(unittest.TestCase):
         self.assertIn('APP_BUNDLE="/Applications/${DISPLAY_NAME}.app"', development)
         self.assertIn('APP_DIR="/Applications/Joy Harness.app"', installer)
 
+    def test_install_rejects_unknown_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            environment = os.environ.copy()
+            environment["HOME"] = temporary_directory
+            result = subprocess.run(
+                [str(ROOT / "scripts" / "install.sh"), "--launch"],
+                env=environment, capture_output=True, text=True,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("usage:", result.stderr)
+
+    def test_install_accepts_the_no_launch_option(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            stub_directory = Path(temporary_directory) / "bin"
+            stub_directory.mkdir()
+            stub = stub_directory / "swift"
+            stub.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            stub.chmod(0o755)
+            environment = os.environ.copy()
+            environment["HOME"] = temporary_directory
+            environment["PATH"] = f"{stub_directory}{os.pathsep}{environment['PATH']}"
+            result = subprocess.run(
+                [str(ROOT / "scripts" / "install.sh"), "--no-launch"],
+                env=environment, capture_output=True, text=True,
+            )
+
+        # The flag is accepted, so the script reaches the build step that the
+        # stubbed toolchain fails, instead of stopping at the usage gate.
+        self.assertNotEqual(result.returncode, 2)
+        self.assertNotIn("usage:", result.stderr)
+        self.assertIn("Building Joy Harness", result.stdout)
+
+    def test_install_launches_only_when_launch_was_requested(self) -> None:
+        script = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+        self.assertIn('if [[ "${LAUNCH_AFTER_INSTALL}" == "1" ]]; then', script)
+        self.assertIn('/usr/bin/open -n "${APP_DIR}"', script)
+
+    def test_taskfile_exposes_the_macos_workflow(self) -> None:
+        taskfile = (ROOT / "Taskfile.yml").read_text(encoding="utf-8")
+
+        self.assertIn("dir: '{{.ROOT_DIR}}'", taskfile)
+        for name in (
+            "macos:prepare", "macos:check", "macos:test", "macos:build",
+            "macos:package", "macos:install", "macos:run", "macos:validate",
+            "macos:clean", "macos:ci",
+        ):
+            self.assertIn(f"  {name}:", taskfile)
+        self.assertIn("platforms: [darwin]", taskfile)
+        self.assertIn("bash scripts/install.sh --no-launch", taskfile)
+        self.assertIn('codesign --verify --deep --strict "${app}"', taskfile)
+
     def test_joycon_pointer_verifier_has_passing_self_test(self) -> None:
         result = subprocess.run(
             [str(ROOT / "scripts" / "verify_joycon_pointer.sh"), "--self-test"],
