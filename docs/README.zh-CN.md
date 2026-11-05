@@ -706,6 +706,16 @@ PlayStation 标准手柄共用标准手柄映射 profile，以保持共同按键
 | `task send -- waiting` | 手动发送一个状态 |
 | `task demo` | 顺序演示全部震动状态 |
 | `task test` | 运行 Swift 与 Python 测试 |
+| `task macos:prepare` | 检查 macOS 工具和项目文件，不构建 |
+| `task macos:check` | 运行 macOS 静态检查，不构建、不启动 |
+| `task macos:test` | 在 macOS 上运行仓库测试套件 |
+| `task macos:build` | 构建并检查 release 版 Joy Harness 可执行文件 |
+| `task macos:package -- 0.10.0` | 构建、签名、检查并生成 macOS DMG |
+| `task macos:install` | 构建并安装，替换已安装应用但不启动 |
+| `task macos:run` | 构建并启动固定路径的本地应用 |
+| `task macos:validate` | 检查已有 `dist/` 应用的签名与架构 |
+| `task macos:clean` | 删除 SwiftPM 构建产物 |
+| `task macos:ci` | 运行 macOS 检查、测试和构建，不安装 |
 
 CLI 也支持检查 daemon 和操作槽位：
 

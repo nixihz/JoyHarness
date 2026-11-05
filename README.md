@@ -507,6 +507,16 @@ Run this audit separately from the full test suite: native view rendering occupi
 | `task send -- waiting` | Send one haptic state manually |
 | `task demo` | Play every haptic state in sequence |
 | `task test` | Run Swift and Python tests |
+| `task macos:prepare` | Check macOS tools and project files without building |
+| `task macos:check` | Run macOS static checks without building or launching |
+| `task macos:test` | Run the repository test suites on macOS |
+| `task macos:build` | Build and verify the release Joy Harness executable |
+| `task macos:package -- 0.10.0` | Build, sign, verify, and create the macOS DMG |
+| `task macos:install` | Build and install, replacing the installed app without launching it |
+| `task macos:run` | Build and launch the canonical local app |
+| `task macos:validate` | Verify the signature and architecture of the existing `dist/` app |
+| `task macos:clean` | Remove SwiftPM build products |
+| `task macos:ci` | Run macOS checks, tests, and build without installing |
 
 The CLI can also inspect the daemon and control slots:
 
