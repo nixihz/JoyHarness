@@ -5,6 +5,8 @@ enum AIVoiceBuiltInAction {
     case desktop(AIVoiceDesktopAction)
     case systemAppearance(AIVoiceSystemAppearance)
     case currentAppSettings
+    case browser(AIVoiceBrowserAction)
+    case everyday(AIVoiceEverydayAction)
 }
 
 enum AIVoiceBuiltInResolution {
@@ -31,10 +33,16 @@ enum AIVoiceBuiltInCommands {
         .init(id: "open_current_app_settings", summary: "打开当前前台应用的设置或偏好设置，向提交语音时的前台应用发送一次Command+逗号。无参数，目标由本机捕获，不能指定其他应用、PID、路径或快捷键。执行时前台已变化则不发送。仅请求打开，不能保证所有应用支持；不是打开macOS系统设置，也不是微信输入法专用设置入口。", parameterNames: [], examples: ["打开当前应用的设置", "打开这个软件的偏好设置"]),
         .init(id: "get_datetime", summary: "查询本机当前日期、星期和时间，无参数。", parameterNames: [], examples: ["现在几点", "今天几号"]),
         .init(id: "get_battery", summary: "查询Mac内建电池电量及充电状态，无参数。不查询手柄/鼠标/耳机电池。", parameterNames: [], examples: ["电脑还剩多少电"]),
-    ]
+    ] + AIVoiceBrowserCommands.descriptors + AIVoiceEverydayCommands.descriptors
     static let ids = Set(descriptors.map(\.id))
 
     static func resolve(_ command: AIVoiceCommand) -> AIVoiceBuiltInResolution {
+        if AIVoiceBrowserCommands.descriptors.contains(where: { $0.id == command.capabilityID }) {
+            return AIVoiceBrowserCommands.resolve(command)
+        }
+        if AIVoiceEverydayCommands.descriptors.contains(where: { $0.id == command.capabilityID }) {
+            return AIVoiceEverydayCommands.resolve(command)
+        }
         let p = command.parameters
         switch command.capabilityID {
         case "adjust_volume", "adjust_brightness":

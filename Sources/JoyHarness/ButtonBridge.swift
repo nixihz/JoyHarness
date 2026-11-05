@@ -263,8 +263,11 @@ private struct StandardGamepadEventSnapshot {
     let dpadDown: Bool
     let dpadLeft: Bool
     let dpadRight: Bool
+    let isNeutral: Bool
+    let capturedAt: TimeInterval
 
-    init(gamepad: GCExtendedGamepad, changedElement: GCControllerElement) {
+    init(gamepad: GCExtendedGamepad, changedElement: GCControllerElement, capturedAt: TimeInterval) {
+        self.capturedAt = capturedAt
         motionJumpInput = ButtonBridge.motionJumpSnapshot(gamepad: gamepad)
         changedButtonPressed = (changedElement as? GCControllerButtonInput)?.isPressed
         changedButtonValue = (changedElement as? GCControllerButtonInput)?.value
@@ -280,6 +283,7 @@ private struct StandardGamepadEventSnapshot {
         dpadDown = gamepad.dpad.down.isPressed
         dpadLeft = gamepad.dpad.left.isPressed
         dpadRight = gamepad.dpad.right.isPressed
+        isNeutral = ButtonBridge.isNeutral(gamepad)
     }
 
     func dpadPressed(for input: ControllerInput) -> Bool {
@@ -335,6 +339,10 @@ final class ButtonBridge {
     private var motionJumpSuppressesInputUntilNeutral = false
     private var aiVoiceAnalogGate = AIVoiceAnalogNeutralGate()
     private let externalMicrophoneGate = ControllerInputIsolationGate()
+    /// Releasing HID exclusivity can flush delayed reports. Drop them during
+    /// recovery, and require neutral before rearming any held input.
+    private var externalMicrophoneAwaitingNeutral = false
+    private var externalMicrophoneRecoveringThrough: TimeInterval = -.infinity
     var usesExternalVoiceControls = false
 
     /// Hardware exclusivity protects other apps; this gate also drops queued
@@ -344,6 +352,11 @@ final class ButtonBridge {
         externalMicrophoneGate.setBlocked(active)
         suspendMappedOutputs()
         if !active {
+            // Ignore the initial flush, then require a fresh neutral report.
+            // Neither the close-time snapshot nor an early neutral callback
+            // proves that delayed GameController presses have drained.
+            externalMicrophoneRecoveringThrough = homeButtonClock() + PSButtonGesture.maximumReportGap
+            externalMicrophoneAwaitingNeutral = true
             overlaySuppressedButtons.removeAll()
             controllerInputsByButton.removeAll()
         }
@@ -633,10 +646,12 @@ final class ButtonBridge {
         let generation = inputSourceGeneration
         let endpointID = ObjectIdentifier(selected)
         gamepad.valueChangedHandler = { [weak self] gamepad, element in
-            guard let token = self?.externalMicrophoneGate.token() else { return }
+            guard let token = self?.externalMicrophoneGate.token(),
+                  let capturedAt = self?.homeButtonClock() else { return }
             let event = StandardGamepadEventSnapshot(
                 gamepad: gamepad,
-                changedElement: element
+                changedElement: element,
+                capturedAt: capturedAt
             )
             DispatchQueue.main.async {
                 guard let self,
@@ -789,6 +804,8 @@ final class ButtonBridge {
         psChordMotionBlockThrough = -.infinity
         gcTriggerHeldForPSChord = false
         psChordRawInterrupted = false
+        externalMicrophoneAwaitingNeutral = false
+        externalMicrophoneRecoveringThrough = -.infinity
         inputSourceGeneration &+= 1
         controller?.extendedGamepad?.valueChangedHandler = nil
         controller?.extendedGamepad?.buttonHome?.pressedChangedHandler = nil
@@ -1112,6 +1129,12 @@ final class ButtonBridge {
         changedElement: GCControllerElement,
         event: StandardGamepadEventSnapshot
     ) {
+        if event.capturedAt <= externalMicrophoneRecoveringThrough { return }
+        if externalMicrophoneAwaitingNeutral {
+            guard event.isNeutral else { return }
+            externalMicrophoneAwaitingNeutral = false
+            return
+        }
         if usesExternalVoiceControls {
             if changedElement === gamepad.buttonMenu || changedElement === gamepad.buttonHome { return }
         }
@@ -1293,6 +1316,29 @@ final class ButtonBridge {
                 isPressed: event.changedButtonPressed ?? button.isPressed
             )
         }
+    }
+
+    fileprivate static func isNeutral(_ gamepad: GCExtendedGamepad) -> Bool {
+        // Synthesized stick-direction buttons must use the radial dead zones
+        // below; otherwise harmless right-stick drift can prevent recovery.
+        let analogDirections = [gamepad.leftThumbstick, gamepad.rightThumbstick].flatMap {
+            [$0.up, $0.down, $0.left, $0.right]
+        }
+        let buttonsNeutral = gamepad.allButtons.allSatisfy { button in
+            analogDirections.contains(where: { $0 === button }) ||
+                (!button.isPressed && button.value <= 0.1)
+        }
+        let sticksNeutral = hypot(gamepad.leftThumbstick.xAxis.value, gamepad.leftThumbstick.yAxis.value) <= 0.10 &&
+            hypot(gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value) <= 0.15
+        let touchpadNeutral = ![
+            touchpadPrimary(for: gamepad),
+            (gamepad as? GCDualSenseGamepad)?.touchpadSecondary,
+            (gamepad as? GCDualShockGamepad)?.touchpadSecondary
+        ].compactMap({ $0 }).contains {
+            abs($0.xAxis.value) > TouchpadPointerTracker.liftEpsilon ||
+                abs($0.yAxis.value) > TouchpadPointerTracker.liftEpsilon
+        }
+        return buttonsNeutral && sticksNeutral && touchpadNeutral
     }
 
     private static func touchpadButton(for gamepad: GCExtendedGamepad) -> GCControllerButtonInput? {
@@ -1689,7 +1735,9 @@ final class ButtonBridge {
         isPressed sourceIsPressed: Bool,
         motionInput: MotionJumpInputSnapshot? = nil
     ) {
-        guard !externalMicrophoneGate.isBlocked, !usesExternalVoiceControls else { return }
+        guard !externalMicrophoneGate.isBlocked, !usesExternalVoiceControls,
+              !externalMicrophoneAwaitingNeutral,
+              homeButtonClock() > externalMicrophoneRecoveringThrough else { return }
         guard !rawPSInputIsAuthoritative, homeButtonClock() >= legacyHomeSuppressedUntil else { return }
         let edge = homeButtonMerger.update(
             source,

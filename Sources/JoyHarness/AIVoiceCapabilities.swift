@@ -2,7 +2,8 @@ import AppKit
 import ApplicationServices
 
 /// Model output is data: only registered identifiers and validated parameters
-/// can reach an executor. Neither paths, URLs nor code are accepted as actions.
+/// can reach an executor. Web URLs are validated by the browser capability;
+/// executable paths and code are never accepted as actions.
 struct AIVoiceCommand: Codable, Equatable, Sendable {
     let capabilityID: String
     let parameters: [String: String]
@@ -68,6 +69,8 @@ final class AIVoiceCapabilityRegistry {
     private let desktopActions: any AIVoiceDesktopActing
     private let systemAppearance: any AIVoiceSystemAppearanceControlling
     private let currentAppSettings: any AIVoiceCurrentAppSettingsOpening
+    private let browserActions: any AIVoiceBrowserActing
+    private let everydayActions: any AIVoiceEverydayActing
     private let verificationTimeout: TimeInterval
     private let pollingNanoseconds: UInt64
     private struct Request {
@@ -83,6 +86,8 @@ final class AIVoiceCapabilityRegistry {
         desktopActions: (any AIVoiceDesktopActing)? = nil,
         systemAppearance: (any AIVoiceSystemAppearanceControlling)? = nil,
         currentAppSettings: (any AIVoiceCurrentAppSettingsOpening)? = nil,
+        browserActions: (any AIVoiceBrowserActing)? = nil,
+        everydayActions: (any AIVoiceEverydayActing)? = nil,
         verificationTimeout: TimeInterval = 4,
         pollingNanoseconds: UInt64 = 120_000_000
     ) {
@@ -92,6 +97,8 @@ final class AIVoiceCapabilityRegistry {
         self.desktopActions = desktopActions ?? AIVoiceMacDesktopActions()
         self.systemAppearance = systemAppearance ?? AIVoiceMacSystemAppearance()
         self.currentAppSettings = currentAppSettings ?? AIVoiceMacCurrentAppSettings()
+        self.browserActions = browserActions ?? AIVoiceMacBrowserActions()
+        self.everydayActions = everydayActions ?? AIVoiceMacEverydayActions()
         self.verificationTimeout = verificationTimeout
         self.pollingNanoseconds = pollingNanoseconds
     }
@@ -108,8 +115,8 @@ final class AIVoiceCapabilityRegistry {
         [
             AIVoiceCapabilityDescriptor(
                 id: Self.openApplicationID,
-                summary: "打开已安装应用。application 必须是应用名称或 bundle ID；不支持网页、路径、下载或设置修改。",
-                parameterNames: ["application"], examples: ["打开微信", "启动 Safari"]
+                summary: "打开或切换到已安装应用。application 必须是应用名称或 bundle ID；不支持路径、下载或设置修改。浏览器启动、打开网站和网页搜索分别优先使用open_browser、open_website、search_web。",
+                parameterNames: ["application"], examples: ["打开微信", "切换到访达"]
             ),
             AIVoiceCapabilityDescriptor(
                 id: Self.openSystemSettingsID,
@@ -280,6 +287,8 @@ final class AIVoiceCapabilityRegistry {
                 case .desktop(let action): return await desktopActions.execute(action)
                 case .systemAppearance(let mode): return await systemAppearance.execute(mode)
                 case .currentAppSettings: return await currentAppSettings.execute(target: currentApplication)
+                case .browser(let action): return await browserActions.execute(action)
+                case .everyday(let action): return await everydayActions.execute(action, target: currentApplication)
                 }
             }
         } catch is CancellationError {
@@ -336,6 +345,7 @@ final class AIVoiceMacCapabilityEnvironment: AIVoiceCapabilityEnvironment {
         self.fileManager = fileManager
         self.applicationDirectories = applicationDirectories ?? [
             URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/System/Applications"),
+            URL(fileURLWithPath: "/System/Library/CoreServices"),
             fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
         ]
     }
@@ -364,6 +374,7 @@ final class AIVoiceMacCapabilityEnvironment: AIVoiceCapabilityEnvironment {
                 if let bundleName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String { aliases.append(bundleName) }
                 if id == "com.tencent.xinWeChat" { aliases += ["微信", "WeChat"] }
                 if id == "com.apple.systempreferences" { aliases += ["系统设置", "System Settings"] }
+                if id == "com.apple.finder" { aliases += ["访达", "Finder"] }
                 applications.append(.init(bundleID: id, name: name, aliases: aliases, url: url))
             }
         }
@@ -456,7 +467,7 @@ final class AIVoiceMacCapabilityEnvironment: AIVoiceCapabilityEnvironment {
 /// A checked continuation with a finite deadline. Cancellation ends our wait,
 /// but cannot retract a launch request already handed to Launch Services.
 @MainActor
-private final class AIVoiceApplicationLaunch {
+final class AIVoiceApplicationLaunch {
     private var continuation: CheckedContinuation<Int32, Error>?
     private var result: Result<Int32, Error>?
     private var deadline: Task<Void, Never>?
