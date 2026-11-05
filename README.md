@@ -564,6 +564,12 @@ the obsolete **Joy Harness DualSense 麦克风** input while keeping Xiaomi's UI
 RP2040 firmware remains unchanged. For test evidence and limits, see the
 [system microphone spec](docs/specs/dualsense-bluetooth-microphone.md).
 
+### AI Voice browser and everyday commands
+
+In **Settings → AI Voice**, enable the capabilities you need. Say “open YouTube in Chrome,” “open github.com,” “search YouTube for jazz,” “switch to WeChat,” “minimize this window,” “make this window full screen,” “exit full screen,” “hide this app,” “find budget files on this Mac,” “lock the screen,” or “put this Mac to sleep.”
+
+Web commands use the system default browser unless specified; ordinary searches default to Google. Chrome, Safari, Edge, Firefox and Brave are supported, with Google, Bing, Baidu, DuckDuckGo, YouTube and Bilibili search. Window actions stay bound to the app captured when voice is submitted; keep that app in front while processing. File search opens Spotlight. Browser, search, lock and sleep requests report unconfirmed results when the destination state cannot be observed.
+
 ## Installation Footprint
 
 `scripts/install.sh` creates or updates:
